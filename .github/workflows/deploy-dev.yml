@@ -82,12 +82,14 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS: firebase_admin.json
         run: |
-          OUTPUT=$(firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} \
-            --project ${{ env.FIREBASE_PROJECT_ID }} \
-            --expires 7d \
-            --non-interactive 2>&1)
-          echo "$OUTPUT"
-          PREVIEW_URL=$(echo "$OUTPUT" | grep -oP 'Channel URL \(\K[^\)]+' | head -1 || echo "https://anti-harassment-bot--dev-preview.web.app")
+          set -e
+          if ! firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} --project ${{ env.FIREBASE_PROJECT_ID }} --expires 7d --non-interactive > deploy.log 2>&1; then
+            cat deploy.log
+            echo "Firebase hosting deployment failed."
+            exit 1
+          fi
+          cat deploy.log
+          PREVIEW_URL=$(grep -oP 'Channel URL \(\K[^\)]+' deploy.log | head -1 || echo "https://anti-harassment-bot--dev-preview.web.app")
           echo "preview_url=${PREVIEW_URL}" >> $GITHUB_OUTPUT
 
       - name: Find open PRs targeting dev
