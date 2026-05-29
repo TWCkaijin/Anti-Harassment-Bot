@@ -2,12 +2,14 @@
 性騷擾防治智能 AI — 後端設定模組
 統一管理所有環境變數與應用設定
 """
+
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from dotenv import load_dotenv
+
 load_dotenv()
 # 專案根目錄（backend/ 的上一層）
 ROOT_DIR = Path(__file__).parent.parent.parent.parent
@@ -24,9 +26,7 @@ class Settings(BaseSettings):
 
     # ── Gemini / Google ADK ──────────────────────────────────────────────
     gemini_api_key: str = Field(..., description="Gemini API Key")
-    gemini_model: str = Field(
-        default="gemini-3.5-flash", description="預設使用的 Gemini 模型"
-    )
+    gemini_model: str = Field(default="gemini-3.5-flash", description="預設使用的 Gemini 模型")
 
     # ── Firebase Admin ───────────────────────────────────────────────────
     firebase_project_id: str = Field(
@@ -46,9 +46,7 @@ class Settings(BaseSettings):
     )
 
     # ── Privacy ──────────────────────────────────────────────────────────
-    enable_anonymization: bool = Field(
-        default=True, description="是否啟用請求前的 PII 匿名化"
-    )
+    enable_anonymization: bool = Field(default=True, description="是否啟用請求前的 PII 匿名化")
 
 
 @lru_cache

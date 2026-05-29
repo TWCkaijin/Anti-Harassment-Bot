@@ -2,6 +2,7 @@
 性騷擾防治智能 AI — Health Check Router
 提供服務健康狀態端點，供 Firebase Functions warm-up 與 CI/CD 監控使用。
 """
+
 import os
 from datetime import UTC, datetime
 

@@ -2,6 +2,7 @@
 性騷擾防治智能 AI — Chat API Router
 接收前端對話請求，執行匿名化後透過 Google ADK 呼叫 AI 模型。
 """
+
 import json
 import uuid
 
@@ -102,9 +103,7 @@ async def chat(
     was_anonymized = anon_result.was_modified
 
     # 2. 匿名化歷史訊息（批次處理）
-    history_dicts = [
-        {"role": msg.role, "content": msg.content} for msg in request.history
-    ]
+    history_dicts = [{"role": msg.role, "content": msg.content} for msg in request.history]
     anonymized_history = anonymize_messages(history_dicts)
 
     # 3. RAG 檢索（若啟用）
@@ -161,7 +160,7 @@ async def chat(
             cleaned_reply = cleaned_reply[3:]
         if cleaned_reply.endswith("```"):
             cleaned_reply = cleaned_reply[:-3]
-        
+
         data = json.loads(cleaned_reply.strip())
         parsed_reply = data.get("reply", reply)
         emotion = data.get("emotion")

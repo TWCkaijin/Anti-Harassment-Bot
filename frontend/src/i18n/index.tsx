@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 /**
  * i18n — 簡易國際化系統
  * 使用 React Context 提供語言切換能力。

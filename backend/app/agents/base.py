@@ -12,14 +12,15 @@
                 tools=[...],
             )
 """
+
+import base64
 from abc import ABC, abstractmethod
 from typing import Any
-import base64
 
 from google.adk.agents import LlmAgent
+from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.adk.events import Event
 from google.genai import types as genai_types
 
 from backend.app.core.config import get_settings
@@ -160,9 +161,7 @@ class BaseAgent(ABC):
                 mime_type = header.split(":")[1].split(";")[0]
                 image_bytes = base64.b64decode(encoded)
                 # 使用 from_bytes 建立多模態 Part
-                parts.append(
-                    genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-                )
+                parts.append(genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
             except Exception as e:
                 logger.error("Failed to decode image_base64: %s", e)
 

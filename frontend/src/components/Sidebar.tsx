@@ -3,7 +3,7 @@
  * 導航式設計：品牌標識 → 滿版橘色新增對話按鈕 → 對話歷史清單 (卡片式) → 底部工具列。
  * RWD：桌面端固定左側，行動端可透過漢堡按鈕展開覆蓋。
  */
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
 import type { ConversationSession } from "../hooks/useConversation";

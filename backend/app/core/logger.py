@@ -2,8 +2,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 # ── 取得環境變數（避免與 config.py 循環引用） ─────────────────────────────
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
@@ -27,7 +26,7 @@ class GCPJsonFormatter(logging.Formatter):
         log_data = {
             "severity": severity,
             "message": record.getMessage(),
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "logging.googleapis.com/sourceLocation": {
                 "file": record.pathname,
                 "line": record.lineno,
@@ -41,10 +40,27 @@ class GCPJsonFormatter(logging.Formatter):
 
         # 保留自訂的 extra 屬性（過濾掉系統預設屬性）
         standard_keys = {
-            "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
-            "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
-            "created", "msecs", "relativeCreated", "thread", "threadName", "processName",
-            "process", "message"
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+            "message",
         }
         for key, value in record.__dict__.items():
             if key not in standard_keys:
@@ -57,15 +73,16 @@ class ColoredFormatter(logging.Formatter):
     """
     用於本地開發環境的彩色文字日誌 Formatter。
     """
+
     # ANSI 顏色控制碼
     ANSI_RESET = "\033[0m"
     ANSI_BOLD = "\033[1m"
     COLORS = {
-        "DEBUG": "\033[36m",      # 青色
-        "INFO": "\033[32m",       # 綠色
-        "WARNING": "\033[33m",    # 黃色
-        "ERROR": "\033[31m",      # 紅色
-        "CRITICAL": "\033[1;41m", # 粗體紅底白字
+        "DEBUG": "\033[36m",  # 青色
+        "INFO": "\033[32m",  # 綠色
+        "WARNING": "\033[33m",  # 黃色
+        "ERROR": "\033[31m",  # 紅色
+        "CRITICAL": "\033[1;41m",  # 粗體紅底白字
     }
 
     def format(self, record: logging.LogRecord) -> str:
@@ -99,10 +116,7 @@ def setup_logging() -> None:
     根據環境變數 ENVIRONMENT 切換彩色終端機格式或 GCP JSON 結構化格式。
     """
     # 決定使用哪種 formatter
-    if ENVIRONMENT == "development":
-        formatter = ColoredFormatter()
-    else:
-        formatter = GCPJsonFormatter()
+    formatter = ColoredFormatter() if ENVIRONMENT == "development" else GCPJsonFormatter()
 
     # 清除或接管預設的 root logger
     root_logger = logging.getLogger()

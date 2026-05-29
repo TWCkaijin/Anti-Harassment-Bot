@@ -10,6 +10,7 @@
   - 姓名（基本模式）
   - IP 位址
 """
+
 import re
 from dataclasses import dataclass, field
 
@@ -38,9 +39,7 @@ _RULES: list[PIIRule] = [
     ),
     PIIRule(
         name="email",
-        pattern=re.compile(
-            r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b"
-        ),
+        pattern=re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b"),
         replacement="[電子郵件]",
     ),
     PIIRule(
