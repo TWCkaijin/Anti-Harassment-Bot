@@ -1,0 +1,81 @@
+name: Deploy — Production (main)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+
+jobs:
+  deploy-production:
+    name: Build & Deploy to Production
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # 允許 PR comment
+    env:
+      FIREBASE_PROJECT_ID: anti-harassment-bot
+      FUNCTIONS_REGION: asia-east1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Frontend Build ──────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://asia-east1-anti-harassment-bot.cloudfunctions.net/api
+
+      # ── Firebase Deploy ─────────────────────────────────────────────────
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Write Firebase service account
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > firebase_admin.json
+
+      - name: Write backend .env
+        run: |
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+          echo "ENVIRONMENT=production" >> .env
+
+      - name: Deploy to Firebase Hosting & Functions (production)
+        id: firebase-deploy
+        run: |
+          firebase deploy \
+            --project ${{ env.FIREBASE_PROJECT_ID }} \
+            --only hosting,functions:api \
+            --token "${{ secrets.FIREBASE_TOKEN }}" \
+            --non-interactive \
+            --force 2>&1 | tee deploy.log
+          DEPLOY_URL=$(grep -oP 'Hosting URL: \K.*' deploy.log | head -1 || echo "https://anti-harassment-bot.web.app")
+          echo "deploy_url=${DEPLOY_URL}" >> $GITHUB_OUTPUT
+
+      - name: Comment deployment URL on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const deployUrl = '${{ steps.firebase-deploy.outputs.deploy_url }}' || 'https://anti-harassment-bot.web.app';
+            const body = `## 🚀 Production Deployment\n\n✅ 已部署至 Firebase Hosting（Production）\n\n🔗 **URL**: ${deployUrl}\n📦 **API**: \`https://asia-east1-anti-harassment-bot.cloudfunctions.net/api\`\n\n*由 GitHub Actions 自動部署*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
