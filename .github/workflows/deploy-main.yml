@@ -71,11 +71,12 @@ jobs:
 
       - name: Deploy to Firebase Hosting & Functions (production)
         id: firebase-deploy
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: firebase_admin.json
         run: |
           firebase deploy \
             --project ${{ env.FIREBASE_PROJECT_ID }} \
             --only hosting,functions:api \
-            --token "${{ secrets.FIREBASE_TOKEN }}" \
             --non-interactive \
             --force 2>&1 | tee deploy.log
           DEPLOY_URL=$(grep -oP 'Hosting URL: \K.*' deploy.log | head -1 || echo "https://anti-harassment-bot.web.app")
