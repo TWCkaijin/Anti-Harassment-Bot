@@ -1,0 +1,105 @@
+name: Deploy — Preview (dev)
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy-preview:
+    name: Build & Deploy to Preview
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      FIREBASE_PROJECT_ID: anti-harassment-bot
+      FUNCTIONS_REGION: asia-east1
+      PREVIEW_CHANNEL: dev-preview
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Frontend Build ──────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build frontend (preview)
+        run: npm run build
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://asia-east1-anti-harassment-bot.cloudfunctions.net/api-preview
+          VITE_ENV: preview
+
+      # ── Firebase Deploy ─────────────────────────────────────────────────
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Write Firebase service account
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > firebase_admin.json
+
+      - name: Write backend .env
+        run: |
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+          echo "ENVIRONMENT=preview" >> .env
+
+      - name: Deploy Functions (api-preview)
+        run: |
+          firebase deploy \
+            --project ${{ env.FIREBASE_PROJECT_ID }} \
+            --only functions:api-preview \
+            --token "${{ secrets.FIREBASE_TOKEN }}" \
+            --non-interactive \
+            --force
+
+      - name: Deploy to Firebase Hosting Preview Channel
+        id: preview-deploy
+        run: |
+          OUTPUT=$(firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} \
+            --project ${{ env.FIREBASE_PROJECT_ID }} \
+            --token "${{ secrets.FIREBASE_TOKEN }}" \
+            --expires 7d \
+            --non-interactive 2>&1)
+          echo "$OUTPUT"
+          PREVIEW_URL=$(echo "$OUTPUT" | grep -oP 'Channel URL \(\K[^\)]+' | head -1 || echo "https://anti-harassment-bot--dev-preview.web.app")
+          echo "preview_url=${PREVIEW_URL}" >> $GITHUB_OUTPUT
+
+      - name: Find open PRs targeting dev
+        id: find-pr
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              base: 'dev'
+            });
+            const pr = prs.data.find(p => p.head.sha === context.sha) || prs.data[0];
+            return pr ? pr.number : null;
+
+      - name: Comment preview URL on dev PR
+        if: steps.find-pr.outputs.result != 'null'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = ${{ steps.find-pr.outputs.result }};
+            if (!prNumber) return;
+            const previewUrl = '${{ steps.preview-deploy.outputs.preview_url }}';
+            const body = `## 🔍 Preview Deployment (dev)\n\n✅ 已部署至 Firebase Hosting Preview Channel\n\n🔗 **Preview URL**: ${previewUrl}\n📦 **Preview API**: \`https://asia-east1-anti-harassment-bot.cloudfunctions.net/api-preview\`\n⏳ **有效期限**: 7 天\n\n*由 GitHub Actions 自動部署*`;
+            github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
