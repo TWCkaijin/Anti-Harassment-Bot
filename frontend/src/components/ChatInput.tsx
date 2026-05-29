@@ -110,7 +110,7 @@ export default function ChatInput({ onSend, isLoading }: ChatInputProps) {
           onClick={() => textareaRef.current?.focus()}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
-          className={`relative bg-white border rounded-3xl shadow-lg flex items-end px-4 lg:px-6 py-2 transition-all cursor-text ${isFocused ? "border-primary/50" : "border-primary/30"}`}
+          className={`relative bg-white border rounded-[32px] shadow-lg flex items-end px-4 lg:px-6 py-2 transition-all cursor-text ${isFocused ? "border-primary ring-2 ring-primary/20" : "border-primary/30"}`}
         >
           <button 
             className="p-2 text-on-surface/40 hover:text-primary transition-colors cursor-pointer mb-0.5 shrink-0" 
@@ -135,7 +135,7 @@ export default function ChatInput({ onSend, isLoading }: ChatInputProps) {
             placeholder={t.inputPlaceholder}
             rows={1}
             disabled={isLoading}
-            className="flex-1 bg-transparent border-none focus:ring-0 px-2 lg:px-4 py-2.5 text-on-surface placeholder:text-on-surface/30 font-medium resize-none leading-relaxed disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-transparent border-none focus:border-none focus:ring-0 outline-none focus:outline-none px-2 lg:px-4 py-2.5 text-on-surface placeholder:text-on-surface/30 font-medium resize-none leading-relaxed disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ maxHeight: "160px" }}
           />
 
