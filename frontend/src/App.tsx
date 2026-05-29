@@ -1,0 +1,66 @@
+/**
+ * App — 性騷擾防治智能 AI 主應用程式
+ * 整合 Sidebar + ChatArea + EmergencyFab + SettingsPanel，
+ * 使用 useConversation hook 管理所有狀態。
+ */
+import { useState, useCallback } from "react";
+import { useConversation } from "./hooks/useConversation";
+import Sidebar from "./components/Sidebar";
+import ChatArea from "./components/ChatArea";
+import SettingsPanel from "./components/SettingsPanel";
+
+export default function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const {
+    sessions,
+    currentSessionId,
+    messages,
+    isLoading,
+    sendMessage,
+    createNewSession,
+    setCurrentSessionId,
+    deleteSession,
+    clearAllSessions,
+  } = useConversation();
+
+  const handleOpenSettings = useCallback(() => {
+    setSettingsOpen(true);
+    setSidebarOpen(false);
+  }, []);
+
+  return (
+    <div className="flex w-full h-dvh bg-background overflow-hidden">
+      {/* 側邊欄 */}
+      <Sidebar
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        onSelectSession={setCurrentSessionId}
+        onNewSession={createNewSession}
+        onDeleteSession={deleteSession}
+        onOpenSettings={handleOpenSettings}
+      />
+
+      {/* 主要對話區 */}
+      <ChatArea
+        messages={messages}
+        isLoading={isLoading}
+        onSend={sendMessage}
+        onOpenSidebar={() => setSidebarOpen(true)}
+      />
+
+
+
+      {/* 設定面板 */}
+      <SettingsPanel
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        sessions={sessions}
+        onClearAll={clearAllSessions}
+      />
+    </div>
+  );
+}

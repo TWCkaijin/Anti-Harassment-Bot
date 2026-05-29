@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+/* ── Stitch 設計系統：新版對話內頁 v0.1 ──────────────────────── */
+
+@theme {
+  /* ─ 色彩系統 ─ */
+  --color-primary: #d15b00;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #fff1e7;
+
+  --color-secondary: #7c6f64;
+  --color-on-secondary: #ffffff;
+
+  --color-tertiary: #d15b00;
+  --color-on-tertiary: #ffffff;
+
+  --color-background: #fff9f6;
+  --color-on-background: #2b1700;
+  
+  --color-surface: #ffffff;
+  --color-on-surface: #2b1700;
+  --color-surface-container: #f8f1ee;
+  --color-surface-container-low: #fffcfb;
+  --color-surface-container-high: #f0ebe8;
+
+  --color-outline: #e0c0b2;
+
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+  --color-on-error: #ffffff;
+
+  --color-inverse-surface: #2b2b2b;
+  --color-inverse-on-surface: #ffffff;
+
+  /* ─ 額外視覺效果色 ─ */
+  --color-primary-fixed: #ffdbcd;
+  --color-secondary-fixed: #e2d3c7;
+
+  /* ─ 字體 ─ */
+  --font-sans: "Noto Sans", "Noto Sans TC", system-ui, -apple-system, sans-serif;
+
+  /* ─ 圓角（Stitch Shapes）─ */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --radius-2xl: 2rem;
+  --radius-3xl: 2.5rem;
+  --radius-full: 9999px;
+
+  /* ─ 陰影 ─ */
+  --shadow-card: 0px 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-float: 0px 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+/* ── 全域基底 ─────────────────────────────────────────────────────────── */
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--color-background);
+  color: var(--color-on-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100dvh;
+  display: flex;
+}
+
+/* ── Material Symbols ────────────────────────────────────────────────── */
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  user-select: none;
+}
+
+/* ── 滾動條美化 ──────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-outline);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-secondary);
+}
+
+/* ── 特效類別 ────────────────────────────────────────────────────────── */
+
+/* 微光呼吸動畫 */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(209, 91, 0, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(209, 91, 0, 0.6); }
+}
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* 打字動畫 */
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
+.typing-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  margin: 0 2px;
+}
+.typing-dot:nth-child(1) { animation: typing-dot 1.4s ease-in-out infinite 0s; }
+.typing-dot:nth-child(2) { animation: typing-dot 1.4s ease-in-out infinite 0.2s; }
+.typing-dot:nth-child(3) { animation: typing-dot 1.4s ease-in-out infinite 0.4s; }
+
+/* 淡入動畫 */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out forwards;
+}
+
+/* Hero mesh gradient 背景 */
+.hero-mesh-gradient {
+  background-color: var(--color-background);
+  background-image:
+    radial-gradient(at 0% 0%, rgba(209, 91, 0, 0.08) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(209, 91, 0, 0.05) 0px, transparent 50%);
+}
