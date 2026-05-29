@@ -68,22 +68,19 @@ jobs:
           echo "ENVIRONMENT=preview" >> .env
 
       - name: Deploy Functions (api-preview)
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: firebase_admin.json
         run: |
           firebase deploy \
             --project ${{ env.FIREBASE_PROJECT_ID }} \
             --only functions:api-preview \
+            --token "${{ secrets.FIREBASE_TOKEN }}" \
             --non-interactive \
             --force
 
       - name: Deploy to Firebase Hosting Preview Channel
         id: preview-deploy
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: firebase_admin.json
         run: |
           set -e
-          if ! firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} --project ${{ env.FIREBASE_PROJECT_ID }} --expires 7d --non-interactive > deploy.log 2>&1; then
+          if ! firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} --project ${{ env.FIREBASE_PROJECT_ID }} --token "${{ secrets.FIREBASE_TOKEN }}" --expires 7d --non-interactive > deploy.log 2>&1; then
             cat deploy.log
             echo "Firebase hosting deployment failed."
             exit 1

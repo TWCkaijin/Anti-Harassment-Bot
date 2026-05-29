@@ -71,11 +71,9 @@ jobs:
 
       - name: Deploy to Firebase Hosting & Functions (production)
         id: firebase-deploy
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: firebase_admin.json
         run: |
           set -e
-          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only hosting,functions:api --non-interactive --force > deploy.log 2>&1; then
+          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only hosting,functions:api --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
             cat deploy.log
             echo "Firebase deployment failed."
             exit 1
