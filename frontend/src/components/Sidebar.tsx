@@ -3,6 +3,7 @@
  * 導航式設計：品牌標識 → 滿版橘色新增對話按鈕 → 對話歷史清單 (卡片式) → 底部工具列。
  * RWD：桌面端固定左側，行動端可透過漢堡按鈕展開覆蓋。
  */
+import { useState, useEffect } from "react";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
 import type { ConversationSession } from "../hooks/useConversation";
@@ -15,6 +16,7 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onDeleteSession: (id: string) => void;
+  onRenameSession: (id: string, newTitle: string) => void;
   onOpenSettings: () => void;
 }
 
@@ -42,7 +44,7 @@ function getSessionPreview(session: ConversationSession, t: ReturnType<typeof us
       ? lastUserMsg.content.slice(0, 28) + "…"
       : lastUserMsg.content;
   }
-  return t.newConversation;
+  return session.title || t.newConversation;
 }
 
 export default function Sidebar({
@@ -53,14 +55,38 @@ export default function Sidebar({
   onSelectSession,
   onNewSession,
   onDeleteSession,
+  onRenameSession,
   onOpenSettings,
 }: SidebarProps) {
   const { t } = useI18n();
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
 
   // 只顯示有訊息的對話，由新到舊排序
   const sortedSessions = [...sessions]
     .filter((s) => s.messages.length > 0)
     .sort((a, b) => b.createdAt - a.createdAt);
+
+  const handleExport = (session: ConversationSession) => {
+    // 建立只包含有意義的文字紀錄的簡單匯出版本，或 JSON
+    const exportData = session.messages.map(m => `[${m.role === 'user' ? 'User' : 'AI'}]: ${m.content}`).join('\n\n');
+    const blob = new Blob([exportData], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chat-${session.title || session.id.slice(0, 8)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMenuOpenId(null);
+  };
+
+  const handleRenameSubmit = (id: string) => {
+    if (editingTitle.trim()) {
+      onRenameSession(id, editingTitle.trim());
+    }
+    setEditingId(null);
+  };
 
   return (
     <>
@@ -134,11 +160,13 @@ export default function Sidebar({
                   }
                 `}
                 onClick={() => {
-                  onSelectSession(session.id);
-                  onClose();
+                  if (editingId !== session.id) {
+                    onSelectSession(session.id);
+                    onClose();
+                  }
                 }}
               >
-                <div className="flex gap-3 pr-6">
+                <div className="flex gap-3 pr-8">
                   <MaterialIcon
                     icon="chat_bubble"
                     size={20}
@@ -147,15 +175,30 @@ export default function Sidebar({
                     }`}
                   />
                   <div className="flex-1 min-w-0">
-                    <p
-                      className={`text-sm truncate font-medium ${
-                        isActive
-                          ? "text-primary"
-                          : "text-on-surface"
-                      }`}
-                    >
-                      {getSessionPreview(session, t)}
-                    </p>
+                    {editingId === session.id ? (
+                      <input
+                        type="text"
+                        autoFocus
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onBlur={() => handleRenameSubmit(session.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRenameSubmit(session.id);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        className="w-full text-sm font-medium bg-transparent border-b border-primary outline-none text-on-surface"
+                      />
+                    ) : (
+                      <p
+                        className={`text-sm truncate font-medium ${
+                          isActive
+                            ? "text-primary"
+                            : "text-on-surface"
+                        }`}
+                      >
+                        {session.title || getSessionPreview(session, t)}
+                      </p>
+                    )}
                     <p className={`text-[11px] mt-1 ${isActive ? "text-primary/60" : "text-on-surface/40"}`}>
                       {formatDate(session.createdAt, t)}
                       {session.messages.length > 0 &&
@@ -163,17 +206,62 @@ export default function Sidebar({
                     </p>
                   </div>
                 </div>
-                {/* 刪除按鈕 */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteSession(session.id);
-                  }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 rounded-lg hover:bg-error-container text-on-surface/40 hover:text-error transition-all"
-                  aria-label={`${t.deleteChat} ${session.id}`}
-                >
-                  <MaterialIcon icon="delete" size={16} />
-                </button>
+                
+                {/* 更多功能選單按鈕 */}
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpenId(menuOpenId === session.id ? null : session.id);
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-surface-container-high text-on-surface/40 hover:text-on-surface"
+                  >
+                    <MaterialIcon icon="more_vert" size={16} />
+                  </button>
+
+                  {/* 選單列表 */}
+                  {menuOpenId === session.id && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); }} />
+                      <div className="absolute right-0 top-full mt-1 w-32 bg-white rounded-xl shadow-lg border border-outline/10 py-1.5 z-50 flex flex-col text-sm">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTitle(session.title || getSessionPreview(session, t));
+                            setEditingId(session.id);
+                            setMenuOpenId(null);
+                          }}
+                          className="px-4 py-2 text-left hover:bg-surface-container flex items-center gap-2 text-on-surface"
+                        >
+                          <MaterialIcon icon="edit" size={14} />
+                          重新命名
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleExport(session);
+                          }}
+                          className="px-4 py-2 text-left hover:bg-surface-container flex items-center gap-2 text-on-surface"
+                        >
+                          <MaterialIcon icon="download" size={14} />
+                          匯出紀錄
+                        </button>
+                        <div className="h-px bg-outline/10 my-1"></div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteSession(session.id);
+                            setMenuOpenId(null);
+                          }}
+                          className="px-4 py-2 text-left hover:bg-error-container/50 text-error flex items-center gap-2"
+                        >
+                          <MaterialIcon icon="delete" size={14} />
+                          {t.deleteChat}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             );
           })}
