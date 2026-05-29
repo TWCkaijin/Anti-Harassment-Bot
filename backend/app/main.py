@@ -45,8 +45,11 @@ app.add_middleware(
 )
 
 # ── 掛載 Routers ─────────────────────────────────────────────────────────────
+# 支援 /api/v1 (本地與 Firebase Hosting Rewrite) 以及 /v1 (直接呼叫 Cloud Function)
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(health_router, prefix="/v1")
+app.include_router(chat_router, prefix="/v1")
 
 
 @app.get("/", include_in_schema=False)

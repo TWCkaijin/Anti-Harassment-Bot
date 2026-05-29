@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     api_title: str = "性騷擾防治智能 AI API"
     api_version: str = "0.1.0"
     cors_origins: list[str] = Field(
-        default=["http://localhost:5173", "http://localhost:3000"],
-        description="允許的 CORS 來源（開發環境）",
+        default=["*"],
+        description="允許的 CORS 來源",
     )
 
     # ── Privacy ──────────────────────────────────────────────────────────
