@@ -26,6 +26,7 @@ export interface ConversationSession {
   id: string;
   createdAt: number;
   messages: ConversationMessage[];
+  title?: string;
 }
 
 // ── 常數 ─────────────────────────────────────────────────────────────────
@@ -258,6 +259,16 @@ export function useConversation(sessionId?: string) {
     [currentSessionId, createNewSession]
   );
 
+  // ── 重新命名 Session ───────────────────────────────────────────────────
+
+  const renameSession = useCallback((id: string, newTitle: string) => {
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === id ? { ...s, title: newTitle } : s
+      )
+    );
+  }, []);
+
   // ── 清除所有 Session ───────────────────────────────────────────────────
 
   const clearAllSessions = useCallback(() => {
@@ -290,6 +301,7 @@ export function useConversation(sessionId?: string) {
     setCurrentSessionId,
     clearCurrentSession,
     deleteSession,
+    renameSession,
     clearAllSessions,
   };
 }
