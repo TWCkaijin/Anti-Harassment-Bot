@@ -74,11 +74,13 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS: firebase_admin.json
         run: |
-          firebase deploy \
-            --project ${{ env.FIREBASE_PROJECT_ID }} \
-            --only hosting,functions:api \
-            --non-interactive \
-            --force 2>&1 | tee deploy.log
+          set -e
+          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only hosting,functions:api --non-interactive --force > deploy.log 2>&1; then
+            cat deploy.log
+            echo "Firebase deployment failed."
+            exit 1
+          fi
+          cat deploy.log
           DEPLOY_URL=$(grep -oP 'Hosting URL: \K.*' deploy.log | head -1 || echo "https://anti-harassment-bot.web.app")
           echo "deploy_url=${DEPLOY_URL}" >> $GITHUB_OUTPUT
 
