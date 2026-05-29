@@ -22,6 +22,7 @@ export default function App() {
     createNewSession,
     setCurrentSessionId,
     deleteSession,
+    renameSession,
     clearAllSessions,
   } = useConversation();
 
@@ -41,6 +42,7 @@ export default function App() {
         onSelectSession={setCurrentSessionId}
         onNewSession={createNewSession}
         onDeleteSession={deleteSession}
+        onRenameSession={renameSession}
         onOpenSettings={handleOpenSettings}
       />
 
