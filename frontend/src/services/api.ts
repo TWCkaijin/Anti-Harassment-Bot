@@ -4,7 +4,7 @@
  */
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
 
 // ── 型別定義 ──────────────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ async function apiFetch<T>(
  * 傳送對話訊息給 AI，並取得回覆。
  */
 export async function sendChat(request: ChatRequest): Promise<ChatResponse> {
-  return apiFetch<ChatResponse>("/api/v1/chat/", {
+  return apiFetch<ChatResponse>("/v1/chat/", {
     method: "POST",
     body: JSON.stringify(request),
   });
@@ -108,5 +108,5 @@ export async function sendChat(request: ChatRequest): Promise<ChatResponse> {
  * 健康狀態檢查。
  */
 export async function checkHealth(): Promise<HealthResponse> {
-  return apiFetch<HealthResponse>("/api/v1/health/");
+  return apiFetch<HealthResponse>("/v1/health/");
 }
