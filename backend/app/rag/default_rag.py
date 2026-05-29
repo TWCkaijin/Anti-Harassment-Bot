@@ -5,6 +5,7 @@
 
 TODO: 接入真實的 RAG 資料庫（請提供 RAG 資料來源後更換此實作）
 """
+
 import uuid
 from difflib import SequenceMatcher
 
@@ -88,9 +89,7 @@ class DefaultRAG(BaseRAG):
                 )
             )
 
-    async def retrieve(
-        self, query: str, top_k: int = 5
-    ) -> list[RAGDocument]:
+    async def retrieve(self, query: str, top_k: int = 5) -> list[RAGDocument]:
         """使用 SequenceMatcher 進行簡易關鍵字相似度比對（支援中英文）。"""
         if not self._documents:
             return []
@@ -112,9 +111,7 @@ class DefaultRAG(BaseRAG):
                         ngram_hits += 1
             keyword_score = ngram_hits / max(ngram_total, 1)
 
-            similarity = SequenceMatcher(
-                None, query_lower, content_lower[:200]
-            ).ratio()
+            similarity = SequenceMatcher(None, query_lower, content_lower[:200]).ratio()
 
             combined_score = keyword_score * 0.7 + similarity * 0.3
             scored.append(

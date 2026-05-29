@@ -1,6 +1,7 @@
 """
 測試：默認 RAG 實作
 """
+
 import pytest
 
 from backend.app.rag.base import RAGDocument

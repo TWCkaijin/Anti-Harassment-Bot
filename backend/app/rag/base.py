@@ -12,6 +12,7 @@
             # 實作文件新增邏輯
             ...
 """
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
@@ -46,9 +47,7 @@ class BaseRAG(ABC):
     """
 
     @abstractmethod
-    async def retrieve(
-        self, query: str, top_k: int = 5
-    ) -> list[RAGDocument]:
+    async def retrieve(self, query: str, top_k: int = 5) -> list[RAGDocument]:
         """
         根據查詢字串檢索最相關的文件。
 
@@ -71,9 +70,7 @@ class BaseRAG(ABC):
         """
         ...
 
-    async def retrieve_as_context(
-        self, query: str, top_k: int = 5
-    ) -> str:
+    async def retrieve_as_context(self, query: str, top_k: int = 5) -> str:
         """
         檢索文件並格式化為可直接注入 Prompt 的上下文字串。
         預設使用 `retrieve()` 的結果，子類別可覆寫以客製化格式。

@@ -66,10 +66,21 @@ function saveSessions(sessions: ConversationSession[]): void {
 // ── Hook ─────────────────────────────────────────────────────────────────
 
 export function useConversation(sessionId?: string) {
-  const [sessions, setSessions] = useState<ConversationSession[]>(loadSessions);
-  const [currentSessionId, setCurrentSessionId] = useState<string>(
-    sessionId ?? generateId()
-  );
+  const [initialState] = useState(() => {
+    const loaded = loadSessions();
+    const id = sessionId ?? generateId();
+    if (!loaded.some(s => s.id === id)) {
+      loaded.push({
+        id,
+        createdAt: Date.now(),
+        messages: [],
+      });
+    }
+    return { sessions: loaded, currentSessionId: id };
+  });
+
+  const [sessions, setSessions] = useState<ConversationSession[]>(initialState.sessions);
+  const [currentSessionId, setCurrentSessionId] = useState<string>(initialState.currentSessionId);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,20 +129,6 @@ export function useConversation(sessionId?: string) {
     setCurrentSessionId(newId);
     setError(null);
     return newId;
-  }, [currentSessionId]);
-
-  // ── 初始化 Session（若不存在則建立）──────────────────────────────────
-
-  useEffect(() => {
-    setSessions((prev) => {
-      if (prev.some((s) => s.id === currentSessionId)) return prev;
-      const newSession: ConversationSession = {
-        id: currentSessionId,
-        createdAt: Date.now(),
-        messages: [],
-      };
-      return [...prev, newSession];
-    });
   }, [currentSessionId]);
 
   // ── 傳送訊息 ──────────────────────────────────────────────────────────
