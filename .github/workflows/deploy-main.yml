@@ -23,13 +23,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check for changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+            backend:
+              - 'backend/**'
+              - 'main.py'
+              - 'pyproject.toml'
+              - 'uv.lock'
+
       # ── Frontend Build ──────────────────────────────────────────────────
       - name: Setup pnpm
+        if: steps.filter.outputs.frontend == 'true'
         uses: pnpm/action-setup@v3
         with:
           version: 9
 
       - name: Setup Node.js
+        if: steps.filter.outputs.frontend == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -37,10 +52,12 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install frontend dependencies
+        if: steps.filter.outputs.frontend == 'true'
         run: pnpm install --frozen-lockfile
         working-directory: frontend
 
       - name: Build frontend
+        if: steps.filter.outputs.frontend == 'true'
         run: pnpm run build
         working-directory: frontend
         env:
@@ -48,48 +65,72 @@ jobs:
 
       # ── Firebase Deploy ─────────────────────────────────────────────────
       - name: Install Firebase CLI
+        if: steps.filter.outputs.frontend == 'true' || steps.filter.outputs.backend == 'true'
         run: npm install -g firebase-tools
 
       - name: Install uv
+        if: steps.filter.outputs.backend == 'true'
         uses: astral-sh/setup-uv@v5
         with:
           version: "latest"
 
       - name: Setup Python environment for Firebase CLI
+        if: steps.filter.outputs.backend == 'true'
         run: |
           uv export --format requirements-txt > requirements.txt
           uv venv venv
           uv pip install -r requirements.txt -p venv
 
       - name: Write Firebase service account
+        if: steps.filter.outputs.backend == 'true'
         run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > firebase_admin.json
 
       - name: Write backend .env
+        if: steps.filter.outputs.backend == 'true'
         run: |
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
           echo "ENVIRONMENT=production" >> .env
 
-      - name: Deploy to Firebase Hosting & Functions (production)
-        id: firebase-deploy
+      - name: Deploy to Firebase Hosting (production)
+        id: firebase-hosting-deploy
+        if: steps.filter.outputs.frontend == 'true'
         run: |
           set -e
-          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only hosting,functions:api --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
+          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only hosting --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
             cat deploy.log
-            echo "Firebase deployment failed."
+            echo "Firebase hosting deployment failed."
             exit 1
           fi
           cat deploy.log
           DEPLOY_URL=$(grep -oP 'Hosting URL: \K.*' deploy.log | head -1 || echo "https://anti-harassment-bot.web.app")
           echo "deploy_url=${DEPLOY_URL}" >> $GITHUB_OUTPUT
 
+      - name: Deploy Functions (api production)
+        if: steps.filter.outputs.backend == 'true'
+        run: |
+          set -e
+          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only functions:api --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
+            cat deploy.log
+            echo "Firebase functions deployment failed."
+            exit 1
+          fi
+          cat deploy.log
+
       - name: Comment deployment URL on PR
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && (steps.filter.outputs.frontend == 'true' || steps.filter.outputs.backend == 'true')
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const deployUrl = '${{ steps.firebase-deploy.outputs.deploy_url }}' || 'https://anti-harassment-bot.web.app';
-            const body = `## 🚀 Production Deployment\n\n✅ 已部署至 Firebase Hosting（Production）\n\n🔗 **URL**: ${deployUrl}\n📦 **API**: \`https://asia-east1-anti-harassment-bot.cloudfunctions.net/api\`\n\n*由 GitHub Actions 自動部署*`;
+            let body = `## 🚀 Production Deployment\n\n`;
+            if ('${{ steps.filter.outputs.frontend }}' === 'true') {
+              const deployUrl = '${{ steps.firebase-hosting-deploy.outputs.deploy_url }}' || 'https://anti-harassment-bot.web.app';
+              body += `✅ 已部署至 Firebase Hosting（Production）\n🔗 **URL**: ${deployUrl}\n`;
+            }
+            if ('${{ steps.filter.outputs.backend }}' === 'true') {
+              body += `✅ Backend Updated\n📦 **API**: \`https://asia-east1-anti-harassment-bot.cloudfunctions.net/api\`\n`;
+            }
+            body += `\n*由 GitHub Actions 自動部署*`;
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
