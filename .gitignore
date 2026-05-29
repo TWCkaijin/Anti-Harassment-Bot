@@ -1,0 +1,41 @@
+# ===== Python =====
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyo
+*.pyc
+
+# ===== Environment & Secrets =====
+.env
+.env.local
+.env.*.local
+firebase_admin.json
+*.pem
+*.key
+
+# ===== Node / Frontend =====
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+*.tsbuildinfo
+
+# ===== Firebase =====
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
