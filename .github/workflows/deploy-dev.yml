@@ -53,8 +53,11 @@ jobs:
         with:
           version: "latest"
 
-      - name: Export requirements.txt for Firebase Functions
-        run: uv export --format requirements-txt > requirements.txt
+      - name: Setup Python environment for Firebase CLI
+        run: |
+          uv export --format requirements-txt > requirements.txt
+          uv venv venv
+          uv pip install -r requirements.txt -p venv
 
       - name: Write Firebase service account
         run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > firebase_admin.json
