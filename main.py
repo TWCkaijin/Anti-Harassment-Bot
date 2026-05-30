@@ -6,4 +6,9 @@ from firebase_functions.options import HttpsOptions
 async def api(scope, receive, send):
     await app(scope, receive, send)
 
-api.__firebase_endpoint__ = HttpsOptions(region="asia-east1")._endpoint(func_name="api")
+api.__firebase_endpoint__ = HttpsOptions(region="asia-east1", invoker="public")._endpoint(func_name="api")
+
+async def api_preview(scope, receive, send):
+    await app(scope, receive, send)
+
+api_preview.__firebase_endpoint__ = HttpsOptions(region="asia-east1", invoker="public")._endpoint(func_name="api_preview")

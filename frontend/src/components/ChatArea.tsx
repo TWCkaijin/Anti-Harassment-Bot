@@ -2,7 +2,7 @@
  * ChatArea — 主要對話區域（Stitch 新版對話內頁 v0.1）
  * 包含頂部導航列、訊息列表（或 WelcomeHero）、打字動畫、底部輸入框。
  */
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState} from "react";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
 import type { ConversationMessage } from "../hooks/useConversation";
@@ -10,6 +10,7 @@ import MessageItem from "./MessageItem";
 import WelcomeHero from "./WelcomeHero";
 import ChatInput from "./ChatInput";
 import TypingIndicator from "./TypingIndicator";
+import { checkHealth } from "../services/api";
 
 interface ChatAreaProps {
   messages: ConversationMessage[];
@@ -27,10 +28,27 @@ export default function ChatArea({
   const { t } = useI18n();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const [isBackendConnected, setIsBackendConnected] = useState<boolean | null>(null);
+
   // 自動滾動到最下方
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
+
+  // 測試後端連線
+  useEffect(() => {
+    let mounted = true;
+    checkHealth()
+      .then(() => {
+        if (mounted) setIsBackendConnected(true);
+      })
+      .catch(() => {
+        if (mounted) setIsBackendConnected(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const hasMessages = messages.length > 0;
 
@@ -68,16 +86,30 @@ export default function ChatArea({
             className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full border transition-colors ${
               isLoading
                 ? "text-orange-600 bg-orange-50 border-orange-100"
+                : isBackendConnected === false
+                ? "text-red-600 bg-red-50 border-red-100"
                 : "text-green-600 bg-green-50 border-green-100"
             }`}
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                isLoading ? "bg-orange-500 animate-pulse" : "bg-green-500"
+                isLoading
+                  ? "bg-orange-500 animate-pulse"
+                  : isBackendConnected === false
+                  ? "bg-red-500"
+                  : isBackendConnected === null
+                  ? "bg-gray-400 animate-pulse"
+                  : "bg-green-500"
               }`}
             ></span>
             <span className="hidden sm:inline">
-              {isLoading ? t.statusProcessing : t.statusConnected}
+              {isLoading
+                ? t.statusProcessing
+                : isBackendConnected === false
+                ? "連線失敗"
+                : isBackendConnected === null
+                ? "連線中..."
+                : t.statusConnected}
             </span>
           </div>
         </div>
