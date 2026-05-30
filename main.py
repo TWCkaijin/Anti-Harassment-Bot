@@ -1,14 +1,19 @@
 from backend.app.main import app
-from firebase_functions.options import HttpsOptions
+from firebase_functions import https_fn
+from a2wsgi import ASGIMiddleware
 
-# For Firebase CLI to detect the ASGI application as a Firebase Function
-# We wrap the FastAPI app in a standard ASGI function so `inspect.isfunction` evaluates to True.
-async def api(scope, receive, send):
-    await app(scope, receive, send)
+# 將 FastAPI (ASGI) 轉換為 WSGI 供 Firebase Functions 使用
+wsgi_app = ASGIMiddleware(app)
 
-api.__firebase_endpoint__ = HttpsOptions(region="asia-east1", invoker="public")._endpoint(func_name="api")
+# 註冊為 Firebase HTTP 函數，支援公開呼叫 (invoker="public")
+api = https_fn.on_request(
+    wsgi_app,
+    region="asia-east1",
+    invoker="public"
+)
 
-async def api_preview(scope, receive, send):
-    await app(scope, receive, send)
-
-api_preview.__firebase_endpoint__ = HttpsOptions(region="asia-east1", invoker="public")._endpoint(func_name="api_preview")
+api_preview = https_fn.on_request(
+    wsgi_app,
+    region="asia-east1",
+    invoker="public"
+)
