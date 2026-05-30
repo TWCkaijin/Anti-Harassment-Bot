@@ -56,11 +56,24 @@ def handle_request(req: https_fn.Request) -> https_fn.Response:
             headers=cors_headers
         )
 
+from firebase_functions import options
+
 # 註冊為 Firebase HTTP 函數，支援公開呼叫 (invoker="public")
-@https_fn.on_request(region="asia-east1", invoker="public")
+# 增加記憶體至 512MB 以獲得更多 CPU 資源，並將超時時間延長至 180 秒
+@https_fn.on_request(
+    region="asia-east1", 
+    invoker="public", 
+    timeout_sec=180, 
+    memory=options.MemoryOption.MB_512
+)
 def api(req: https_fn.Request) -> https_fn.Response:
     return handle_request(req)
 
-@https_fn.on_request(region="asia-east1", invoker="public")
+@https_fn.on_request(
+    region="asia-east1", 
+    invoker="public", 
+    timeout_sec=180, 
+    memory=options.MemoryOption.MB_512
+)
 def api_preview(req: https_fn.Request) -> https_fn.Response:
     return handle_request(req)
