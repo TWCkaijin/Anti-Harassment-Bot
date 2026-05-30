@@ -58,7 +58,7 @@ jobs:
         run: pnpm run build
         working-directory: frontend
         env:
-          VITE_API_BASE_URL: https://asia-east1-anti-harassment-bot.cloudfunctions.net/api-preview
+          VITE_API_BASE_URL: https://asia-east1-anti-harassment-bot.cloudfunctions.net/api_preview
           VITE_ENV: preview
 
       # ── Firebase Deploy ─────────────────────────────────────────────────
@@ -89,12 +89,12 @@ jobs:
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
           echo "ENVIRONMENT=preview" >> .env
 
-      - name: Deploy Functions (api-preview)
+      - name: Deploy Functions (api_preview)
         if: steps.filter.outputs.backend == 'true'
         run: |
           firebase deploy \
             --project ${{ env.FIREBASE_PROJECT_ID }} \
-            --only functions:api-preview \
+            --only functions:api_preview \
             --token "${{ secrets.FIREBASE_TOKEN }}" \
             --non-interactive \
             --force
@@ -143,7 +143,7 @@ jobs:
               body += `✅ 已部署至 Firebase Hosting Preview Channel\n🔗 **Preview URL**: ${previewUrl}\n`;
             }
             if ('${{ steps.filter.outputs.backend }}' === 'true') {
-              body += `✅ Backend Updated\n📦 **Preview API**: \`https://asia-east1-anti-harassment-bot.cloudfunctions.net/api-preview\`\n`;
+              body += `✅ Backend Updated\n📦 **Preview API**: \`https://asia-east1-anti-harassment-bot.cloudfunctions.net/api_preview\`\n`;
             }
             body += `⏳ **有效期限**: 7 天\n\n*由 GitHub Actions 自動部署*`;
             github.rest.issues.createComment({
