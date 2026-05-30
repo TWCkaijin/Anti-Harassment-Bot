@@ -18,10 +18,19 @@ settings = get_settings()
 setup_logging()
 
 # ── Firebase Admin 初始化 ────────────────────────────────────────────────────
-_cred_path = str(settings.firebase_admin_credential_path)
-if os.path.exists(_cred_path) and not firebase_admin._apps:
-    _cred = credentials.Certificate(_cred_path)
-    firebase_admin.initialize_app(_cred)
+if not firebase_admin._apps:
+    _cred_path = str(settings.firebase_admin_credential_path)
+    _initialized = False
+    if os.path.exists(_cred_path) and os.path.getsize(_cred_path) > 10:
+        try:
+            _cred = credentials.Certificate(_cred_path)
+            firebase_admin.initialize_app(_cred)
+            _initialized = True
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Invalid firebase creds at {_cred_path}, falling back to ADC. Error: {e}")
+    if not _initialized:
+        firebase_admin.initialize_app()
 
 # ── FastAPI 應用程式 ─────────────────────────────────────────────────────────
 app = FastAPI(

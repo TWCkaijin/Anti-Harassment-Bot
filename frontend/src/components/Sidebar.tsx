@@ -158,6 +158,7 @@ export default function Sidebar({
                       ? "bg-primary-container border-primary/20"
                       : "bg-surface hover:bg-surface-container border-transparent"
                   }
+                  ${menuOpenId === session.id ? "z-30" : "z-0"}
                 `}
                 onClick={() => {
                   if (editingId !== session.id) {
