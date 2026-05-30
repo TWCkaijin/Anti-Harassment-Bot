@@ -1,13 +1,9 @@
 import json
 import traceback
 from backend.app.main import app
-from firebase_functions import https_fn
+from firebase_functions import https_fn, options
 from flask import Response as FlaskResponse
 from werkzeug.wrappers import Response as WerkzeugResponse
-from a2wsgi import ASGIMiddleware
-
-# 將 FastAPI (ASGI) 轉換為 WSGI 供 Firebase Functions 使用
-wsgi_app = ASGIMiddleware(app)
 
 def handle_request(req: https_fn.Request) -> https_fn.Response:
     # 建立基礎 CORS 標頭
@@ -18,7 +14,7 @@ def handle_request(req: https_fn.Request) -> https_fn.Response:
         "Access-Control-Allow-Credentials": "true",
     }
 
-    # 1. 快速處理 CORS 預檢請求 (OPTIONS)，不進入 ASGI，避免冷啟動或內部錯誤導致預檢失敗
+    # 1. 快速處理 CORS 預檢請求 (OPTIONS)
     if req.method == "OPTIONS":
         return FlaskResponse(
             status=204,
@@ -26,8 +22,8 @@ def handle_request(req: https_fn.Request) -> https_fn.Response:
         )
 
     try:
-        # 2. 執行 WSGI 應用程式
-        w_res = WerkzeugResponse.from_app(wsgi_app, req.environ)
+        # 2. 執行 Flask 應用程式 (Flask 本身就是 WSGI App)
+        w_res = WerkzeugResponse.from_app(app, req.environ)
         
         # 確保成功的回應也有 CORS 標頭
         headers = dict(w_res.headers)
@@ -56,7 +52,6 @@ def handle_request(req: https_fn.Request) -> https_fn.Response:
             headers=cors_headers
         )
 
-from firebase_functions import options
 
 # 註冊為 Firebase HTTP 函數，支援公開呼叫 (invoker="public")
 # 增加記憶體至 512MB 以獲得更多 CPU 資源，並將超時時間延長至 180 秒
