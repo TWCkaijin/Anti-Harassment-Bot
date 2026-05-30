@@ -47,3 +47,6 @@ ui-debug.log
 *.swp
 *.swo
 .DS_Store
+
+# ===== Logs & Temporary Files =====
+functions_error.json
