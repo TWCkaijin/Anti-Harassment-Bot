@@ -3,10 +3,11 @@
 """
 
 import os
-from flask import Flask, jsonify
-from flask_cors import CORS
+
 import firebase_admin
 from firebase_admin import credentials
+from flask import Flask, jsonify
+from flask_cors import CORS
 
 from backend.app.api.chat import chat_bp
 from backend.app.api.health import health_bp
@@ -27,7 +28,10 @@ if not firebase_admin._apps:
             _initialized = True
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"Invalid firebase creds at {_cred_path}, falling back to ADC. Error: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"Invalid firebase creds at {_cred_path}, falling back to ADC. Error: {e}"
+            )
     if not _initialized:
         firebase_admin.initialize_app()
 
@@ -47,9 +51,12 @@ app.register_blueprint(chat_bp, url_prefix="/api/v1/chat")
 app.register_blueprint(health_bp, url_prefix="/v1/health", name="health_v1")
 app.register_blueprint(chat_bp, url_prefix="/v1/chat", name="chat_v1")
 
+
 @app.route("/")
 def root():
-    return jsonify({
-        "service": settings.api_title,
-        "version": settings.api_version,
-    })
+    return jsonify(
+        {
+            "service": settings.api_title,
+            "version": settings.api_version,
+        }
+    )
