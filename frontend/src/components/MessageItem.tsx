@@ -6,6 +6,7 @@
  */
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
+import React from "react";
 import type { ConversationMessage } from "../hooks/useConversation";
 
 interface MessageItemProps {
@@ -52,6 +53,7 @@ function renderContent(content: string) {
 
 export default function MessageItem({ message }: MessageItemProps) {
   const { t } = useI18n();
+  const [showTooltip, setShowTooltip] = React.useState(false);
   const isUser = message.role === "user";
   const isError = message.isError;
 
@@ -122,14 +124,18 @@ export default function MessageItem({ message }: MessageItemProps) {
           <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-outline/10">
             {message.ragUsed?.status && (
               <div className="group relative flex items-center">
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-tertiary bg-primary-container px-2.5 py-1 rounded-full cursor-help transition-colors hover:bg-outline/20">
+                <button 
+                  onClick={() => setShowTooltip(!showTooltip)}
+                  onBlur={() => setShowTooltip(false)}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-medium text-tertiary bg-primary-container px-2.5 py-1 rounded-full cursor-pointer transition-colors hover:bg-outline/20"
+                >
                   <MaterialIcon icon="menu_book" size={14} />
                   {t.ragLabel}
-                </span>
+                </button>
 
-                {/* 條文來源 Hover Tooltip */}
+                {/* 條文來源 Hover / Click Tooltip */}
                 {message.ragUsed.sources.length > 0 && (
-                  <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block w-max max-w-[280px] bg-inverse-surface text-inverse-on-surface text-xs rounded-xl shadow-float z-10 animate-fade-in-up">
+                  <div className={`absolute bottom-full left-0 mb-2 w-max max-w-[280px] bg-inverse-surface text-inverse-on-surface text-xs rounded-xl shadow-float z-10 animate-fade-in-up transition-opacity ${showTooltip ? 'block' : 'hidden group-hover:block'}`}>
                     <div className="p-3 border-b border-inverse-on-surface/10 font-bold bg-white/5 rounded-t-xl">
                       {t.ragTooltipTitle}
                     </div>
