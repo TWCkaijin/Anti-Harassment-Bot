@@ -62,6 +62,7 @@ export default function Sidebar({
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [isEmergencyMenuOpen, setIsEmergencyMenuOpen] = useState(false);
 
   // 只顯示有訊息的對話，由新到舊排序
   const sortedSessions = [...sessions]
@@ -207,9 +208,12 @@ export default function Sidebar({
                     </p>
                   </div>
                 </div>
-                
                 {/* 更多功能選單按鈕 */}
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all">
+                <div className={`absolute right-2 top-1/2 -translate-y-1/2 transition-all ${
+                  menuOpenId === session.id 
+                    ? "opacity-100" 
+                    : "opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100"
+                }`}>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -282,16 +286,19 @@ export default function Sidebar({
           </div>
 
           {/* 緊急求助選單 */}
-          <div className="relative group w-full">
+          <div className="relative w-full">
             <button
+              onClick={() => setIsEmergencyMenuOpen(!isEmergencyMenuOpen)}
               className="w-full py-4 px-4 bg-secondary text-white rounded-full font-bold flex items-center justify-center gap-2 shadow-md hover:opacity-90 transition-opacity cursor-pointer"
             >
               <MaterialIcon icon="call" size={20} />
               <span>專人緊急協助</span>
-              <MaterialIcon icon="expand_less" size={20} className="ml-auto group-hover:rotate-180 transition-transform" />
+              <MaterialIcon icon="expand_less" size={20} className={`ml-auto transition-transform ${isEmergencyMenuOpen ? 'rotate-180' : ''}`} />
             </button>
             {/* 展開選單 (往上展開，避免超出畫面) */}
-            <div className="absolute left-0 bottom-full mb-2 w-full bg-white border border-outline/20 rounded-2xl shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col overflow-hidden z-50 origin-bottom">
+            <div className={`absolute left-0 bottom-full mb-2 w-full bg-white border border-outline/20 rounded-2xl shadow-lg transition-all flex flex-col overflow-hidden z-50 origin-bottom ${
+              isEmergencyMenuOpen ? "opacity-100 visible" : "opacity-0 invisible"
+            }`}>
               <a href="tel:113" className="px-4 py-3 hover:bg-surface-container flex items-center gap-3 text-on-surface">
                 <MaterialIcon icon="local_police" size={20} className="text-secondary" />
                 <div className="flex flex-col text-left">
