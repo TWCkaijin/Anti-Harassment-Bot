@@ -3,11 +3,11 @@
 接收前端對話請求，執行匿名化後透過 Google ADK 呼叫 AI 模型。
 """
 
+import asyncio
 import json
 import uuid
-import asyncio
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, jsonify, request
 from pydantic import BaseModel, Field, ValidationError
 
 from backend.app.agents.harass_agent import HarassmentCounselingAgent
@@ -25,11 +25,13 @@ chat_bp = Blueprint("chat", __name__, url_prefix="/chat")
 _agent_instance: HarassmentCounselingAgent | None = None
 _rag_instance: DefaultRAG | None = None
 
+
 def get_agent() -> HarassmentCounselingAgent:
     global _agent_instance
     if _agent_instance is None:
         _agent_instance = HarassmentCounselingAgent()
     return _agent_instance
+
 
 def get_rag() -> DefaultRAG:
     global _rag_instance
@@ -37,15 +39,20 @@ def get_rag() -> DefaultRAG:
         _rag_instance = DefaultRAG()
     return _rag_instance
 
+
 # ── 請求 / 回應模型 ─────────────────────────────────────────────────────────
+
 
 class MessageItem(BaseModel):
     """單一訊息項目。"""
+
     role: str = Field(..., pattern="^(user|assistant)$", description="發訊者角色")
     content: str = Field(..., min_length=1, max_length=4000, description="訊息內容")
 
+
 class ChatRequest(BaseModel):
     """聊天請求：包含當前訊息及完整對話歷史。"""
+
     message: str = Field(..., min_length=1, max_length=2000, description="當前使用者訊息")
     history: list[MessageItem] = Field(
         default_factory=list,
@@ -55,7 +62,9 @@ class ChatRequest(BaseModel):
     use_rag: bool = Field(default=True, description="是否啟用 RAG 檢索增強")
     image_base64: str | None = Field(default=None, description="使用者上傳的圖片 (base64 data URL)")
 
+
 # ── Endpoints ───────────────────────────────────────────────────────────────
+
 
 @chat_bp.route("/", methods=["POST"])
 def chat():
@@ -155,14 +164,13 @@ def chat():
         logger.warning("Failed to parse JSON from AI response: %s", reply)
         pass
 
-    return jsonify({
-        "reply": parsed_reply,
-        "session_id": session_id,
-        "anonymized": was_anonymized,
-        "rag_used": {
-            "status": rag_used_status,
-            "sources": rag_sources
-        },
-        "emotion": emotion,
-        "emotion_color": emotion_color,
-    })
+    return jsonify(
+        {
+            "reply": parsed_reply,
+            "session_id": session_id,
+            "anonymized": was_anonymized,
+            "rag_used": {"status": rag_used_status, "sources": rag_sources},
+            "emotion": emotion,
+            "emotion_color": emotion_color,
+        }
+    )
