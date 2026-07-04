@@ -1,5 +1,5 @@
 """backend/app/agents/__init__.py"""
 
-from backend.app.agents.harass_agent import HarassmentCounselingAgent
+from backend.app.agents.openrouter_agent import AgentResult, OpenRouterAgent
 
-__all__ = ["HarassmentCounselingAgent"]
+__all__ = ["AgentResult", "OpenRouterAgent"]

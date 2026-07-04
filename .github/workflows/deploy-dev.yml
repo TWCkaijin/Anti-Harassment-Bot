@@ -86,7 +86,7 @@ jobs:
       - name: Write backend .env
         if: steps.filter.outputs.backend == 'true'
         run: |
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+          echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" > .env
           echo "ENVIRONMENT=preview" >> .env
 
       - name: Deploy Functions (api_preview)
