@@ -30,6 +30,54 @@ def get_agent() -> OpenRouterAgent:
     return _agent_instance
 
 
+def _strip_json_code_fence(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    return cleaned.strip()
+
+
+def _escape_newlines_inside_json_strings(text: str) -> str:
+    """Escape bare line breaks only when they appear inside JSON strings."""
+    result: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if escaped:
+            result.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            result.append(char)
+            escaped = True
+            continue
+        if char == '"':
+            result.append(char)
+            in_string = not in_string
+            continue
+        if in_string and char == "\n":
+            result.append("\\n")
+            continue
+        if in_string and char == "\r":
+            result.append("\\r")
+            continue
+        result.append(char)
+    return "".join(result)
+
+
+def parse_agent_json_response(reply: str) -> dict | None:
+    cleaned = _strip_json_code_fence(reply)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        repaired = _escape_newlines_inside_json_strings(cleaned)
+        return json.loads(repaired)
+
+
 # ── 請求 / 回應模型 ─────────────────────────────────────────────────────────
 
 
@@ -110,15 +158,7 @@ def chat():
     emotion_color = None
     parsed_reply = reply
     try:
-        cleaned_reply = reply.strip()
-        if cleaned_reply.startswith("```json"):
-            cleaned_reply = cleaned_reply[7:]
-        elif cleaned_reply.startswith("```"):
-            cleaned_reply = cleaned_reply[3:]
-        if cleaned_reply.endswith("```"):
-            cleaned_reply = cleaned_reply[:-3]
-
-        data = json.loads(cleaned_reply.strip())
+        data = parse_agent_json_response(reply)
         parsed_reply = data.get("reply", reply)
         emotion = data.get("emotion")
         emotion_color = data.get("emotion_color")

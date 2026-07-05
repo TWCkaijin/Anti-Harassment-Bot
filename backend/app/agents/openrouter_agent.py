@@ -54,17 +54,26 @@ _SYSTEM_INSTRUCTION = """
 _RAG_TOOL = {
     "type": "function",
     "function": {
-        "name": "retrieve_law_from_firestore",
-        "description": "當使用者詢問性騷擾相關法律、申訴管道、時效等具體規範時，必須呼叫此工具檢索最新法規與資料庫內容。",
+        "name": "retrieve_harassment_knowledge",
+        "description": "當使用者詢問性騷擾法律、判決案例、申訴管道、救濟資源或求助流程時，依資料類型檢索 Firestore 向量資料庫。",
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "用來檢索的查詢字串，例如：'性騷擾申訴期限' 或 '公司應該怎麼處理性騷擾'",
-                }
+                    "description": "用來檢索的查詢字串，例如：'性騷擾申訴期限'、'屏東職場性騷擾救濟' 或 '類似判決案例'",
+                },
+                "data_type": {
+                    "type": "string",
+                    "enum": ["law", "judgment", "remedy", "all"],
+                    "description": "要查詢的資料類型：law=法規與一般知識，judgment=判決書，remedy=救濟/申訴/求助資源，all=不確定時跨類型查詢",
+                },
+                "harassment_type": {
+                    "type": "string",
+                    "description": "可選：一般、職場、校園、數位/私密影像、跟蹤騷擾等情境分類，用來讓查詢字串更精準",
+                },
             },
-            "required": ["query"],
+            "required": ["query", "data_type"],
         },
     },
 }
@@ -159,12 +168,24 @@ class OpenRouterAgent:
                 messages.append(response_message)  # 把 assistant 的 tool call 訊息加回歷史
 
                 for tool_call in tool_calls:
-                    if tool_call.function.name == "retrieve_law_from_firestore":
+                    if tool_call.function.name == "retrieve_harassment_knowledge":
                         args = json.loads(tool_call.function.arguments)
                         query = args.get("query", user_message)
-                        logger.info(f"Tool called: retrieve_law_from_firestore(query='{query}')")
+                        data_type = args.get("data_type", "law")
+                        harassment_type = args.get("harassment_type")
+                        if harassment_type:
+                            query = f"{harassment_type} {query}"
+                        logger.info(
+                            "Tool called: retrieve_harassment_knowledge(query='%s', data_type='%s')",
+                            query,
+                            data_type,
+                        )
 
-                        docs = await self.rag.retrieve(query, top_k=settings.rag_retrieval_top_k)
+                        docs = await self.rag.retrieve(
+                            query,
+                            top_k=settings.rag_retrieval_top_k,
+                            data_type=data_type,
+                        )
                         rag_used = bool(docs)
                         for doc in docs:
                             source = doc.metadata.get("source")
@@ -180,7 +201,7 @@ class OpenRouterAgent:
                             {
                                 "tool_call_id": tool_call.id,
                                 "role": "tool",
-                                "name": "retrieve_law_from_firestore",
+                                "name": "retrieve_harassment_knowledge",
                                 "content": context_text,
                             }
                         )
