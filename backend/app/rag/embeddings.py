@@ -43,7 +43,7 @@ class EmbeddingClient:
     async def _embed_openrouter(self, text: str, mode: EmbeddingMode) -> list[float]:
         response = await self._openrouter_client.embeddings.create(
             input=_e5_prefix(text, mode),
-            model=settings.openrouter_embedding_model,
+            model=self.model,
         )
         return response.data[0].embedding
 

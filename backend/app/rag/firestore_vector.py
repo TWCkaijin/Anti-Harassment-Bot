@@ -91,10 +91,12 @@ class FirestoreVectorRAG(BaseRAG):
             results = []
             for doc in docs:
                 data = doc.to_dict()
+                metadata = dict(data.get("metadata", {}))
+                metadata.setdefault("collection", collection_name)
                 results.append(
                     RAGDocument(
                         content=data.get("content", ""),
-                        metadata=data.get("metadata", {}),
+                        metadata=metadata,
                         doc_id=doc.id,
                     )
                 )
