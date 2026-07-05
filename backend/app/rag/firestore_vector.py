@@ -80,6 +80,7 @@ class FirestoreVectorRAG(BaseRAG):
         # 使用 find_nearest 進行向量檢索
         # 需在 Firebase Console 中為 embedding 欄位建立 Vector Index
         try:
+            vector_dim = len(query_vector)
             vector_query = self.db.collection(collection_name).find_nearest(
                 vector_field="embedding",
                 query_vector=query_vector,
@@ -100,7 +101,14 @@ class FirestoreVectorRAG(BaseRAG):
                 )
             return results
         except Exception as e:
-            logger.exception("Firestore Vector Search failed for %s: %s", collection_name, e)
+            logger.exception(
+                "Firestore Vector Search failed for %s: %s "
+                "(project=%s, vector_field=embedding, vector_dim=%s)",
+                collection_name,
+                e,
+                getattr(self.db, "project", None),
+                len(query_vector),
+            )
             return []
 
     async def add_documents(self, documents: list[RAGDocument]) -> None:
