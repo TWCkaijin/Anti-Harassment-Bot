@@ -96,6 +96,7 @@ def _get_system_instruction() -> str:
         return configured_prompt.replace("\\n", "\n").strip()
     return _DEFAULT_SYSTEM_INSTRUCTION.strip()
 
+
 _RAG_TOOL = {
     "type": "function",
     "function": {
