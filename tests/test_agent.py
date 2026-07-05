@@ -31,11 +31,11 @@ class FakeFunction:
 
 
 class FakeToolCall:
-    def __init__(self, query: str):
+    def __init__(self, query: str, data_type: str = "law"):
         self.id = "tool-1"
         self.function = FakeFunction(
-            "retrieve_law_from_firestore",
-            json.dumps({"query": query}, ensure_ascii=False),
+            "retrieve_harassment_knowledge",
+            json.dumps({"query": query, "data_type": data_type}, ensure_ascii=False),
         )
 
 
@@ -60,7 +60,11 @@ class FakeClient:
 
 
 class FakeRAG:
-    async def retrieve(self, query: str, top_k: int = 5):
+    def __init__(self):
+        self.calls = []
+
+    async def retrieve(self, query: str, top_k: int = 5, data_type: str = "law"):
+        self.calls.append({"query": query, "top_k": top_k, "data_type": data_type})
         return [
             RAGDocument(
                 content="申訴期限為事件發生後一年內。",
@@ -120,9 +124,30 @@ async def test_agent_tool_call_returns_sources():
     assert result.rag_used is True
     assert result.sources == ["性騷擾防治法第13條"]
     assert len(completions.calls) == 2
+    assert agent.rag.calls[0]["data_type"] == "law"
     tool_message = completions.calls[1]["messages"][-1]
     assert tool_message["role"] == "tool"
     assert "[參考資料 - 性騷擾防治法第13條]" in tool_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_agent_tool_call_passes_judgment_data_type():
+    completions = FakeCompletions(
+        [
+            FakeResponse(FakeMessage(tool_calls=[FakeToolCall("類似判決", data_type="judgment")])),
+            FakeResponse(
+                FakeMessage(
+                    content='{"emotion":"冷靜","emotion_color":"green","reply":"找到相近判決。"}',
+                    tool_calls=None,
+                )
+            ),
+        ]
+    )
+    agent = make_agent(completions)
+
+    await agent.run("有沒有類似判決？", use_rag=True)
+
+    assert agent.rag.calls[0]["data_type"] == "judgment"
 
 
 @pytest.mark.asyncio

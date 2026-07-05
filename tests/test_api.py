@@ -74,3 +74,35 @@ def test_chat_passes_use_rag_false(monkeypatch):
     assert response.status_code == 200
     assert captured["use_rag"] is False
     assert response.get_json()["rag_used"] == {"status": False, "sources": []}
+
+
+def test_chat_repairs_bare_newlines_inside_json_string(monkeypatch):
+    class FakeAgent:
+        async def run(self, **kwargs):
+            return AgentResult(
+                reply='{"emotion":"冷靜","emotion_color":"green","reply":"第一段\n\n第二段"}',
+                rag_used=False,
+                sources=[],
+            )
+
+    monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+
+    client = app.test_client()
+    response = client.post(
+        "/api/v1/chat/",
+        json={"message": "測試換行", "history": [], "use_rag": False},
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["reply"] == "第一段\n\n第二段"
+    assert data["emotion"] == "冷靜"
+    assert data["emotion_color"] == "green"
+
+
+def test_parse_agent_json_response_strips_code_fence():
+    data = chat_module.parse_agent_json_response(
+        '```json\n{"emotion":"未知","emotion_color":"gray","reply":"好的"}\n```'
+    )
+
+    assert data == {"emotion": "未知", "emotion_color": "gray", "reply": "好的"}
