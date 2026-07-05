@@ -94,7 +94,7 @@ jobs:
         run: |
           firebase deploy \
             --project ${{ env.FIREBASE_PROJECT_ID }} \
-            --only functions:api_preview \
+            --only functions:api:api_preview \
             --token "${{ secrets.FIREBASE_TOKEN }}" \
             --non-interactive \
             --force
