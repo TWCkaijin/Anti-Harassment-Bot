@@ -28,7 +28,13 @@ def test_chat_response_shape(monkeypatch):
             return AgentResult(
                 reply='{"emotion":"冷靜","emotion_color":"green","reply":"我會陪你整理下一步。"}',
                 rag_used=True,
-                sources=["性騷擾防治法第13條"],
+                sources=[
+                    {
+                        "label": "性騷擾防治法第13條",
+                        "type": "law",
+                        "collection": "rag_documents",
+                    }
+                ],
             )
 
     monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
@@ -44,7 +50,13 @@ def test_chat_response_shape(monkeypatch):
     assert data["reply"] == "我會陪你整理下一步。"
     assert data["rag_used"] == {
         "status": True,
-        "sources": ["性騷擾防治法第13條"],
+        "sources": [
+            {
+                "label": "性騷擾防治法第13條",
+                "type": "law",
+                "collection": "rag_documents",
+            }
+        ],
     }
     assert data["emotion"] == "冷靜"
     assert data["emotion_color"] == "green"

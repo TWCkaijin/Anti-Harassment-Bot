@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+import backend.app.agents.openrouter_agent as agent_module
 from backend.app.agents.openrouter_agent import OpenRouterAgent
 from backend.app.rag.base import RAGDocument
 
@@ -68,7 +69,7 @@ class FakeRAG:
         return [
             RAGDocument(
                 content="申訴期限為事件發生後一年內。",
-                metadata={"source": "性騷擾防治法第13條"},
+                metadata={"source": "性騷擾防治法第13條", "collection": "rag_documents"},
                 doc_id="law-13",
             )
         ]
@@ -105,6 +106,30 @@ async def test_agent_returns_without_tool_call():
 
 
 @pytest.mark.asyncio
+async def test_agent_uses_configured_system_prompt(monkeypatch):
+    completions = FakeCompletions(
+        [
+            FakeResponse(
+                FakeMessage(
+                    content='{"emotion":"冷靜","emotion_color":"green","reply":"我在。"}',
+                    tool_calls=None,
+                )
+            )
+        ]
+    )
+    agent = make_agent(completions)
+    monkeypatch.setattr(agent_module.settings, "agent_system_prompt", "第一行\\n第二行")
+
+    await agent.run("測試 prompt", use_rag=False)
+
+    assert completions.calls[0]["messages"][0] == {
+        "role": "system",
+        "content": "第一行\n第二行",
+    }
+    assert "tools" not in completions.calls[0]
+
+
+@pytest.mark.asyncio
 async def test_agent_tool_call_returns_sources():
     completions = FakeCompletions(
         [
@@ -122,7 +147,14 @@ async def test_agent_tool_call_returns_sources():
     result = await agent.run("性騷擾申訴期限多久？", use_rag=True)
 
     assert result.rag_used is True
-    assert result.sources == ["性騷擾防治法第13條"]
+    assert result.sources == [
+        {
+            "label": "性騷擾防治法第13條",
+            "type": "law",
+            "collection": "rag_documents",
+            "doc_id": "law-13",
+        }
+    ]
     assert len(completions.calls) == 2
     assert agent.rag.calls[0]["data_type"] == "law"
     tool_message = completions.calls[1]["messages"][-1]
