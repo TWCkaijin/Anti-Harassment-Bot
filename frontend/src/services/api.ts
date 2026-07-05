@@ -20,9 +20,18 @@ export interface ChatRequest {
   image_base64?: string;
 }
 
+export type RagSourceType = "law" | "judgment" | "remedy" | "unknown";
+
+export interface RagSource {
+  label: string;
+  type: RagSourceType;
+  collection?: string;
+  doc_id?: string;
+}
+
 export interface RagInfo {
   status: boolean;
-  sources: string[];
+  sources: Array<RagSource | string>;
 }
 
 export interface ChatResponse {
