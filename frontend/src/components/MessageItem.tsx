@@ -11,6 +11,7 @@ import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
 import React from "react";
 import type { ConversationMessage } from "../hooks/useConversation";
+import type { RagSource, RagSourceType } from "../services/api";
 
 interface MessageItemProps {
   message: ConversationMessage;
@@ -33,11 +34,85 @@ const getEmotionColorClasses = (color?: string) => {
   }
 };
 
+const SOURCE_ORDER: RagSourceType[] = ["law", "judgment", "remedy", "unknown"];
+
+const normalizeSource = (source: RagSource | string): RagSource => {
+  if (typeof source === "string") {
+    return {
+      label: source,
+      type: "law",
+    };
+  }
+  return {
+    label: source.label,
+    type: source.type ?? "unknown",
+    collection: source.collection,
+    doc_id: source.doc_id,
+  };
+};
+
+const getSourceStyle = (type: RagSourceType) => {
+  switch (type) {
+    case "law":
+      return {
+        icon: "menu_book",
+        className: "text-orange-700 bg-orange-50 border-orange-200 hover:bg-orange-100",
+        tooltipClassName: "border-orange-200",
+      };
+    case "judgment":
+      return {
+        icon: "gavel",
+        className: "text-blue-700 bg-blue-50 border-blue-200 hover:bg-blue-100",
+        tooltipClassName: "border-blue-200",
+      };
+    case "remedy":
+      return {
+        icon: "support_agent",
+        className: "text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100",
+        tooltipClassName: "border-emerald-200",
+      };
+    default:
+      return {
+        icon: "database",
+        className: "text-gray-700 bg-gray-50 border-gray-200 hover:bg-gray-100",
+        tooltipClassName: "border-gray-200",
+      };
+  }
+};
+
 export default function MessageItem({ message }: MessageItemProps) {
   const { t } = useI18n();
-  const [showTooltip, setShowTooltip] = React.useState(false);
+  const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
   const isUser = message.role === "user";
   const isError = message.isError;
+  const sourceGroups = React.useMemo(() => {
+    const sources = message.ragUsed?.sources ?? [];
+    const groups = new Map<RagSourceType, RagSource[]>();
+    sources.map(normalizeSource).forEach((source) => {
+      const type = source.type ?? "unknown";
+      const list = groups.get(type) ?? [];
+      if (!list.some((item) => item.label === source.label && item.collection === source.collection)) {
+        list.push(source);
+      }
+      groups.set(type, list);
+    });
+    return SOURCE_ORDER
+      .filter((type) => groups.has(type))
+      .map((type) => ({ type, sources: groups.get(type) ?? [] }));
+  }, [message.ragUsed?.sources]);
+
+  const getSourceTypeLabel = (type: RagSourceType) => {
+    switch (type) {
+      case "law":
+        return t.ragSourceLaw;
+      case "judgment":
+        return t.ragSourceJudgment;
+      case "remedy":
+        return t.ragSourceRemedy;
+      default:
+        return t.ragSourceUnknown;
+    }
+  };
 
   return (
     <div
@@ -121,32 +196,42 @@ export default function MessageItem({ message }: MessageItemProps) {
         {/* 底部標示列 */}
         {!isUser && !isError && (message.ragUsed?.status || message.anonymized) && (
           <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-outline/10">
-            {message.ragUsed?.status && (
-              <div className="group relative flex items-center">
-                <button
-                  onClick={() => setShowTooltip(!showTooltip)}
-                  onBlur={() => setShowTooltip(false)}
-                  className="inline-flex items-center gap-1.5 text-[11px] font-medium text-tertiary bg-primary-container px-2.5 py-1 rounded-full cursor-pointer transition-colors hover:bg-outline/20"
-                >
-                  <MaterialIcon icon="menu_book" size={14} />
-                  {t.ragLabel}
-                </button>
+            {message.ragUsed?.status && sourceGroups.length > 0 && (
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {sourceGroups.map(({ type, sources }) => {
+                  const style = getSourceStyle(type);
+                  const isActive = activeSourceType === type;
+                  return (
+                    <div key={type} className="group relative flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => setActiveSourceType(isActive ? null : type)}
+                        onBlur={() => setActiveSourceType(null)}
+                        className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${style.className}`}
+                        aria-label={`${t.ragLabel}：${getSourceTypeLabel(type)}`}
+                      >
+                        <MaterialIcon icon={style.icon} size={14} />
+                        <span>{getSourceTypeLabel(type)}</span>
+                        <span className="tabular-nums opacity-70">{sources.length}</span>
+                      </button>
 
-                {/* 條文來源 Hover / Click Tooltip */}
-                {message.ragUsed.sources.length > 0 && (
-                  <div
-                    className={`absolute bottom-full left-0 mb-2 w-max max-w-[280px] bg-inverse-surface text-inverse-on-surface text-xs rounded-xl shadow-float z-10 animate-fade-in-up transition-opacity ${showTooltip ? "block" : "hidden group-hover:block"}`}
-                  >
-                    <div className="p-3 border-b border-inverse-on-surface/10 font-bold bg-white/5 rounded-t-xl">
-                      {t.ragTooltipTitle}
+                      <div
+                        className={`absolute bottom-full left-0 z-10 mb-2 hidden w-max max-w-[min(320px,80vw)] rounded-2xl border bg-white text-xs text-on-surface shadow-float group-hover:block ${isActive ? "block" : ""} ${style.tooltipClassName}`}
+                      >
+                        <div className="border-b border-outline/10 px-3 py-2 font-bold">
+                          {getSourceTypeLabel(type)}
+                        </div>
+                        <ul className="max-h-44 space-y-1 overflow-y-auto p-3">
+                          {sources.map((src, i) => (
+                            <li key={`${src.label}-${i}`} className="leading-relaxed">
+                              {src.label}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     </div>
-                    <ul className="p-3 max-h-40 overflow-y-auto list-disc pl-6 space-y-1">
-                      {message.ragUsed.sources.map((src, i) => (
-                        <li key={i}>{src}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                  );
+                })}
               </div>
             )}
             {message.anonymized && (

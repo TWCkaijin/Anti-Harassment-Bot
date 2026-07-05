@@ -48,8 +48,12 @@ const zhTW = {
   hotline113: "113 保護專線",
 
   // ── MessageItem ──
-  ragLabel: "已檢索法律知識庫",
-  ragTooltipTitle: "檢閱的條文：",
+  ragLabel: "已檢索資料庫",
+  ragTooltipTitle: "檢索依據：",
+  ragSourceLaw: "法律條文",
+  ragSourceJudgment: "歷史判決",
+  ragSourceRemedy: "救濟管道",
+  ragSourceUnknown: "其他資料",
   anonymizedLabel: "隱私去識別化保護",
 
   // ── EmergencyFab ──
