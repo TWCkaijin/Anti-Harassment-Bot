@@ -5,6 +5,7 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 from pydantic import Field
@@ -32,8 +33,8 @@ class Settings(BaseSettings):
     )
     openrouter_model: str = Field(default="google/gemma-2-9b-it", description="預設使用的模型")
     openrouter_embedding_model: str = Field(
-        default="openai/text-embedding-3-small",
-        description="OpenRouter Embedding 模型",
+        default="intfloat/multilingual-e5-large",
+        description="OpenRouter Embedding 模型（僅 embedding_provider=openrouter 時使用）",
     )
     openrouter_request_timeout_seconds: float = Field(
         default=60.0,
@@ -45,11 +46,27 @@ class Settings(BaseSettings):
         default="rag_documents",
         description="Firestore RAG 文件 Collection 名稱",
     )
+    rag_judgment_collection_name: str = Field(
+        default="rag_judgments",
+        description="Firestore 判決書向量 Collection 名稱",
+    )
+    rag_remedy_collection_name: str = Field(
+        default="rag_remedies",
+        description="Firestore 救濟資源向量 Collection 名稱",
+    )
     rag_retrieval_top_k: int = Field(
         default=3,
         ge=1,
         le=20,
         description="Agentic RAG 每次工具檢索的文件數量",
+    )
+    embedding_provider: Literal["openrouter", "local"] = Field(
+        default="openrouter",
+        description="Embedding 來源：openrouter 或 local sentence-transformers",
+    )
+    embedding_model: str = Field(
+        default="intfloat/multilingual-e5-large",
+        description="主要 Embedding 模型，預設為 multilingual-e5-large",
     )
 
     # ── Firebase Admin ───────────────────────────────────────────────────

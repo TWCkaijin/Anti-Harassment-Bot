@@ -1,19 +1,24 @@
 from firebase_admin import firestore
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
-from openai import AsyncOpenAI
 
 from backend.app.core.config import get_settings
 from backend.app.core.logger import get_logger
 from backend.app.rag.base import BaseRAG, RAGDocument
+from backend.app.rag.embeddings import EmbeddingClient
 
 logger = get_logger(__name__)
 settings = get_settings()
 
-client = AsyncOpenAI(
-    base_url=settings.openrouter_base_url,
-    api_key=settings.openrouter_api_key,
-    timeout=settings.openrouter_request_timeout_seconds,
-)
+COLLECTIONS_BY_DATA_TYPE = {
+    "law": [settings.rag_collection_name],
+    "judgment": [settings.rag_judgment_collection_name],
+    "remedy": [settings.rag_remedy_collection_name],
+    "all": [
+        settings.rag_collection_name,
+        settings.rag_judgment_collection_name,
+        settings.rag_remedy_collection_name,
+    ],
+}
 
 
 class FirestoreVectorRAG(BaseRAG):
@@ -23,21 +28,23 @@ class FirestoreVectorRAG(BaseRAG):
 
     def __init__(self):
         self.db = firestore.client()
-        self.collection = self.db.collection(settings.rag_collection_name)
+        self.embedding_client = EmbeddingClient()
 
     async def _get_embedding(self, text: str) -> list[float] | None:
-        """使用 OpenRouter 取得字串的 Embedding。"""
+        """取得查詢向量。"""
         try:
-            response = await client.embeddings.create(
-                input=text,
-                model=settings.openrouter_embedding_model,
-            )
-            return response.data[0].embedding
+            return await self.embedding_client.embed(text, mode="query")
         except Exception as e:
-            logger.warning("Failed to get embedding from OpenRouter: %s", e)
+            logger.warning("Failed to get query embedding: %s", e)
             return None
 
-    async def retrieve(self, query: str, top_k: int = 5) -> list[RAGDocument]:
+    async def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        data_type: str = "law",
+        collection_name: str | None = None,
+    ) -> list[RAGDocument]:
         """
         將查詢字串轉為向量，並在 Firestore 進行相似度檢索。
         """
@@ -45,14 +52,39 @@ class FirestoreVectorRAG(BaseRAG):
         if not query_vector:
             return []
 
+        collection_names = (
+            [collection_name] if collection_name else COLLECTIONS_BY_DATA_TYPE.get(data_type)
+        )
+        if not collection_names:
+            logger.warning("Unknown RAG data_type=%s; falling back to law collection.", data_type)
+            collection_names = COLLECTIONS_BY_DATA_TYPE["law"]
+
+        results: list[RAGDocument] = []
+        per_collection_limit = top_k if len(collection_names) == 1 else max(top_k, 1)
+        for target_collection in collection_names:
+            results.extend(
+                self._retrieve_from_collection(
+                    collection_name=target_collection,
+                    query_vector=query_vector,
+                    limit=per_collection_limit,
+                )
+            )
+        return results[:top_k]
+
+    def _retrieve_from_collection(
+        self,
+        collection_name: str,
+        query_vector: list[float],
+        limit: int,
+    ) -> list[RAGDocument]:
         # 使用 find_nearest 進行向量檢索
         # 需在 Firebase Console 中為 embedding 欄位建立 Vector Index
         try:
-            vector_query = self.collection.find_nearest(
+            vector_query = self.db.collection(collection_name).find_nearest(
                 vector_field="embedding",
                 query_vector=query_vector,
                 distance_measure=DistanceMeasure.COSINE,
-                limit=top_k,
+                limit=limit,
             )
 
             docs = vector_query.get()
@@ -68,7 +100,7 @@ class FirestoreVectorRAG(BaseRAG):
                 )
             return results
         except Exception as e:
-            logger.exception("Firestore Vector Search failed: %s", e)
+            logger.exception("Firestore Vector Search failed for %s: %s", collection_name, e)
             return []
 
     async def add_documents(self, documents: list[RAGDocument]) -> None:
