@@ -17,7 +17,6 @@ jobs:
       contents: read
       pull-requests: write  # 允許 PR comment
     env:
-      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'anti-harassment-bot' }}
       FUNCTIONS_REGION: asia-east1
 
     steps:
@@ -114,7 +113,6 @@ jobs:
               "RAG_RETRIEVAL_TOP_K",
               "API_VERSION",
               "ENABLE_ANONYMIZATION",
-              "FIREBASE_PROJECT_ID",
               "AGENT_SYSTEM_PROMPT",
               "ENVIRONMENT",
           ]
@@ -129,7 +127,7 @@ jobs:
         if: steps.filter.outputs.frontend == 'true'
         run: |
           set -e
-          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only hosting --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
+          if ! firebase deploy --only hosting --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
             cat deploy.log
             echo "Firebase hosting deployment failed."
             exit 1
@@ -142,7 +140,7 @@ jobs:
         if: steps.filter.outputs.backend == 'true'
         run: |
           set -e
-          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only functions:api:api --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
+          if ! firebase deploy --only functions:api:api --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
             cat deploy.log
             echo "Firebase functions deployment failed."
             exit 1

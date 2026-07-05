@@ -70,9 +70,6 @@ class Settings(BaseSettings):
     )
 
     # ── Firebase Admin ───────────────────────────────────────────────────
-    firebase_project_id: str = Field(
-        default="anti-harassment-bot", description="Firebase Project ID"
-    )
     firebase_admin_credential_path: Path = Field(
         default=ROOT_DIR / "firebase_admin.json",
         description="Firebase Admin SDK JSON 路徑",

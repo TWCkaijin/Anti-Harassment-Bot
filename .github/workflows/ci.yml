@@ -84,7 +84,6 @@ jobs:
       RAG_RETRIEVAL_TOP_K: ${{ vars.RAG_RETRIEVAL_TOP_K || '3' }}
       API_VERSION: ${{ vars.API_VERSION || '0.1.0' }}
       ENABLE_ANONYMIZATION: ${{ vars.ENABLE_ANONYMIZATION || 'true' }}
-      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'anti-harassment-bot' }}
       ENVIRONMENT: ci
     steps:
       - uses: actions/checkout@v4
