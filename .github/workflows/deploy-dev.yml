@@ -13,7 +13,6 @@ jobs:
       contents: read
       pull-requests: write
     env:
-      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'anti-harassment-bot' }}
       FUNCTIONS_REGION: asia-east1
       PREVIEW_CHANNEL: dev-preview
 
@@ -112,7 +111,6 @@ jobs:
               "RAG_RETRIEVAL_TOP_K",
               "API_VERSION",
               "ENABLE_ANONYMIZATION",
-              "FIREBASE_PROJECT_ID",
               "AGENT_SYSTEM_PROMPT",
               "ENVIRONMENT",
           ]
@@ -126,7 +124,6 @@ jobs:
         if: steps.filter.outputs.backend == 'true'
         run: |
           firebase deploy \
-            --project ${{ env.FIREBASE_PROJECT_ID }} \
             --only functions:api:api_preview \
             --token "${{ secrets.FIREBASE_TOKEN }}" \
             --non-interactive \
@@ -137,7 +134,7 @@ jobs:
         if: steps.filter.outputs.frontend == 'true'
         run: |
           set -e
-          if ! firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} --project ${{ env.FIREBASE_PROJECT_ID }} --token "${{ secrets.FIREBASE_TOKEN }}" --expires 7d --non-interactive > deploy.log 2>&1; then
+          if ! firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} --token "${{ secrets.FIREBASE_TOKEN }}" --expires 7d --non-interactive > deploy.log 2>&1; then
             cat deploy.log
             echo "Firebase hosting deployment failed."
             exit 1
