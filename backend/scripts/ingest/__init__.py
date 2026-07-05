@@ -1,0 +1,1 @@
+"""Firestore ingestion entrypoints."""
