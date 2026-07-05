@@ -5,7 +5,7 @@ description = "性騷擾防治智能 AI — 後端服務"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "google-adk>=2.1.0",
+    "openai>=1.14.0",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.1",
     "python-dotenv>=1.2.2",

@@ -17,7 +17,7 @@ jobs:
       contents: read
       pull-requests: write  # 允許 PR comment
     env:
-      FIREBASE_PROJECT_ID: anti-harassment-bot
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || 'anti-harassment-bot' }}
       FUNCTIONS_REGION: asia-east1
 
     steps:
@@ -87,8 +87,29 @@ jobs:
 
       - name: Write backend .env
         if: steps.filter.outputs.backend == 'true'
+        env:
+          AGENT_SYSTEM_PROMPT: ${{ secrets.AGENT_SYSTEM_PROMPT }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'google/gemini-2.5-pro' }}
+          EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL || 'intfloat/multilingual-e5-large' }}
+          RAG_COLLECTION_NAME: ${{ vars.RAG_COLLECTION_NAME || 'rag_documents' }}
+          RAG_JUDGMENT_COLLECTION_NAME: ${{ vars.RAG_JUDGMENT_COLLECTION_NAME || 'rag_judgments' }}
+          RAG_REMEDY_COLLECTION_NAME: ${{ vars.RAG_REMEDY_COLLECTION_NAME || 'rag_remedies' }}
+          RAG_RETRIEVAL_TOP_K: ${{ vars.RAG_RETRIEVAL_TOP_K || '3' }}
+          API_VERSION: ${{ vars.API_VERSION || '0.1.0' }}
+          ENABLE_ANONYMIZATION: ${{ vars.ENABLE_ANONYMIZATION || 'true' }}
         run: |
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+          echo "OPENROUTER_API_KEY=${OPENROUTER_API_KEY}" > .env
+          echo "OPENROUTER_MODEL=${OPENROUTER_MODEL}" >> .env
+          echo "EMBEDDING_MODEL=${EMBEDDING_MODEL}" >> .env
+          echo "RAG_COLLECTION_NAME=${RAG_COLLECTION_NAME}" >> .env
+          echo "RAG_JUDGMENT_COLLECTION_NAME=${RAG_JUDGMENT_COLLECTION_NAME}" >> .env
+          echo "RAG_REMEDY_COLLECTION_NAME=${RAG_REMEDY_COLLECTION_NAME}" >> .env
+          echo "RAG_RETRIEVAL_TOP_K=${RAG_RETRIEVAL_TOP_K}" >> .env
+          echo "API_VERSION=${API_VERSION}" >> .env
+          echo "ENABLE_ANONYMIZATION=${ENABLE_ANONYMIZATION}" >> .env
+          echo "FIREBASE_PROJECT_ID=${{ env.FIREBASE_PROJECT_ID }}" >> .env
+          echo "AGENT_SYSTEM_PROMPT=${AGENT_SYSTEM_PROMPT}" >> .env
           echo "ENVIRONMENT=production" >> .env
 
       - name: Deploy to Firebase Hosting (production)
