@@ -56,7 +56,8 @@ class FakeVectorQuery:
 
 
 class FakeCollection:
-    def __init__(self):
+    def __init__(self, name: str):
+        self.name = name
         self.kwargs = None
 
     def find_nearest(self, **kwargs):
@@ -64,30 +65,41 @@ class FakeCollection:
         return FakeVectorQuery()
 
 
+class FakeDB:
+    def __init__(self):
+        self.collections = {}
+
+    def collection(self, name: str):
+        collection = FakeCollection(name)
+        self.collections[name] = collection
+        return collection
+
+
 @pytest.mark.asyncio
 async def test_firestore_vector_rag_retrieve_with_mocks(monkeypatch):
     rag = object.__new__(FirestoreVectorRAG)
-    rag.collection = FakeCollection()
+    rag.db = FakeDB()
 
     async def fake_embedding(text: str):
         return [0.1, 0.2, 0.3]
 
     monkeypatch.setattr(rag, "_get_embedding", fake_embedding)
 
-    results = await rag.retrieve("申訴期限", top_k=1)
+    results = await rag.retrieve("申訴期限", top_k=1, data_type="judgment")
 
     assert len(results) == 1
     assert results[0].content == "申訴期限為事件發生後一年內。"
     assert results[0].metadata["source"] == "性騷擾防治法第13條"
-    assert rag.collection.kwargs["vector_field"] == "embedding"
-    assert rag.collection.kwargs["query_vector"] == [0.1, 0.2, 0.3]
-    assert rag.collection.kwargs["limit"] == 1
+    collection = rag.db.collections["rag_judgments"]
+    assert collection.kwargs["vector_field"] == "embedding"
+    assert collection.kwargs["query_vector"] == [0.1, 0.2, 0.3]
+    assert collection.kwargs["limit"] == 1
 
 
 @pytest.mark.asyncio
 async def test_firestore_vector_rag_embedding_failure_returns_empty(monkeypatch):
     rag = object.__new__(FirestoreVectorRAG)
-    rag.collection = FakeCollection()
+    rag.db = FakeDB()
 
     async def missing_embedding(text: str):
         return None
@@ -95,7 +107,7 @@ async def test_firestore_vector_rag_embedding_failure_returns_empty(monkeypatch)
     monkeypatch.setattr(rag, "_get_embedding", missing_embedding)
 
     assert await rag.retrieve("申訴期限") == []
-    assert rag.collection.kwargs is None
+    assert rag.db.collections == {}
 
 
 @pytest.mark.asyncio
@@ -105,7 +117,7 @@ async def test_firestore_vector_rag_query_failure_returns_empty(monkeypatch):
             raise RuntimeError("index missing")
 
     rag = object.__new__(FirestoreVectorRAG)
-    rag.collection = BrokenCollection()
+    rag.db = type("BrokenDB", (), {"collection": lambda self, name: BrokenCollection()})()
 
     async def fake_embedding(text: str):
         return [0.1, 0.2, 0.3]
