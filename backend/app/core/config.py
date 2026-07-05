@@ -32,13 +32,13 @@ class Settings(BaseSettings):
         description="OpenRouter OpenAI-compatible API base URL",
     )
     openrouter_model: str = Field(default="google/gemma-2-9b-it", description="預設使用的模型")
-    openrouter_embedding_model: str = Field(
-        default="intfloat/multilingual-e5-large",
-        description="OpenRouter Embedding 模型（僅 embedding_provider=openrouter 時使用）",
-    )
     openrouter_request_timeout_seconds: float = Field(
         default=60.0,
         description="OpenRouter API request timeout 秒數",
+    )
+    agent_system_prompt: str | None = Field(
+        default=None,
+        description="OpenRouter Agent system prompt；未設定時使用程式內建預設 prompt",
     )
 
     # ── RAG / Firestore Vector Search ─────────────────────────────────────
