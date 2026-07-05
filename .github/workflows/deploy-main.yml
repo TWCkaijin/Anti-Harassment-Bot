@@ -109,7 +109,7 @@ jobs:
         if: steps.filter.outputs.backend == 'true'
         run: |
           set -e
-          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only functions:api --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
+          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only functions:api:api --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
             cat deploy.log
             echo "Firebase functions deployment failed."
             exit 1
