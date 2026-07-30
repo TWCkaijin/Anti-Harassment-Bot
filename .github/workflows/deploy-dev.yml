@@ -85,7 +85,7 @@ jobs:
       - name: Write backend .env
         if: steps.filter.outputs.backend == 'true'
         env:
-          AGENT_SYSTEM_PROMPT: ${{ secrets.AGENT_SYSTEM_PROMPT }}
+          AGENT_SYSTEM_PROMPT: ${{ vars.AGENT_SYSTEM_PROMPT }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'google/gemini-2.5-pro' }}
           EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL || 'intfloat/multilingual-e5-large' }}
