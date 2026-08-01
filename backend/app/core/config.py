@@ -31,14 +31,30 @@ class Settings(BaseSettings):
         default="https://openrouter.ai/api/v1",
         description="OpenRouter OpenAI-compatible API base URL",
     )
-    openrouter_model: str = Field(default="google/gemma-2-9b-it", description="預設使用的模型")
+    openrouter_model: str = Field(
+        default="google/gemini-2.5-pro", description="Firestore 未設定時使用的本地預設模型"
+    )
+    openrouter_temperature: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=2.0,
+        description="模型生成溫度的預設值",
+    )
+    openrouter_top_p: float = Field(
+        default=1.0,
+        gt=0.0,
+        le=1.0,
+        description="模型 nucleus sampling 的預設值",
+    )
+    openrouter_max_tokens: int = Field(
+        default=1200,
+        ge=128,
+        le=8192,
+        description="模型單次輸出的最大 token 數",
+    )
     openrouter_request_timeout_seconds: float = Field(
         default=60.0,
         description="OpenRouter API request timeout 秒數",
-    )
-    agent_system_prompt: str | None = Field(
-        default=None,
-        description="OpenRouter Agent system prompt；未設定時使用程式內建預設 prompt",
     )
 
     # ── RAG / Firestore Vector Search ─────────────────────────────────────
@@ -75,6 +91,25 @@ class Settings(BaseSettings):
         description="Firebase Admin SDK JSON 路徑",
     )
 
+    # ── Runtime Admin / Firestore Runtime Config ─────────────────────────
+    admin_api_key: str | None = Field(
+        default=None,
+        description="Admin API bearer token；未設定時停用 admin 寫入 API",
+    )
+    runtime_config_collection_name: str = Field(
+        default="runtime_config",
+        description="Firestore runtime config collection 名稱",
+    )
+    runtime_config_document_id: str = Field(
+        default="app_dev",
+        description="Firestore runtime config document ID",
+    )
+    runtime_config_cache_ttl_seconds: int = Field(
+        default=30,
+        ge=0,
+        le=3600,
+        description="Runtime config process-local cache TTL 秒數",
+    )
     # ── Flask API ────────────────────────────────────────────────────────
     api_title: str = "性騷擾防治智能 AI API"
     api_version: str = "0.1.0"

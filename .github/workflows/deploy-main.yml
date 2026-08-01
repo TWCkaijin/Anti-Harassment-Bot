@@ -87,16 +87,9 @@ jobs:
       - name: Write backend .env
         if: steps.filter.outputs.backend == 'true'
         env:
-          AGENT_SYSTEM_PROMPT: ${{ secrets.AGENT_SYSTEM_PROMPT }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'google/gemini-2.5-pro' }}
-          EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL || 'intfloat/multilingual-e5-large' }}
-          RAG_COLLECTION_NAME: ${{ vars.RAG_COLLECTION_NAME || 'rag_documents' }}
-          RAG_JUDGMENT_COLLECTION_NAME: ${{ vars.RAG_JUDGMENT_COLLECTION_NAME || 'rag_judgments' }}
-          RAG_REMEDY_COLLECTION_NAME: ${{ vars.RAG_REMEDY_COLLECTION_NAME || 'rag_remedies' }}
-          RAG_RETRIEVAL_TOP_K: ${{ vars.RAG_RETRIEVAL_TOP_K || '3' }}
-          API_VERSION: ${{ vars.API_VERSION || '0.1.0' }}
-          ENABLE_ANONYMIZATION: ${{ vars.ENABLE_ANONYMIZATION || 'true' }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          RUNTIME_CONFIG_DOCUMENT_ID: app_main
           ENVIRONMENT: production
         run: |
           python - <<'PY'
@@ -105,15 +98,8 @@ jobs:
 
           keys = [
               "OPENROUTER_API_KEY",
-              "OPENROUTER_MODEL",
-              "EMBEDDING_MODEL",
-              "RAG_COLLECTION_NAME",
-              "RAG_JUDGMENT_COLLECTION_NAME",
-              "RAG_REMEDY_COLLECTION_NAME",
-              "RAG_RETRIEVAL_TOP_K",
-              "API_VERSION",
-              "ENABLE_ANONYMIZATION",
-              "AGENT_SYSTEM_PROMPT",
+              "ADMIN_API_KEY",
+              "RUNTIME_CONFIG_DOCUMENT_ID",
               "ENVIRONMENT",
           ]
           with open(".env", "w", encoding="utf-8") as env_file:

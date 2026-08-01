@@ -18,6 +18,7 @@ interface SidebarProps {
   onDeleteSession: (id: string) => void;
   onRenameSession: (id: string, newTitle: string) => void;
   onOpenSettings: () => void;
+  onOpenAdmin: () => void;
 }
 
 function formatDate(timestamp: number, t: ReturnType<typeof useI18n>["t"]): string {
@@ -57,6 +58,7 @@ export default function Sidebar({
   onDeleteSession,
   onRenameSession,
   onOpenSettings,
+  onOpenAdmin,
 }: SidebarProps) {
   const { t } = useI18n();
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
@@ -324,7 +326,7 @@ export default function Sidebar({
           </div>
 
           {/* 工具連結列 */}
-          <div className="grid grid-cols-2 gap-4 border-t border-outline/10 pt-6">
+          <div className="grid grid-cols-3 gap-3 border-t border-outline/10 pt-6">
             <a
               href="tel:113"
               className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
@@ -341,6 +343,15 @@ export default function Sidebar({
               <MaterialIcon icon="settings" size={20} />
               <span className="text-xs font-medium">
                 {t.settings}
+              </span>
+            </button>
+            <button
+              onClick={onOpenAdmin}
+              className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
+            >
+              <MaterialIcon icon="admin_panel_settings" size={20} />
+              <span className="text-xs font-medium">
+                Admin
               </span>
             </button>
           </div>

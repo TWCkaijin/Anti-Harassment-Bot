@@ -6,6 +6,7 @@ import pytest
 
 import backend.app.agents.openrouter_agent as agent_module
 from backend.app.agents.openrouter_agent import OpenRouterAgent
+from backend.app.core.runtime_config import RuntimeConfig
 from backend.app.rag.base import RAGDocument
 
 
@@ -64,8 +65,21 @@ class FakeRAG:
     def __init__(self):
         self.calls = []
 
-    async def retrieve(self, query: str, top_k: int = 5, data_type: str = "law"):
-        self.calls.append({"query": query, "top_k": top_k, "data_type": data_type})
+    async def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        data_type: str = "law",
+        collection_names_by_data_type=None,
+    ):
+        self.calls.append(
+            {
+                "query": query,
+                "top_k": top_k,
+                "data_type": data_type,
+                "collection_names_by_data_type": collection_names_by_data_type,
+            }
+        )
         return [
             RAGDocument(
                 content="申訴期限為事件發生後一年內。",
@@ -83,8 +97,27 @@ def make_agent(completions):
     return agent
 
 
+def fake_runtime_config(**overrides):
+    data = {
+        "openrouter_model": "test/model",
+        "rag_retrieval_top_k": 3,
+        "enable_anonymization": True,
+        "temperature": 0.2,
+        "top_p": 1.0,
+        "max_tokens": 1200,
+        "rag_collections": {
+            "law": "rag_documents",
+            "judgment": "rag_judgments",
+            "remedy": "rag_remedies",
+        },
+        "enable_image_upload": True,
+    }
+    data.update(overrides)
+    return RuntimeConfig(**data)
+
+
 @pytest.mark.asyncio
-async def test_agent_returns_without_tool_call():
+async def test_agent_returns_without_tool_call(monkeypatch):
     completions = FakeCompletions(
         [
             FakeResponse(
@@ -96,6 +129,7 @@ async def test_agent_returns_without_tool_call():
         ]
     )
     agent = make_agent(completions)
+    monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
 
     result = await agent.run("我有點害怕", use_rag=True)
 
@@ -103,10 +137,13 @@ async def test_agent_returns_without_tool_call():
     assert result.rag_used is False
     assert result.sources == []
     assert "tools" in completions.calls[0]
+    assert completions.calls[0]["temperature"] == 0.2
+    assert completions.calls[0]["top_p"] == 1.0
+    assert completions.calls[0]["max_tokens"] == 1200
 
 
 @pytest.mark.asyncio
-async def test_agent_uses_configured_system_prompt(monkeypatch):
+async def test_agent_uses_firestore_prompt_sections(monkeypatch):
     completions = FakeCompletions(
         [
             FakeResponse(
@@ -118,19 +155,40 @@ async def test_agent_uses_configured_system_prompt(monkeypatch):
         ]
     )
     agent = make_agent(completions)
-    monkeypatch.setattr(agent_module.settings, "agent_system_prompt", "第一行\\n第二行")
+    monkeypatch.setattr(
+        agent_module,
+        "get_runtime_config",
+        lambda: fake_runtime_config(agent_prompt_sections={"language": "第一行\n第二行"}),
+    )
 
     await agent.run("測試 prompt", use_rag=False)
 
     assert completions.calls[0]["messages"][0] == {
         "role": "system",
-        "content": "第一行\n第二行",
+        "content": agent_module._assemble_system_instruction({"language": "第一行\n第二行"}),
     }
     assert "tools" not in completions.calls[0]
 
 
+def test_firestore_sections_override_local_prompt_defaults():
+    runtime_config = fake_runtime_config(
+        agent_prompt_sections={"language": "Firestore language rules"},
+    )
+
+    instruction = agent_module._get_system_instruction(runtime_config)
+
+    assert "## 語言\nFirestore language rules" in instruction
+    assert "## 你的核心使命" in instruction
+
+
+def test_missing_firestore_sections_use_built_in_prompt():
+    instruction = agent_module._get_system_instruction(fake_runtime_config())
+
+    assert instruction == agent_module._DEFAULT_SYSTEM_INSTRUCTION
+
+
 @pytest.mark.asyncio
-async def test_agent_tool_call_returns_sources():
+async def test_agent_tool_call_returns_sources(monkeypatch):
     completions = FakeCompletions(
         [
             FakeResponse(FakeMessage(tool_calls=[FakeToolCall("申訴期限")])),
@@ -143,6 +201,7 @@ async def test_agent_tool_call_returns_sources():
         ]
     )
     agent = make_agent(completions)
+    monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
 
     result = await agent.run("性騷擾申訴期限多久？", use_rag=True)
 
@@ -156,14 +215,23 @@ async def test_agent_tool_call_returns_sources():
         }
     ]
     assert len(completions.calls) == 2
+    assert completions.calls[0]["temperature"] == completions.calls[1]["temperature"]
+    assert completions.calls[0]["top_p"] == completions.calls[1]["top_p"]
+    assert completions.calls[0]["max_tokens"] == completions.calls[1]["max_tokens"]
     assert agent.rag.calls[0]["data_type"] == "law"
+    assert agent.rag.calls[0]["top_k"] == 3
+    assert agent.rag.calls[0]["collection_names_by_data_type"] == {
+        "law": "rag_documents",
+        "judgment": "rag_judgments",
+        "remedy": "rag_remedies",
+    }
     tool_message = completions.calls[1]["messages"][-1]
     assert tool_message["role"] == "tool"
     assert "[參考資料 - 性騷擾防治法第13條]" in tool_message["content"]
 
 
 @pytest.mark.asyncio
-async def test_agent_tool_call_passes_judgment_data_type():
+async def test_agent_tool_call_passes_judgment_data_type(monkeypatch):
     completions = FakeCompletions(
         [
             FakeResponse(FakeMessage(tool_calls=[FakeToolCall("類似判決", data_type="judgment")])),
@@ -176,6 +244,7 @@ async def test_agent_tool_call_passes_judgment_data_type():
         ]
     )
     agent = make_agent(completions)
+    monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
 
     await agent.run("有沒有類似判決？", use_rag=True)
 
@@ -183,7 +252,7 @@ async def test_agent_tool_call_passes_judgment_data_type():
 
 
 @pytest.mark.asyncio
-async def test_agent_use_rag_false_does_not_send_tools():
+async def test_agent_use_rag_false_does_not_send_tools(monkeypatch):
     completions = FakeCompletions(
         [
             FakeResponse(
@@ -195,6 +264,7 @@ async def test_agent_use_rag_false_does_not_send_tools():
         ]
     )
     agent = make_agent(completions)
+    monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
 
     result = await agent.run("不要查資料", use_rag=False)
 
@@ -204,12 +274,13 @@ async def test_agent_use_rag_false_does_not_send_tools():
 
 
 @pytest.mark.asyncio
-async def test_agent_openrouter_error_returns_fallback():
+async def test_agent_openrouter_error_returns_fallback(monkeypatch):
     class FailingCompletions:
         async def create(self, **kwargs):
             raise RuntimeError("network down")
 
     agent = make_agent(FailingCompletions())
+    monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
 
     result = await agent.run("你好", use_rag=True)
 
