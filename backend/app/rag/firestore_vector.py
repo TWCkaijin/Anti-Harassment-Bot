@@ -1,24 +1,11 @@
 from firebase_admin import firestore
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 
-from backend.app.core.config import get_settings
 from backend.app.core.logger import get_logger
 from backend.app.rag.base import BaseRAG, RAGDocument
 from backend.app.rag.embeddings import EmbeddingClient
 
 logger = get_logger(__name__)
-settings = get_settings()
-
-COLLECTIONS_BY_DATA_TYPE = {
-    "law": [settings.rag_collection_name],
-    "judgment": [settings.rag_judgment_collection_name],
-    "remedy": [settings.rag_remedy_collection_name],
-    "all": [
-        settings.rag_collection_name,
-        settings.rag_judgment_collection_name,
-        settings.rag_remedy_collection_name,
-    ],
-}
 
 
 class FirestoreVectorRAG(BaseRAG):
@@ -44,6 +31,7 @@ class FirestoreVectorRAG(BaseRAG):
         top_k: int = 5,
         data_type: str = "law",
         collection_name: str | None = None,
+        collection_names_by_data_type: dict[str, str] | None = None,
     ) -> list[RAGDocument]:
         """
         將查詢字串轉為向量，並在 Firestore 進行相似度檢索。
@@ -52,12 +40,23 @@ class FirestoreVectorRAG(BaseRAG):
         if not query_vector:
             return []
 
+        configured_collections = collection_names_by_data_type or {}
+        collections_by_data_type = {
+            "law": [configured_collections.get("law", "rag_documents")],
+            "judgment": [configured_collections.get("judgment", "rag_judgments")],
+            "remedy": [configured_collections.get("remedy", "rag_remedies")],
+            "all": [
+                configured_collections.get("law", "rag_documents"),
+                configured_collections.get("judgment", "rag_judgments"),
+                configured_collections.get("remedy", "rag_remedies"),
+            ],
+        }
         collection_names = (
-            [collection_name] if collection_name else COLLECTIONS_BY_DATA_TYPE.get(data_type)
+            [collection_name] if collection_name else collections_by_data_type.get(data_type)
         )
         if not collection_names:
             logger.warning("Unknown RAG data_type=%s; falling back to law collection.", data_type)
-            collection_names = COLLECTIONS_BY_DATA_TYPE["law"]
+            collection_names = collections_by_data_type["law"]
 
         results: list[RAGDocument] = []
         per_collection_limit = top_k if len(collection_names) == 1 else max(top_k, 1)
