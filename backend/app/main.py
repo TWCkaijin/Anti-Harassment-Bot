@@ -9,6 +9,7 @@ from firebase_admin import credentials
 from flask import Flask, jsonify
 from flask_cors import CORS
 
+from backend.app.api.admin import admin_bp
 from backend.app.api.chat import chat_bp
 from backend.app.api.health import health_bp
 from backend.app.core.config import get_settings
@@ -47,9 +48,11 @@ CORS(app, resources={r"/*": {"origins": settings.cors_origins}}, supports_creden
 # 支援 /api/v1 (本地與 Firebase Hosting Rewrite)
 app.register_blueprint(health_bp, url_prefix="/api/v1/health")
 app.register_blueprint(chat_bp, url_prefix="/api/v1/chat")
+app.register_blueprint(admin_bp, url_prefix="/api/v1/admin")
 # 支援 /v1 (直接呼叫 Cloud Function 且無 rewrite 時備用)
 app.register_blueprint(health_bp, url_prefix="/v1/health", name="health_v1")
 app.register_blueprint(chat_bp, url_prefix="/v1/chat", name="chat_v1")
+app.register_blueprint(admin_bp, url_prefix="/v1/admin", name="admin_v1")
 
 
 @app.route("/")

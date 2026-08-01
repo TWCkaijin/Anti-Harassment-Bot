@@ -121,13 +121,64 @@ pnpm run build
 - `Deploy - Preview (dev)`：push 到 `dev` 時，依變更範圍建置前端與/或部署 preview function。
 - `Deploy - Production (main)`：push 到 `main` 時，依變更範圍部署正式 Hosting 與/或 production function；PR targeting `main` 也會執行同一 workflow 的檢查與部署流程設定。
 
+## Runtime Admin Panel
+
+前端側邊欄提供 `Admin` 入口，可在服務執行期間調整 runtime config。每個部署環境只有一份 Firestore runtime document；模型、RAG、開關與 Prompt Sections 都讀寫同一份文件。Admin API 使用 `ADMIN_API_KEY` 驗證，前端只會預填本機儲存的 token，仍須由後端驗證才能進入面板，且每次寫入都會帶上 token。
+
+Runtime config 預設存放於：
+
+- Collection：`runtime_config`
+- dev Document：`app_dev`
+- main Document：`app_main`
+
+可調整欄位包含：
+
+- `openrouter_model`
+- `temperature`
+- `top_p`
+- `max_tokens`
+- `agent_prompt_sections`
+- `rag_retrieval_top_k`
+- `enable_anonymization`
+- `enable_image_upload`
+- `rag_collections.law`
+- `rag_collections.judgment`
+- `rag_collections.remedy`
+- `maintenance_message`
+
+Prompt Sections 儲存在同一份 Firestore document 的 `agent_prompt_sections` map。未設定的 section 只會使用程式碼內建的預設內容；不會再讀取 Firebase Remote Config、GitHub Actions Variables 或整份 legacy prompt。
+
+設定優先順序固定為：
+
+1. 該環境的 Firestore runtime document
+2. 程式碼內建的本地 fallback
+
+`dev` 的 Admin API 僅寫入 `runtime_config/app_dev`；`main` 僅寫入 `runtime_config/app_main`。
+
+Admin API：
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_API_KEY" \
+  https://asia-east1-anti-harassment-bot.cloudfunctions.net/api/v1/admin/config
+```
+
+建立或補齊 Firestore runtime config 文件：
+
+```bash
+curl -X POST -H "Authorization: Bearer $ADMIN_API_KEY" \
+  https://asia-east1-anti-harassment-bot.cloudfunctions.net/api/v1/admin/config/seed
+```
+
 ## 環境變數
 
-請從 `.env.example` 複製 `.env`，並設定必要金鑰與模型參數：
+請從 `.env.example` 複製 `.env`。部署時只有敏感資訊由 GitHub Actions Secrets 注入；所有可在 Admin Panel 調整的 runtime 欄位都應由 Firestore 管理。`.env` 中的非敏感設定僅供本地開發或 Firestore 欄位尚未建立時的 fallback。
 
 - `OPENROUTER_API_KEY`
 - `OPENROUTER_BASE_URL`
 - `OPENROUTER_MODEL`
+- `OPENROUTER_TEMPERATURE`
+- `OPENROUTER_TOP_P`
+- `OPENROUTER_MAX_TOKENS`
 - `EMBEDDING_PROVIDER`
 - `EMBEDDING_MODEL`
 - `RAG_COLLECTION_NAME`
@@ -135,11 +186,15 @@ pnpm run build
 - `RAG_REMEDY_COLLECTION_NAME`
 - `RAG_RETRIEVAL_TOP_K`
 - `FIREBASE_ADMIN_CREDENTIAL_PATH`
+- `ADMIN_API_KEY`
+- `RUNTIME_CONFIG_COLLECTION_NAME`
+- `RUNTIME_CONFIG_DOCUMENT_ID`
+- `RUNTIME_CONFIG_CACHE_TTL_SECONDS`
 - `CORS_ORIGINS`
 - `ENABLE_ANONYMIZATION`
 - `ENVIRONMENT`
 
-GitHub Actions 部署需要在 repository secrets / variables 中設定 Firebase 與 OpenRouter 相關值，例如 `FIREBASE_TOKEN`、`FIREBASE_SERVICE_ACCOUNT_JSON`、`OPENROUTER_API_KEY` 與模型設定。
+GitHub Actions 部署只需要設定 Secrets：`FIREBASE_TOKEN`、`FIREBASE_SERVICE_ACCOUNT_JSON`、`OPENROUTER_API_KEY` 與 `ADMIN_API_KEY`。不要再設定模型、RAG、匿名化或 Prompt 的 GitHub Actions Variables；它們的雲端來源是 Firestore runtime config。
 
 ## 資料匯入
 

@@ -2,7 +2,27 @@
 
 from backend.app.agents import AgentResult
 from backend.app.api import chat as chat_module
+from backend.app.core.runtime_config import RuntimeConfig
 from backend.app.main import app
+
+
+def fake_runtime_config(**overrides):
+    data = {
+        "openrouter_model": "test/model",
+        "rag_retrieval_top_k": 3,
+        "enable_anonymization": True,
+        "temperature": 0.2,
+        "top_p": 1.0,
+        "max_tokens": 1200,
+        "rag_collections": {
+            "law": "rag_documents",
+            "judgment": "rag_judgments",
+            "remedy": "rag_remedies",
+        },
+        "enable_image_upload": True,
+    }
+    data.update(overrides)
+    return RuntimeConfig(**data)
 
 
 def test_health_check():
@@ -38,6 +58,7 @@ def test_chat_response_shape(monkeypatch):
             )
 
     monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(chat_module, "get_runtime_config", lambda: fake_runtime_config())
 
     client = app.test_client()
     response = client.post(
@@ -76,6 +97,7 @@ def test_chat_passes_use_rag_false(monkeypatch):
             )
 
     monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(chat_module, "get_runtime_config", lambda: fake_runtime_config())
 
     client = app.test_client()
     response = client.post(
@@ -98,6 +120,7 @@ def test_chat_repairs_bare_newlines_inside_json_string(monkeypatch):
             )
 
     monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(chat_module, "get_runtime_config", lambda: fake_runtime_config())
 
     client = app.test_client()
     response = client.post(
