@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, ValidationError
 from backend.app.agents.openrouter_agent import OpenRouterAgent
 from backend.app.core.anonymizer import anonymize, anonymize_messages
 from backend.app.core.logger import get_logger
+from backend.app.core.runtime_config import get_runtime_config
 
 logger = get_logger(__name__)
 
@@ -121,15 +122,22 @@ def chat():
         return jsonify({"detail": str(e)}), 400
 
     agent = get_agent()
+    runtime_config = get_runtime_config()
 
     # 1. 匿名化當前訊息
-    anon_result = anonymize(req_obj.message)
-    anonymized_message = anon_result.anonymized
-    was_anonymized = anon_result.was_modified
+    if runtime_config.enable_anonymization:
+        anon_result = anonymize(req_obj.message)
+        anonymized_message = anon_result.anonymized
+        was_anonymized = anon_result.was_modified
+    else:
+        anonymized_message = req_obj.message
+        was_anonymized = False
 
     # 2. 匿名化歷史訊息（批次處理）
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in req_obj.history]
-    anonymized_history = anonymize_messages(history_dicts)
+    anonymized_history = (
+        anonymize_messages(history_dicts) if runtime_config.enable_anonymization else history_dicts
+    )
 
     async def _run_chat_logic():
         # 3. 呼叫 OpenRouter Agent (內部已實作 Agentic RAG)
@@ -139,7 +147,7 @@ def chat():
             reply = await agent.run(
                 user_message=anonymized_message,
                 history=anonymized_history,
-                image_base64=req_obj.image_base64,
+                image_base64=req_obj.image_base64 if runtime_config.enable_image_upload else None,
                 use_rag=req_obj.use_rag,
             )
             return reply.reply, session_id, reply.rag_used, reply.sources or []
