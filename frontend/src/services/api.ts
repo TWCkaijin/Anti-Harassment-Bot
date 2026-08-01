@@ -50,6 +50,42 @@ export interface HealthResponse {
   environment: string;
 }
 
+export interface RuntimeConfig {
+  openrouter_model: string;
+  rag_retrieval_top_k: number;
+  enable_anonymization: boolean;
+  temperature: number;
+  top_p: number;
+  max_tokens: number;
+  agent_prompt_sections: Record<string, string>;
+  rag_collections: {
+    law: string;
+    judgment: string;
+    remedy: string;
+  };
+  maintenance_message?: string;
+  enable_image_upload: boolean;
+  source: string;
+  updated_at?: string;
+  updated_by?: string;
+}
+
+export type RuntimeConfigUpdate = Partial<
+  Pick<
+    RuntimeConfig,
+    | "openrouter_model"
+    | "rag_retrieval_top_k"
+    | "enable_anonymization"
+    | "temperature"
+    | "top_p"
+    | "max_tokens"
+    | "agent_prompt_sections"
+    | "rag_collections"
+    | "maintenance_message"
+    | "enable_image_upload"
+  >
+>;
+
 // ── API 錯誤類別 ─────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
@@ -76,11 +112,11 @@ async function apiFetch<T>(
 ): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
   const response = await fetch(url, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...options.headers,
     },
-    ...options,
   });
 
   if (!response.ok) {
@@ -118,4 +154,34 @@ export async function sendChat(request: ChatRequest): Promise<ChatResponse> {
  */
 export async function checkHealth(): Promise<HealthResponse> {
   return apiFetch<HealthResponse>("/v1/health/");
+}
+
+export async function getRuntimeConfig(adminToken: string): Promise<RuntimeConfig> {
+  return apiFetch<RuntimeConfig>("/v1/admin/config", {
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+    },
+  });
+}
+
+export async function updateRuntimeConfig(
+  adminToken: string,
+  request: RuntimeConfigUpdate
+): Promise<RuntimeConfig> {
+  return apiFetch<RuntimeConfig>("/v1/admin/config", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+    },
+    body: JSON.stringify(request),
+  });
+}
+
+export async function seedRuntimeConfig(adminToken: string): Promise<RuntimeConfig> {
+  return apiFetch<RuntimeConfig>("/v1/admin/config/seed", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+    },
+  });
 }

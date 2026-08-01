@@ -8,10 +8,12 @@ import { useConversation } from "./hooks/useConversation";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
 import SettingsPanel from "./components/SettingsPanel";
+import AdminPanel from "./components/AdminPanel";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const {
     sessions,
@@ -31,6 +33,11 @@ export default function App() {
     setSidebarOpen(false);
   }, []);
 
+  const handleOpenAdmin = useCallback(() => {
+    setAdminOpen(true);
+    setSidebarOpen(false);
+  }, []);
+
   return (
     <div className="flex w-full h-dvh bg-background overflow-hidden">
       {/* 側邊欄 */}
@@ -44,6 +51,7 @@ export default function App() {
         onDeleteSession={deleteSession}
         onRenameSession={renameSession}
         onOpenSettings={handleOpenSettings}
+        onOpenAdmin={handleOpenAdmin}
       />
 
       {/* 主要對話區 */}
@@ -62,6 +70,11 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         sessions={sessions}
         onClearAll={clearAllSessions}
+      />
+
+      <AdminPanel
+        isOpen={adminOpen}
+        onClose={() => setAdminOpen(false)}
       />
     </div>
   );
