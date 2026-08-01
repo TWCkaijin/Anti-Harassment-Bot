@@ -284,9 +284,7 @@ def _default_runtime_document() -> dict[str, Any]:
     }
 
 
-def _missing_runtime_defaults(
-    existing: dict[str, Any], defaults: dict[str, Any]
-) -> dict[str, Any]:
+def _missing_runtime_defaults(existing: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
     """Fill missing settings while preserving existing scalar and map values."""
     missing: dict[str, Any] = {}
     for key, default_value in defaults.items():
