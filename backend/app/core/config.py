@@ -48,9 +48,9 @@ class Settings(BaseSettings):
     )
     openrouter_max_tokens: int = Field(
         default=1200,
-        ge=128,
+        ge=0,
         le=8192,
-        description="模型單次輸出的最大 token 數",
+        description="模型單次輸出的最大 token 數；0 表示不傳送上限",
     )
     openrouter_request_timeout_seconds: float = Field(
         default=60.0,

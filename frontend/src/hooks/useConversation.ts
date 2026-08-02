@@ -19,6 +19,7 @@ export interface ConversationMessage {
   isError?: boolean;
   emotion?: string; // 加入的情緒標籤
   emotionColor?: string; // 情緒對應的顏色
+  suggestedReplies?: string[];
   imageUrl?: string; // 圖片預覽網址 (僅 frontend 顯示用)
 }
 
@@ -35,11 +36,17 @@ const STORAGE_KEY = "harass_bot_conversations";
 const MAX_SESSIONS = 10;
 const MAX_MESSAGES_PER_SESSION = 100;
 const MAX_HISTORY_TO_SEND = 20; // 每次最多傳送最近 20 輪給後端
+const MAX_RETRYABLE_CHAT_ATTEMPTS = 2;
+const RETRY_MESSAGE = "伺服器回傳錯誤，正在重試中";
 
 // ── 輔助函式 ─────────────────────────────────────────────────────────────
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function loadSessions(): ConversationSession[] {
@@ -81,11 +88,13 @@ export function useConversation(sessionId?: string) {
 
   const [sessions, setSessions] = useState<ConversationSession[]>(initialState.sessions);
   const [currentSessionId, setCurrentSessionId] = useState<string>(initialState.currentSessionId);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loadingSessionIds, setLoadingSessionIds] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
+  const [retryStatusBySession, setRetryStatusBySession] = useState<Record<string, string>>({});
 
   // 同步到 localStorage
   const sessionsRef = useRef(sessions);
+  const loadingSessionIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     sessionsRef.current = sessions;
   });
@@ -94,6 +103,28 @@ export function useConversation(sessionId?: string) {
     saveSessions(sessions);
   }, [sessions]);
 
+  const setSessionLoading = useCallback((id: string, isLoading: boolean) => {
+    const next = new Set(loadingSessionIdsRef.current);
+    if (isLoading) {
+      next.add(id);
+    } else {
+      next.delete(id);
+    }
+    loadingSessionIdsRef.current = next;
+    setLoadingSessionIds(next);
+  }, []);
+
+  const setSessionRetryStatus = useCallback((id: string, status: string | null) => {
+    setRetryStatusBySession((previous) => {
+      if (status === null) {
+        const next = { ...previous };
+        delete next[id];
+        return next;
+      }
+      return { ...previous, [id]: status };
+    });
+  }, []);
+
   // ── 取得當前 Session ───────────────────────────────────────────────────
 
   const currentSession = sessions.find((s) => s.id === currentSessionId);
@@ -101,6 +132,8 @@ export function useConversation(sessionId?: string) {
     () => currentSession?.messages ?? [],
     [currentSession?.messages]
   );
+  const isLoading = loadingSessionIds.has(currentSessionId);
+  const retryStatus = retryStatusBySession[currentSessionId] ?? null;
 
   // ── 建立新 Session ─────────────────────────────────────────────────────
 
@@ -135,10 +168,17 @@ export function useConversation(sessionId?: string) {
 
   const sendMessage = useCallback(
     async (userInput: string, imageBase64?: string, imageUrl?: string) => {
-      if ((!userInput.trim() && !imageBase64) || isLoading) return;
+      const targetSessionId = currentSessionId;
+      if (
+        (!userInput.trim() && !imageBase64) ||
+        loadingSessionIdsRef.current.has(targetSessionId)
+      ) {
+        return;
+      }
 
       setError(null);
-      setIsLoading(true);
+      setSessionRetryStatus(targetSessionId, null);
+      setSessionLoading(targetSessionId, true);
 
       // 建立使用者訊息
       const userMsg: ConversationMessage = {
@@ -152,7 +192,7 @@ export function useConversation(sessionId?: string) {
       // 先將使用者訊息加入畫面
       setSessions((prev) =>
         prev.map((s) =>
-          s.id === currentSessionId
+          s.id === targetSessionId
             ? {
                 ...s,
                 messages: [...s.messages, userMsg].slice(-MAX_MESSAGES_PER_SESSION),
@@ -167,12 +207,33 @@ export function useConversation(sessionId?: string) {
         .map(({ role, content }) => ({ role, content }));
 
       try {
-        const response: ChatResponse = await sendChat({
-          message: userInput.trim(),
-          history: recentHistory,
-          use_rag: true,
-          image_base64: imageBase64,
-        });
+        let response: ChatResponse | undefined;
+        for (let attempt = 0; attempt <= MAX_RETRYABLE_CHAT_ATTEMPTS; attempt += 1) {
+          try {
+            response = await sendChat({
+              message: userInput.trim(),
+              history: recentHistory,
+              use_rag: true,
+              image_base64: imageBase64,
+            });
+            break;
+          } catch (err) {
+            if (
+              err instanceof ApiError &&
+              err.retryable &&
+              attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
+            ) {
+              setSessionRetryStatus(targetSessionId, RETRY_MESSAGE);
+              await delay(500 * (attempt + 1));
+              continue;
+            }
+            throw err;
+          }
+        }
+
+        if (!response) {
+          throw new Error("Chat response is missing after retry attempts");
+        }
 
         const assistantMsg: ConversationMessage = {
           id: generateId(),
@@ -181,11 +242,12 @@ export function useConversation(sessionId?: string) {
           timestamp: Date.now(),
           anonymized: response.anonymized,
           ragUsed: response.rag_used,
+          suggestedReplies: response.suggested_replies,
         };
 
         setSessions((prev) =>
           prev.map((s) => {
-            if (s.id !== currentSessionId) return s;
+            if (s.id !== targetSessionId) return s;
 
             // 更新使用者的訊息：加入 emotion 標籤
             const newMessages = [...s.messages];
@@ -207,7 +269,7 @@ export function useConversation(sessionId?: string) {
       } catch (err) {
         const errorMsg =
           err instanceof ApiError
-            ? `服務暫時無法使用：${err.detail ?? err.message}`
+            ? `服務暫時無法使用：${err.debugMessage ?? err.detail ?? err.message}`
             : "網路連線失敗，請稍後再試";
 
         setError(errorMsg);
@@ -222,16 +284,17 @@ export function useConversation(sessionId?: string) {
         };
         setSessions((prev) =>
           prev.map((s) =>
-            s.id === currentSessionId
+            s.id === targetSessionId
               ? { ...s, messages: [...s.messages, errorBubble] }
               : s
           )
         );
       } finally {
-        setIsLoading(false);
+        setSessionRetryStatus(targetSessionId, null);
+        setSessionLoading(targetSessionId, false);
       }
     },
-    [currentSessionId, isLoading, messages]
+    [currentSessionId, messages, setSessionLoading, setSessionRetryStatus]
   );
 
   // ── 清除當前 Session ──────────────────────────────────────────────────
@@ -249,11 +312,13 @@ export function useConversation(sessionId?: string) {
   const deleteSession = useCallback(
     (id: string) => {
       setSessions((prev) => prev.filter((s) => s.id !== id));
+      setSessionLoading(id, false);
+      setSessionRetryStatus(id, null);
       if (id === currentSessionId) {
         createNewSession();
       }
     },
-    [currentSessionId, createNewSession]
+    [currentSessionId, createNewSession, setSessionLoading, setSessionRetryStatus]
   );
 
   // ── 重新命名 Session ───────────────────────────────────────────────────
@@ -279,6 +344,9 @@ export function useConversation(sessionId?: string) {
     setSessions([newSession]);
     setCurrentSessionId(newId);
     setError(null);
+    loadingSessionIdsRef.current = new Set();
+    setLoadingSessionIds(new Set());
+    setRetryStatusBySession({});
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -293,6 +361,7 @@ export function useConversation(sessionId?: string) {
     messages,
     isLoading,
     error,
+    retryStatus,
     sendMessage,
     createNewSession,
     setCurrentSessionId,

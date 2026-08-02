@@ -2,16 +2,23 @@
  * ChatInput — 底部輸入列 (Stitch 新版對話內頁 v0.1)
  * 白底藥丸形狀 + 淡橘色邊框 + 掃描圖示 + 動態發送按鈕。
  */
-import { useRef, useState, type KeyboardEvent, type ChangeEvent } from "react";
+import {
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type KeyboardEvent,
+} from "react";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
 
 interface ChatInputProps {
   onSend: (message: string, imageBase64?: string, imageUrl?: string) => void;
   isLoading?: boolean;
+  suggestedReplies?: string[];
 }
 
-export default function ChatInput({ onSend, isLoading }: ChatInputProps) {
+export default function ChatInput({ onSend, isLoading, suggestedReplies = [] }: ChatInputProps) {
   const { t } = useI18n();
   const [value, setValue] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -21,17 +28,20 @@ export default function ChatInput({ onSend, isLoading }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const selectImage = (file: File) => {
+    if (!file.type.startsWith("image/")) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert("圖片大小不能超過 5MB");
+      return;
+    }
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+  };
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert("圖片大小不能超過 5MB");
-        return;
-      }
-      setSelectedFile(file);
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
-    }
+    if (file) selectImage(file);
   };
 
   const removeFile = () => {
@@ -55,6 +65,7 @@ export default function ChatInput({ onSend, isLoading }: ChatInputProps) {
   };
 
   const handleSend = async () => {
+    if (isLoading) return;
     const trimmed = value.trim();
     if (!trimmed && !selectedFile) return;
 
@@ -81,6 +92,13 @@ export default function ChatInput({ onSend, isLoading }: ChatInputProps) {
     }
   };
 
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const image = Array.from(event.clipboardData.files).find((file) =>
+      file.type.startsWith("image/")
+    );
+    if (image) selectImage(image);
+  };
+
   const handleInput = () => {
     const el = textareaRef.current;
     if (el) {
@@ -94,6 +112,25 @@ export default function ChatInput({ onSend, isLoading }: ChatInputProps) {
   return (
     <footer className="px-6 lg:px-10 pb-6 lg:pb-10 bg-transparent">
       <div className="w-full relative">
+        {suggestedReplies.length > 0 && (
+          <section className="mb-3" aria-label="建議提問">
+            <p className="mb-2 text-xs font-semibold text-on-surface/60">建議提問</p>
+            <div className="flex flex-wrap gap-2">
+              {suggestedReplies.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => onSend(suggestion)}
+                  disabled={isLoading}
+                  className="max-w-full rounded-lg border border-primary/20 bg-white px-3 py-2 text-left text-xs font-medium text-primary shadow-sm transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         {previewUrl && (
           <div className="mb-3 relative inline-block">
             <img src={previewUrl} alt="Preview" className="h-20 w-auto rounded-lg object-cover border border-primary/20 shadow-sm" />
@@ -131,11 +168,11 @@ export default function ChatInput({ onSend, isLoading }: ChatInputProps) {
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onInput={handleInput}
             placeholder={t.inputPlaceholder}
             rows={1}
-            disabled={isLoading}
-            className="flex-1 bg-transparent border-none focus:border-none focus:ring-0 outline-none focus:outline-none px-2 lg:px-4 py-2.5 text-on-surface placeholder:text-on-surface/30 font-medium resize-none leading-relaxed disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-transparent border-none focus:border-none focus:ring-0 outline-none focus:outline-none px-2 lg:px-4 py-2.5 text-on-surface placeholder:text-on-surface/30 font-medium resize-none leading-relaxed"
             style={{ maxHeight: "160px" }}
           />
 

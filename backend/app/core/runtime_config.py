@@ -38,6 +38,7 @@ WRITABLE_FIELDS = {
     "rag_collections",
     "maintenance_message",
     "enable_image_upload",
+    "development_mode",
 }
 
 
@@ -55,6 +56,7 @@ class RuntimeConfig:
     rag_collections: dict[str, str] = field(default_factory=dict)
     maintenance_message: str | None = None
     enable_image_upload: bool = True
+    development_mode: bool = False
     source: str = "defaults"
     updated_at: str | None = None
     updated_by: str | None = None
@@ -158,6 +160,7 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
         rag_collections=rag_collections,
         maintenance_message=_normalize_prompt(data.get("maintenance_message")),
         enable_image_upload=bool(data.get("enable_image_upload", True)),
+        development_mode=bool(data.get("development_mode", False)),
         source=source,
         updated_at=_timestamp_to_iso(data.get("updated_at")),
         updated_by=data.get("updated_by") if isinstance(data.get("updated_by"), str) else None,
@@ -246,15 +249,15 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
                 max_tokens = int(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError("max_tokens must be an integer") from exc
-            if max_tokens < 128 or max_tokens > 8192:
-                raise ValueError("max_tokens must be between 128 and 8192")
+            if max_tokens < 0 or max_tokens > 8192:
+                raise ValueError("max_tokens must be between 0 and 8192")
             cleaned[key] = max_tokens
         elif key == "rag_retrieval_top_k":
             top_k = int(value)
             if top_k < 1 or top_k > 20:
                 raise ValueError("rag_retrieval_top_k must be between 1 and 20")
             cleaned[key] = top_k
-        elif key in {"enable_anonymization", "enable_image_upload"}:
+        elif key in {"enable_anonymization", "enable_image_upload", "development_mode"}:
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be a boolean")
             cleaned[key] = value
@@ -281,6 +284,7 @@ def _default_runtime_document() -> dict[str, Any]:
         "rag_collections": _default_rag_collections(),
         "maintenance_message": "",
         "enable_image_upload": True,
+        "development_mode": False,
     }
 
 
@@ -331,5 +335,17 @@ def seed_runtime_config_if_missing(updated_by: str = "system") -> RuntimeConfig:
         missing["updated_by"] = updated_by
         missing["updated_at"] = datetime.now(tz=UTC)
         ref.set(missing, merge=True)
+    invalidate_runtime_config_cache()
+    return get_runtime_config(force_refresh=True)
+
+
+def reset_runtime_config(updated_by: str = "admin") -> RuntimeConfig:
+    """Replace the environment document with the application's local defaults."""
+    defaults = _default_runtime_document()
+    defaults["updated_by"] = updated_by
+    defaults["updated_at"] = datetime.now(tz=UTC)
+    firestore.client().collection(settings.runtime_config_collection_name).document(
+        settings.runtime_config_document_id
+    ).set(defaults)
     invalidate_runtime_config_cache()
     return get_runtime_config(force_refresh=True)

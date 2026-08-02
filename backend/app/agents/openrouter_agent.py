@@ -4,6 +4,7 @@ from textwrap import dedent
 
 from openai import AsyncOpenAI
 
+from backend.app.core.chat_response import OPENROUTER_RESPONSE_FORMAT
 from backend.app.core.config import get_settings
 from backend.app.core.logger import get_logger
 from backend.app.core.runtime_config import RuntimeConfig, get_runtime_config
@@ -13,7 +14,7 @@ logger = get_logger(__name__)
 settings = get_settings()
 
 
-_DEFAULT_SYSTEM_INTRO = "你是「守護者」，一位[屏東縣政府性騷擾治理政策]專案底下的AI對話機器人，專門協助性騷擾潛在受害者的 AI 諮詢助理，並正為一般民眾判斷是否可能遭遇性騷擾情況，"
+_DEFAULT_SYSTEM_INTRO = "你是「屏東縣政府性騷擾治理政策」AI 對話機器人，服務對象為一般民眾。你的任務是協助使用者初步理解其描述的情境「可能涉及」性別工作平等法、性別平等教育法或性騷擾防治法的性騷擾處理規範，又或是涉及反覆出現，而且和性或性別相關的跟蹤騷擾防治制。完成法律適用情境判讀後，再提供下一步求助或申訴方向。你不是法院、主管機關或正式調查單位。不得作成確定法律判斷，不得使用「一定構成」「確定違法」「已經成立」等語氣。應使用「可能涉及」「建議進一步諮詢」「仍需由受理機關依個案判斷」等表述。必須優先提供資料庫的救濟管道。"
 
 _DEFAULT_SYSTEM_SECTIONS: tuple[tuple[str, str, str], ...] = (
     (
@@ -85,8 +86,10 @@ _DEFAULT_SYSTEM_SECTIONS: tuple[tuple[str, str, str], ...] = (
             {
               "emotion": "使用者的當前情緒標籤，例如：焦慮、憤怒、恐懼、冷靜、悲傷、未知",
               "emotion_color": "請從以下預定義顏色中選擇：'red' (恐懼/憤怒), 'yellow' (焦慮/緊張), 'green' (冷靜/放鬆), 'blue' (悲傷/低落), 'gray' (未知/一般)",
-              "reply": "你原本準備要回應使用者的完整內容"
+              "reply": "你原本準備要回應使用者的完整內容",
+              "suggested_replies": ["根據你剛剛的回覆，提供 2 到 4 個使用者可直接點選的下一句繁體中文短句"]
             }
+            `suggested_replies` 必須是使用者可能會回答的具體短句，不得與 `reply` 重複，也不得放入解釋文字。
             """
         ).strip(),
     ),
@@ -160,7 +163,7 @@ _RAG_TOOL = {
     "type": "function",
     "function": {
         "name": "retrieve_harassment_knowledge",
-        "description": "當使用者詢問性騷擾法律、判決案例、申訴管道、救濟資源或求助流程時，依資料類型檢索 Firestore 向量資料庫。",
+        "description": "當使用者詢問性騷擾法律、判決案例、申訴管道、救濟資源或求助流程時，依資料類型檢索 Firestore 向量資料庫。若問題同時要求下一步與過往案例、實務經驗或判決，必須選 all，不能只選 remedy。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -171,7 +174,7 @@ _RAG_TOOL = {
                 "data_type": {
                     "type": "string",
                     "enum": ["law", "judgment", "remedy", "all"],
-                    "description": "要查詢的資料類型：law=法規與一般知識，judgment=判決書，remedy=救濟/申訴/求助資源，all=不確定時跨類型查詢",
+                    "description": "要查詢的資料類型：law=法規與一般知識，judgment=判決書，remedy=救濟/申訴/求助資源，all=跨類型查詢。使用者提到判決、判例、過往案例、歷史經驗、實務經驗或同時詢問下一步與案例時，選 all。",
                 },
                 "harassment_type": {
                     "type": "string",
@@ -182,6 +185,32 @@ _RAG_TOOL = {
         },
     },
 }
+
+_JUDGMENT_CONTEXT_MARKERS = (
+    "判決",
+    "判例",
+    "案例",
+    "過往",
+    "歷史經驗",
+    "實務經驗",
+    "法院",
+)
+
+
+def _requires_judgment_context(user_message: str) -> bool:
+    """Detect explicit requests for past cases before the model selects a single tool."""
+    return any(marker in user_message for marker in _JUDGMENT_CONTEXT_MARKERS)
+
+
+def _clean_final_response(final_text: str | None) -> str:
+    if not final_text:
+        raise ValueError("OpenRouter returned an empty assistant response")
+    cleaned = final_text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    return cleaned.strip()
 
 
 @dataclass(frozen=True)
@@ -303,14 +332,62 @@ class OpenRouterAgent:
         logger.info("Sending request to OpenRouter (%s)...", model)
 
         try:
+            # Explicit past-case requests do not need a separate LLM tool-selection turn.
+            # Fetch all relevant source types first, then generate the final answer once.
+            if use_rag and _requires_judgment_context(user_message):
+                docs = await self.rag.retrieve(
+                    user_message,
+                    top_k=runtime_config.rag_retrieval_top_k,
+                    data_type="all",
+                    collection_names_by_data_type=runtime_config.rag_collections,
+                )
+                sources: list[dict[str, str]] = []
+                seen_sources: set[tuple[str, str, str | None]] = set()
+                for doc in docs:
+                    source = _source_from_doc(doc, "all", runtime_config)
+                    if not source:
+                        continue
+                    source_key = (source.type, source.label, source.collection)
+                    if source_key not in seen_sources:
+                        seen_sources.add(source_key)
+                        sources.append(source.to_dict())
+                context_text = (
+                    "\n\n---\n\n".join(doc.to_context_string() for doc in docs)
+                    if docs
+                    else "查無相關法規、判決或救濟資料。"
+                )
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": f"以下為已檢索的參考資料，請以此整理回覆：\n\n{context_text}",
+                    }
+                )
+                direct_create_kwargs = {
+                    "model": model,
+                    "messages": messages,
+                    "temperature": runtime_config.temperature,
+                    "top_p": runtime_config.top_p,
+                    "response_format": OPENROUTER_RESPONSE_FORMAT,
+                }
+                if runtime_config.max_tokens > 0:
+                    direct_create_kwargs["max_tokens"] = runtime_config.max_tokens
+                direct_response = await self.client.chat.completions.create(**direct_create_kwargs)
+                return AgentResult(
+                    reply=_clean_final_response(direct_response.choices[0].message.content),
+                    rag_used=bool(docs),
+                    sources=sources,
+                )
+
             # 第一次呼叫：讓模型決定是否要 Tool Call
             create_kwargs = {
                 "model": model,
                 "messages": messages,
                 "temperature": runtime_config.temperature,
                 "top_p": runtime_config.top_p,
-                "max_tokens": runtime_config.max_tokens,
+                "response_format": OPENROUTER_RESPONSE_FORMAT,
             }
+            if runtime_config.max_tokens > 0:
+                create_kwargs["max_tokens"] = runtime_config.max_tokens
             if use_rag:
                 create_kwargs["tools"] = [_RAG_TOOL]
                 create_kwargs["tool_choice"] = "auto"
@@ -332,6 +409,8 @@ class OpenRouterAgent:
                         args = json.loads(tool_call.function.arguments)
                         query = args.get("query", user_message)
                         data_type = args.get("data_type", "law")
+                        if _requires_judgment_context(user_message):
+                            data_type = "all"
                         harassment_type = args.get("harassment_type")
                         if harassment_type:
                             query = f"{harassment_type} {query}"
@@ -373,32 +452,27 @@ class OpenRouterAgent:
 
                 # 第二次呼叫：帶著 Tool 執行結果，讓模型生成最終回應
                 logger.info("Sending tool results back to OpenRouter...")
-                second_response = await self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=runtime_config.temperature,
-                    top_p=runtime_config.top_p,
-                    max_tokens=runtime_config.max_tokens,
-                )
+                second_create_kwargs = {
+                    "model": model,
+                    "messages": messages,
+                    "temperature": runtime_config.temperature,
+                    "top_p": runtime_config.top_p,
+                    "response_format": OPENROUTER_RESPONSE_FORMAT,
+                }
+                if runtime_config.max_tokens > 0:
+                    second_create_kwargs["max_tokens"] = runtime_config.max_tokens
+                second_response = await self.client.chat.completions.create(**second_create_kwargs)
                 final_text = second_response.choices[0].message.content
             else:
                 # 若無 Tool Call，直接回傳
                 final_text = response_message.content
 
-            # 清理可能的 markdown code block
-            if final_text.startswith("```json"):
-                final_text = final_text[7:]
-            if final_text.endswith("```"):
-                final_text = final_text[:-3]
+            return AgentResult(
+                reply=_clean_final_response(final_text),
+                rag_used=rag_used,
+                sources=sources,
+            )
 
-            return AgentResult(reply=final_text.strip(), rag_used=rag_used, sources=sources)
-
-        except Exception as e:
-            logger.error(f"OpenRouter API Error: {e}")
-            # 發生錯誤時的 fallback JSON
-            fallback = {
-                "emotion": "未知",
-                "emotion_color": "gray",
-                "reply": "系統目前無法連線至 AI 引擎，請稍後再試。若有緊急狀況請撥打 113 保護專線。",
-            }
-            return AgentResult(reply=json.dumps(fallback, ensure_ascii=False))
+        except Exception:
+            logger.exception("OpenRouter API Error")
+            raise

@@ -140,6 +140,22 @@ async def test_agent_returns_without_tool_call(monkeypatch):
     assert completions.calls[0]["temperature"] == 0.2
     assert completions.calls[0]["top_p"] == 1.0
     assert completions.calls[0]["max_tokens"] == 1200
+    assert completions.calls[0]["response_format"]["type"] == "json_schema"
+
+
+@pytest.mark.asyncio
+async def test_agent_omits_max_tokens_when_runtime_config_is_unlimited(monkeypatch):
+    completions = FakeCompletions(
+        [FakeResponse(FakeMessage(content='{"emotion":"冷靜"}', tool_calls=None))]
+    )
+    agent = make_agent(completions)
+    monkeypatch.setattr(
+        agent_module, "get_runtime_config", lambda: fake_runtime_config(max_tokens=0)
+    )
+
+    await agent.run("測試", use_rag=False)
+
+    assert "max_tokens" not in completions.calls[0]
 
 
 @pytest.mark.asyncio
@@ -246,9 +262,32 @@ async def test_agent_tool_call_passes_judgment_data_type(monkeypatch):
     agent = make_agent(completions)
     monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
 
-    await agent.run("有沒有類似判決？", use_rag=True)
+    await agent.run("請查詢這個案件的相關資料", use_rag=True)
 
     assert agent.rag.calls[0]["data_type"] == "judgment"
+
+
+@pytest.mark.asyncio
+async def test_agent_directly_retrieves_all_sources_for_past_case_questions(monkeypatch):
+    completions = FakeCompletions(
+        [
+            FakeResponse(
+                FakeMessage(
+                    content='{"emotion":"冷靜","emotion_color":"green","reply":"先整理證據。"}',
+                    tool_calls=None,
+                )
+            )
+        ]
+    )
+    agent = make_agent(completions)
+    monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
+
+    result = await agent.run("我下一步該做什麼？根據過往歷史經驗，我要準備什麼？")
+
+    assert result.rag_used is True
+    assert agent.rag.calls[0]["data_type"] == "all"
+    assert len(completions.calls) == 1
+    assert "tools" not in completions.calls[0]
 
 
 @pytest.mark.asyncio
@@ -282,8 +321,5 @@ async def test_agent_openrouter_error_returns_fallback(monkeypatch):
     agent = make_agent(FailingCompletions())
     monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
 
-    result = await agent.run("你好", use_rag=True)
-
-    assert result.rag_used is False
-    assert result.sources == []
-    assert "系統目前無法連線至 AI 引擎" in result.reply
+    with pytest.raises(RuntimeError, match="network down"):
+        await agent.run("你好", use_rag=True)

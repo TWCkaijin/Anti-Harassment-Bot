@@ -41,6 +41,7 @@ export interface ChatResponse {
   rag_used: RagInfo;
   emotion?: string;
   emotion_color?: string;
+  suggested_replies: string[];
 }
 
 export interface HealthResponse {
@@ -65,6 +66,7 @@ export interface RuntimeConfig {
   };
   maintenance_message?: string;
   enable_image_upload: boolean;
+  development_mode: boolean;
   source: string;
   updated_at?: string;
   updated_by?: string;
@@ -83,6 +85,7 @@ export type RuntimeConfigUpdate = Partial<
     | "rag_collections"
     | "maintenance_message"
     | "enable_image_upload"
+    | "development_mode"
   >
 >;
 
@@ -91,16 +94,22 @@ export type RuntimeConfigUpdate = Partial<
 export class ApiError extends Error {
   readonly status: number;
   readonly detail?: string;
+  readonly retryable: boolean;
+  readonly debugMessage?: string;
 
   constructor(
     status: number,
     message: string,
-    detail?: string
+    detail?: string,
+    retryable = false,
+    debugMessage?: string
   ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
+    this.retryable = retryable;
+    this.debugMessage = debugMessage;
   }
 }
 
@@ -121,16 +130,22 @@ async function apiFetch<T>(
 
   if (!response.ok) {
     let detail: string | undefined;
+    let retryable = false;
+    let debugMessage: string | undefined;
     try {
       const errorData = await response.json();
       detail = errorData.detail ?? undefined;
+      retryable = errorData.retryable === true;
+      debugMessage = errorData.debug_message ?? undefined;
     } catch {
       // 非 JSON 回應
     }
     throw new ApiError(
       response.status,
       `API 請求失敗 (${response.status})`,
-      detail
+      detail,
+      retryable,
+      debugMessage
     );
   }
 
@@ -179,6 +194,15 @@ export async function updateRuntimeConfig(
 
 export async function seedRuntimeConfig(adminToken: string): Promise<RuntimeConfig> {
   return apiFetch<RuntimeConfig>("/v1/admin/config/seed", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+    },
+  });
+}
+
+export async function resetRuntimeConfig(adminToken: string): Promise<RuntimeConfig> {
+  return apiFetch<RuntimeConfig>("/v1/admin/config/reset", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${adminToken}`,

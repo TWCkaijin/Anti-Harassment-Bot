@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from backend.app.agents.openrouter_agent import OpenRouterAgent
 from backend.app.core.anonymizer import anonymize, anonymize_messages
+from backend.app.core.chat_response import AssistantChatResponse
 from backend.app.core.logger import get_logger
 from backend.app.core.runtime_config import get_runtime_config
 
@@ -77,6 +78,17 @@ def parse_agent_json_response(reply: str) -> dict | None:
     except json.JSONDecodeError:
         repaired = _escape_newlines_inside_json_strings(cleaned)
         return json.loads(repaired)
+
+
+def _retryable_error(runtime_config, exc: Exception):
+    """Keep operational diagnostics server-side unless development mode is enabled."""
+    payload = {
+        "detail": "伺服器回傳錯誤，正在重試中",
+        "retryable": True,
+    }
+    if runtime_config.development_mode:
+        payload["debug_message"] = f"{type(exc).__name__}: {str(exc)[:2000]}"
+    return jsonify(payload), 502
 
 
 # ── 請求 / 回應模型 ─────────────────────────────────────────────────────────
@@ -155,32 +167,31 @@ def chat():
             logger.exception("AI agent run failed for session %s", session_id)
             raise exc
 
-    # 執行 Async 邏輯
+    # 執行 Async 邏輯並驗證 OpenRouter 的 structured response。
     try:
         reply, session_id, rag_used_status, rag_sources = asyncio.run(_run_chat_logic())
     except Exception as exc:
-        return jsonify({"detail": f"AI 服務暫時無法使用，請稍後再試。({type(exc).__name__})"}), 503
+        logger.warning("OpenRouter request failed: %s", exc)
+        return _retryable_error(runtime_config, exc)
 
-    # 4. 解析 JSON 回應
-    emotion = None
-    emotion_color = None
-    parsed_reply = reply
+    # 4. 解析並驗證 JSON 回應；不完整或不符 schema 的回答由前端自動重試。
     try:
         data = parse_agent_json_response(reply)
-        parsed_reply = data.get("reply", reply)
-        emotion = data.get("emotion")
-        emotion_color = data.get("emotion_color")
-    except Exception:
-        logger.warning("Failed to parse JSON from AI response: %s", reply)
-        pass
+        if not isinstance(data, dict):
+            raise ValueError("OpenRouter response must be a JSON object")
+        structured_response = AssistantChatResponse.model_validate(data)
+    except Exception as exc:
+        logger.warning("OpenRouter response failed schema validation: %s", exc)
+        return _retryable_error(runtime_config, exc)
 
     return jsonify(
         {
-            "reply": parsed_reply,
+            "reply": structured_response.reply,
             "session_id": session_id,
             "anonymized": was_anonymized,
             "rag_used": {"status": rag_used_status, "sources": rag_sources},
-            "emotion": emotion,
-            "emotion_color": emotion_color,
+            "emotion": structured_response.emotion,
+            "emotion_color": structured_response.emotion_color,
+            "suggested_replies": structured_response.suggested_replies,
         }
     )

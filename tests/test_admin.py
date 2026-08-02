@@ -46,3 +46,24 @@ def test_admin_updates_prompt_sections(monkeypatch):
     prompt_sections = response.get_json()["agent_prompt_sections"]
     assert prompt_sections["language"] == "dev prompt"
     assert prompt_sections["core_mission"]
+
+
+def test_admin_resets_runtime_config_to_local_defaults(monkeypatch):
+    calls = []
+    monkeypatch.setattr(admin_module.settings, "admin_api_key", "test-token")
+    monkeypatch.setattr(
+        admin_module, "get_runtime_config", lambda force_refresh=True: _runtime_config()
+    )
+    monkeypatch.setattr(
+        admin_module,
+        "reset_runtime_config",
+        lambda updated_by: calls.append(updated_by) or _runtime_config(),
+    )
+
+    response = app.test_client().post(
+        "/api/v1/admin/config/reset",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    assert calls == ["admin"]

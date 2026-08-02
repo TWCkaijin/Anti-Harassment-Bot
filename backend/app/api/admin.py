@@ -11,6 +11,7 @@ from backend.app.agents.openrouter_agent import get_default_prompt_sections
 from backend.app.core.config import get_settings
 from backend.app.core.runtime_config import (
     get_runtime_config,
+    reset_runtime_config,
     seed_runtime_config_if_missing,
     update_runtime_config,
 )
@@ -86,4 +87,16 @@ def seed_config():
         seed_runtime_config_if_missing(updated_by=identity or "admin")
     except Exception as exc:
         return jsonify({"detail": f"Failed to seed runtime config: {type(exc).__name__}"}), 500
+    return jsonify(_public_config())
+
+
+@admin_bp.route("/config/reset", methods=["POST"])
+def reset_config():
+    identity, error = _require_admin()
+    if error:
+        return error
+    try:
+        reset_runtime_config(updated_by=identity or "admin")
+    except Exception as exc:
+        return jsonify({"detail": f"Failed to reset runtime config: {type(exc).__name__}"}), 500
     return jsonify(_public_config())

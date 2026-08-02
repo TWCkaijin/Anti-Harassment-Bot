@@ -20,6 +20,7 @@ export default function App() {
     currentSessionId,
     messages,
     isLoading,
+    retryStatus,
     sendMessage,
     createNewSession,
     setCurrentSessionId,
@@ -55,9 +56,10 @@ export default function App() {
       />
 
       {/* 主要對話區 */}
-      <ChatArea
-        messages={messages}
-        isLoading={isLoading}
+        <ChatArea
+          messages={messages}
+          isLoading={isLoading}
+          retryStatus={retryStatus}
         onSend={sendMessage}
         onOpenSidebar={() => setSidebarOpen(true)}
       />
