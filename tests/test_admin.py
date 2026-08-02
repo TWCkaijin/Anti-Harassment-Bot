@@ -109,16 +109,26 @@ def test_admin_lists_and_updates_shared_scenario_scripts(monkeypatch):
     monkeypatch.setattr(
         admin_module,
         "upsert_scenario_script",
-        lambda script_id, payload, updated_by: calls.append((script_id, payload, updated_by)) or script,
+        lambda script_id, payload, updated_by: (
+            calls.append((script_id, payload, updated_by)) or script
+        ),
     )
 
     client = app.test_client()
     headers = {"Authorization": "Bearer test-token"}
-    assert client.get("/api/v1/admin/scenario-scripts", headers=headers).get_json()["skills"][0]["id"] == "call_support"
+    assert (
+        client.get("/api/v1/admin/scenario-scripts", headers=headers).get_json()["skills"][0]["id"]
+        == "call_support"
+    )
     response = client.put(
         "/api/v1/admin/scenario-scripts/call_support",
         headers=headers,
-        json={"name": "電話求助", "trigger_keywords": ["113"], "instruction": "提供電話。", "actions": []},
+        json={
+            "name": "電話求助",
+            "trigger_keywords": ["113"],
+            "instruction": "提供電話。",
+            "actions": [],
+        },
     )
 
     assert response.status_code == 200

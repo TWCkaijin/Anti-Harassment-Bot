@@ -140,7 +140,9 @@ def put_scenario_script(script_id: str):
     if not isinstance(payload, dict):
         return jsonify({"detail": "JSON body must be an object"}), 400
     try:
-        return jsonify(upsert_scenario_script(script_id, payload, identity or "admin").public_dict())
+        return jsonify(
+            upsert_scenario_script(script_id, payload, identity or "admin").public_dict()
+        )
     except ValueError as exc:
         return jsonify({"detail": str(exc)}), 422
     except Exception as exc:
