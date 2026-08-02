@@ -58,17 +58,30 @@ class FirestoreVectorRAG(BaseRAG):
             logger.warning("Unknown RAG data_type=%s; falling back to law collection.", data_type)
             collection_names = collections_by_data_type["law"]
 
-        results: list[RAGDocument] = []
+        results_by_collection: list[list[RAGDocument]] = []
         per_collection_limit = top_k if len(collection_names) == 1 else max(top_k, 1)
         for target_collection in collection_names:
-            results.extend(
+            results_by_collection.append(
                 self._retrieve_from_collection(
                     collection_name=target_collection,
                     query_vector=query_vector,
                     limit=per_collection_limit,
                 )
             )
-        return results[:top_k]
+        if len(results_by_collection) == 1:
+            return results_by_collection[0][:top_k]
+
+        # Cross-collection queries should expose each requested source type instead
+        # of allowing the first collection to consume the entire result budget.
+        results: list[RAGDocument] = []
+        longest_result_set = max((len(items) for items in results_by_collection), default=0)
+        for index in range(longest_result_set):
+            for collection_results in results_by_collection:
+                if index < len(collection_results):
+                    results.append(collection_results[index])
+                    if len(results) == top_k:
+                        return results
+        return results
 
     def _retrieve_from_collection(
         self,

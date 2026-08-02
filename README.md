@@ -119,7 +119,7 @@ pnpm run build
 
 - `CI - Lint & Test`：所有 branch push 與 PR 都會執行後端 ruff、pytest、前端 ESLint 與 build。
 - `Deploy - Preview (dev)`：push 到 `dev` 時，依變更範圍建置前端與/或部署 preview function。
-- `Deploy - Production (main)`：push 到 `main` 時，依變更範圍部署正式 Hosting 與/或 production function；PR targeting `main` 也會執行同一 workflow 的檢查與部署流程設定。
+- `Deploy - Production (main)`：只有變更合併並 push 到 `main` 後，才依變更範圍部署正式 Hosting 與/或 production function。PR 則只執行 `CI - Lint & Test`，不會部署 production。
 
 ## Runtime Admin Panel
 
@@ -137,6 +137,7 @@ Runtime config 預設存放於：
 - `temperature`
 - `top_p`
 - `max_tokens`
+- `development_mode`
 - `agent_prompt_sections`
 - `rag_retrieval_top_k`
 - `enable_anonymization`
@@ -147,6 +148,10 @@ Runtime config 預設存放於：
 - `maintenance_message`
 
 Prompt Sections 儲存在同一份 Firestore document 的 `agent_prompt_sections` map。未設定的 section 只會使用程式碼內建的預設內容；不會再讀取 Firebase Remote Config、GitHub Actions Variables 或整份 legacy prompt。
+
+`max_tokens` 設為 `0` 時，後端不會把 token 上限傳給 OpenRouter；其他正整數則會成為單次模型回覆的上限。`development_mode` 僅建議在 `app_dev` 開啟：它會在可重試的模型或 schema 錯誤中，額外回傳伺服器診斷字串給前端，正式環境應維持關閉。
+
+聊天回覆採用 OpenRouter Structured Outputs 的 JSON Schema 契約，必須包含情緒、回覆文字與 2 至 4 個建議回覆。若模型或供應端無法符合契約，前端會顯示「伺服器回傳錯誤，正在重試中」並自動重試兩次；請選用支援 Structured Outputs 的 OpenRouter 模型。
 
 設定優先順序固定為：
 

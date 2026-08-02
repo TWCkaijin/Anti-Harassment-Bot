@@ -11,14 +11,14 @@ def test_validate_generation_settings():
         {
             "temperature": 0.35,
             "top_p": 0.9,
-            "max_tokens": 2048,
+            "max_tokens": 0,
         }
     )
 
     assert result == {
         "temperature": 0.35,
         "top_p": 0.9,
-        "max_tokens": 2048,
+        "max_tokens": 0,
     }
 
 
@@ -27,7 +27,7 @@ def test_validate_generation_settings():
     [
         ("temperature", 2.1),
         ("top_p", 0),
-        ("max_tokens", 127),
+        ("max_tokens", -1),
         ("max_tokens", 8193),
     ],
 )

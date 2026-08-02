@@ -125,3 +125,25 @@ async def test_firestore_vector_rag_query_failure_returns_empty(monkeypatch):
     monkeypatch.setattr(rag, "_get_embedding", fake_embedding)
 
     assert await rag.retrieve("申訴期限") == []
+
+
+@pytest.mark.asyncio
+async def test_firestore_vector_rag_interleaves_cross_collection_results(monkeypatch):
+    rag = object.__new__(FirestoreVectorRAG)
+
+    async def fake_embedding(text: str):
+        return [0.1, 0.2, 0.3]
+
+    def fake_retrieve(collection_name: str, query_vector: list[float], limit: int):
+        return [RAGDocument(content=f"{collection_name}-{index}") for index in range(limit)]
+
+    monkeypatch.setattr(rag, "_get_embedding", fake_embedding)
+    monkeypatch.setattr(rag, "_retrieve_from_collection", fake_retrieve)
+
+    results = await rag.retrieve("過往案例", top_k=3, data_type="all")
+
+    assert [document.content for document in results] == [
+        "rag_documents-0",
+        "rag_judgments-0",
+        "rag_remedies-0",
+    ]

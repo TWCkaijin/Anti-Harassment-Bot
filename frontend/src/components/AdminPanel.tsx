@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   ApiError,
   getRuntimeConfig,
+  resetRuntimeConfig,
   seedRuntimeConfig,
   updateRuntimeConfig,
   type RuntimeConfig,
@@ -44,6 +45,7 @@ const emptyConfig: RuntimeConfig = {
   },
   maintenance_message: "",
   enable_image_upload: true,
+  development_mode: false,
   source: "local",
 };
 
@@ -59,6 +61,7 @@ function configToUpdate(config: RuntimeConfig): RuntimeConfigUpdate {
     rag_collections: config.rag_collections,
     maintenance_message: config.maintenance_message ?? "",
     enable_image_upload: config.enable_image_upload,
+    development_mode: config.development_mode,
   };
 }
 
@@ -173,6 +176,25 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
       setStatus("已補齊此環境 Firestore runtime config 的完整設定");
     } catch (err) {
       handleRequestError(err, "初始化失敗");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const resetConfig = async () => {
+    if (!isAuthenticated || !verifiedToken) {
+      setError("請先完成 Admin Token 驗證");
+      return;
+    }
+    setIsSaving(true);
+    setError("");
+    setStatus("");
+    try {
+      const nextConfig = await resetRuntimeConfig(verifiedToken);
+      applyLoadedConfig(nextConfig);
+      setStatus("已重置為程式內建的預設設定");
+    } catch (err) {
+      handleRequestError(err, "重置失敗");
     } finally {
       setIsSaving(false);
     }
@@ -332,12 +354,15 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                       max_tokens: Number(event.target.value),
                     }))
                   }
-                  min={128}
+                  min={0}
                   max={8192}
                   step={64}
                   type="number"
                   className="mt-1 w-full px-2.5 py-2.5 rounded-xl border border-outline/30 bg-surface-container-low text-sm outline-none focus:border-primary"
                 />
+                <span className="mt-1 block text-[11px] text-on-surface/50">
+                  0 表示不設定回覆 token 上限
+                </span>
               </label>
             </div>
             <label className="block">
@@ -391,6 +416,20 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                   setConfig((current) => ({
                     ...current,
                     enable_anonymization: event.target.checked,
+                  }))
+                }
+                className="h-5 w-5 accent-primary"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-4 rounded-xl bg-surface-container-low px-3 py-3">
+              <span className="text-sm font-medium text-on-surface">Development mode</span>
+              <input
+                type="checkbox"
+                checked={config.development_mode}
+                onChange={(event) =>
+                  setConfig((current) => ({
+                    ...current,
+                    development_mode: event.target.checked,
                   }))
                 }
                 className="h-5 w-5 accent-primary"
@@ -475,13 +514,22 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
 
         {isAuthenticated && (
           <div className="border-t border-outline/20 p-4 flex items-center justify-between gap-3">
-            <button
-              onClick={seedConfig}
-              disabled={isSaving}
-              className="px-3 py-2.5 rounded-xl bg-surface-container text-sm font-semibold text-on-surface hover:bg-surface-container-high disabled:opacity-50 cursor-pointer"
-            >
-              補齊設定
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={seedConfig}
+                disabled={isSaving}
+                className="px-3 py-2.5 rounded-xl bg-surface-container text-sm font-semibold text-on-surface hover:bg-surface-container-high disabled:opacity-50 cursor-pointer"
+              >
+                補齊設定
+              </button>
+              <button
+                onClick={resetConfig}
+                disabled={isSaving}
+                className="px-3 py-2.5 rounded-xl border border-error/25 bg-error-container/30 text-sm font-semibold text-error hover:bg-error-container/50 disabled:opacity-50 cursor-pointer"
+              >
+                重置設定
+              </button>
+            </div>
             <button
               onClick={saveConfig}
               disabled={isSaving || !isDirty}

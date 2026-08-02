@@ -46,7 +46,7 @@ def test_chat_response_shape(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
             return AgentResult(
-                reply='{"emotion":"冷靜","emotion_color":"green","reply":"我會陪你整理下一步。"}',
+                reply='{"emotion":"冷靜","emotion_color":"green","reply":"我會陪你整理下一步。","suggested_replies":["我想先了解申訴流程","我需要緊急協助"]}',
                 rag_used=True,
                 sources=[
                     {
@@ -81,6 +81,7 @@ def test_chat_response_shape(monkeypatch):
     }
     assert data["emotion"] == "冷靜"
     assert data["emotion_color"] == "green"
+    assert data["suggested_replies"] == ["我想先了解申訴流程", "我需要緊急協助"]
     assert "session_id" in data
 
 
@@ -91,7 +92,7 @@ def test_chat_passes_use_rag_false(monkeypatch):
         async def run(self, **kwargs):
             captured.update(kwargs)
             return AgentResult(
-                reply='{"emotion":"未知","emotion_color":"gray","reply":"好的。"}',
+                reply='{"emotion":"未知","emotion_color":"gray","reply":"好的。","suggested_replies":["我想多說一些","我想了解下一步"]}',
                 rag_used=False,
                 sources=[],
             )
@@ -114,7 +115,7 @@ def test_chat_repairs_bare_newlines_inside_json_string(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
             return AgentResult(
-                reply='{"emotion":"冷靜","emotion_color":"green","reply":"第一段\n\n第二段"}',
+                reply='{"emotion":"冷靜","emotion_color":"green","reply":"第一段\n\n第二段","suggested_replies":["我想補充細節","我想了解可用資源"]}',
                 rag_used=False,
                 sources=[],
             )
@@ -141,3 +142,44 @@ def test_parse_agent_json_response_strips_code_fence():
     )
 
     assert data == {"emotion": "未知", "emotion_color": "gray", "reply": "好的"}
+
+
+def test_chat_returns_retryable_error_for_invalid_model_schema(monkeypatch):
+    class FakeAgent:
+        async def run(self, **kwargs):
+            return AgentResult(reply='{"reply":"缺少必要欄位"}')
+
+    monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(
+        chat_module, "get_runtime_config", lambda: fake_runtime_config(development_mode=True)
+    )
+
+    response = app.test_client().post(
+        "/api/v1/chat/",
+        json={"message": "測試 schema", "history": [], "use_rag": False},
+    )
+
+    assert response.status_code == 502
+    assert response.get_json()["detail"] == "伺服器回傳錯誤，正在重試中"
+    assert response.get_json()["retryable"] is True
+    assert "ValidationError" in response.get_json()["debug_message"]
+
+
+def test_chat_hides_retryable_error_diagnostics_outside_development_mode(monkeypatch):
+    class FakeAgent:
+        async def run(self, **kwargs):
+            raise RuntimeError("upstream model rejected the JSON schema")
+
+    monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(chat_module, "get_runtime_config", lambda: fake_runtime_config())
+
+    response = app.test_client().post(
+        "/api/v1/chat/",
+        json={"message": "測試 schema", "history": [], "use_rag": False},
+    )
+
+    assert response.status_code == 502
+    assert response.get_json() == {
+        "detail": "伺服器回傳錯誤，正在重試中",
+        "retryable": True,
+    }
