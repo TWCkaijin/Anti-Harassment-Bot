@@ -11,9 +11,7 @@ def test_phone_support_script_matches_call_intent(monkeypatch):
             "priority": 100,
             "trigger_keywords": ["撥打", "113"],
             "instruction": "提供已核准的電話動作。",
-            "actions": [
-                {"action": "tel", "phone_number": "113", "label": "撥打 113 保護專線"}
-            ],
+            "actions": [{"action": "tel", "phone_number": "113", "label": "撥打 113 保護專線"}],
         },
     )
     assert script is not None
@@ -45,10 +43,17 @@ def test_scenario_script_rejects_unknown_actions():
 def test_disabled_scripts_are_not_used_at_runtime(monkeypatch):
     disabled = scenario_module._parse_script(
         "disabled_skill",
-        {"enabled": False, "trigger_keywords": ["測試"], "instruction": "不應該使用", "actions": []},
+        {
+            "enabled": False,
+            "trigger_keywords": ["測試"],
+            "instruction": "不應該使用",
+            "actions": [],
+        },
     )
     assert disabled is not None
-    monkeypatch.setattr(scenario_module, "list_scenario_scripts", lambda force_refresh=False: (disabled,))
+    monkeypatch.setattr(
+        scenario_module, "list_scenario_scripts", lambda force_refresh=False: (disabled,)
+    )
 
     assert scenario_module.get_scenario_scripts() == ()
 
