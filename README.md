@@ -228,3 +228,7 @@ uv run python -m backend.scripts.ingest.all_to_firestore
 - 請勿將 `.env`、Firebase service account、OpenRouter API key 或任何真實個資提交到 Git。
 - 本服務不應被視為法律意見、醫療建議或心理諮商。
 - 若使用者處於立即危險，請優先聯絡 `110`、`113`、`1955` 或所在地正式求助管道。
+
+## 授權
+
+Copyright 2026 Kai-Chun Wu. 授權採用 [Apache License 2.0](LICENSE)，授權日期為 2026-08-03。
