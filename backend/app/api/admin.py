@@ -15,6 +15,12 @@ from backend.app.core.runtime_config import (
     seed_runtime_config_if_missing,
     update_runtime_config,
 )
+from backend.app.core.scenario_scripts import (
+    delete_scenario_script,
+    list_scenario_scripts,
+    seed_example_scenario_scripts,
+    upsert_scenario_script,
+)
 
 settings = get_settings()
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -100,3 +106,54 @@ def reset_config():
     except Exception as exc:
         return jsonify({"detail": f"Failed to reset runtime config: {type(exc).__name__}"}), 500
     return jsonify(_public_config())
+
+
+@admin_bp.route("/scenario-scripts/seed", methods=["POST"])
+def seed_scenario_scripts():
+    identity, error = _require_admin()
+    if error:
+        return error
+    try:
+        scripts = seed_example_scenario_scripts(updated_by=identity or "admin")
+    except Exception as exc:
+        return jsonify({"detail": f"Failed to seed scenario scripts: {type(exc).__name__}"}), 500
+    return jsonify({"script_ids": [script.script_id for script in scripts]})
+
+
+@admin_bp.route("/scenario-scripts", methods=["GET"])
+def get_scenario_scripts():
+    _, error = _require_admin()
+    if error:
+        return error
+    try:
+        return jsonify({"skills": [script.public_dict() for script in list_scenario_scripts(True)]})
+    except Exception as exc:
+        return jsonify({"detail": f"Failed to load scenario scripts: {type(exc).__name__}"}), 500
+
+
+@admin_bp.route("/scenario-scripts/<script_id>", methods=["PUT"])
+def put_scenario_script(script_id: str):
+    identity, error = _require_admin()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"detail": "JSON body must be an object"}), 400
+    try:
+        return jsonify(upsert_scenario_script(script_id, payload, identity or "admin").public_dict())
+    except ValueError as exc:
+        return jsonify({"detail": str(exc)}), 422
+    except Exception as exc:
+        return jsonify({"detail": f"Failed to save scenario script: {type(exc).__name__}"}), 500
+
+
+@admin_bp.route("/scenario-scripts/<script_id>", methods=["DELETE"])
+def remove_scenario_script(script_id: str):
+    _, error = _require_admin()
+    if error:
+        return error
+    try:
+        delete_scenario_script(script_id)
+    except Exception as exc:
+        return jsonify({"detail": f"Failed to delete scenario script: {type(exc).__name__}"}), 500
+    return "", 204

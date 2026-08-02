@@ -73,6 +73,24 @@ body {
   display: flex;
 }
 
+/* Shared fields used by the compact admin editor. */
+.input {
+  width: 100%;
+  margin-top: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--color-outline) 50%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: 0.625rem 0.75rem;
+  color: var(--color-on-surface);
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
 /* ── Material Symbols ────────────────────────────────────────────────── */
 
 .material-symbols-outlined {

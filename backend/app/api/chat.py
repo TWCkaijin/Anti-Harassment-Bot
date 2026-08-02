@@ -162,14 +162,23 @@ def chat():
                 image_base64=req_obj.image_base64 if runtime_config.enable_image_upload else None,
                 use_rag=req_obj.use_rag,
             )
-            return reply.reply, session_id, reply.rag_used, reply.sources or []
+            return (
+                reply.reply,
+                session_id,
+                reply.rag_used,
+                reply.sources or [],
+                reply.available_actions,
+                reply.tool_calls,
+            )
         except Exception as exc:
             logger.exception("AI agent run failed for session %s", session_id)
             raise exc
 
     # 執行 Async 邏輯並驗證 OpenRouter 的 structured response。
     try:
-        reply, session_id, rag_used_status, rag_sources = asyncio.run(_run_chat_logic())
+        reply, session_id, rag_used_status, rag_sources, permitted_actions, tool_calls = asyncio.run(
+            _run_chat_logic()
+        )
     except Exception as exc:
         logger.warning("OpenRouter request failed: %s", exc)
         return _retryable_error(runtime_config, exc)
@@ -184,8 +193,18 @@ def chat():
         logger.warning("OpenRouter response failed schema validation: %s", exc)
         return _retryable_error(runtime_config, exc)
 
-    return jsonify(
-        {
+    available_actions = {
+        (action["action"], action["phone_number"]): action
+        for action in permitted_actions
+        if "action" in action and "phone_number" in action and "label" in action
+    }
+    action_buttons = [
+        available_actions[(action.action, action.phone_number)]
+        for action in structured_response.action_buttons
+        if (action.action, action.phone_number) in available_actions
+    ]
+
+    response_payload = {
             "reply": structured_response.reply,
             "session_id": session_id,
             "anonymized": was_anonymized,
@@ -193,5 +212,10 @@ def chat():
             "emotion": structured_response.emotion,
             "emotion_color": structured_response.emotion_color,
             "suggested_replies": structured_response.suggested_replies,
-        }
-    )
+            "action_buttons": action_buttons,
+            "interaction_mode": structured_response.interaction_mode,
+            "clarifying_questions": structured_response.clarifying_questions,
+    }
+    if runtime_config.development_mode:
+        response_payload["debug_tool_calls"] = tool_calls
+    return jsonify(response_payload)

@@ -12,6 +12,7 @@ import AdminPanel from "./components/AdminPanel";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
 
@@ -21,6 +22,7 @@ export default function App() {
     messages,
     isLoading,
     retryStatus,
+    stopCurrentResponse,
     sendMessage,
     createNewSession,
     setCurrentSessionId,
@@ -46,7 +48,9 @@ export default function App() {
         sessions={sessions}
         currentSessionId={currentSessionId}
         isOpen={sidebarOpen}
+        isCollapsed={sidebarCollapsed}
         onClose={() => setSidebarOpen(false)}
+        onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onSelectSession={setCurrentSessionId}
         onNewSession={createNewSession}
         onDeleteSession={deleteSession}
@@ -60,6 +64,7 @@ export default function App() {
           messages={messages}
           isLoading={isLoading}
           retryStatus={retryStatus}
+          onStop={stopCurrentResponse}
         onSend={sendMessage}
         onOpenSidebar={() => setSidebarOpen(true)}
       />

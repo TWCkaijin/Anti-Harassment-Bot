@@ -25,6 +25,7 @@ AGENT_PROMPT_SECTIONS = (
     "language",
     "output_format",
     "analysis_rules",
+    "retrieval_instructions",
 )
 PROMPT_MAX_LENGTH = 20000
 WRITABLE_FIELDS = {
@@ -32,6 +33,7 @@ WRITABLE_FIELDS = {
     "temperature",
     "top_p",
     "max_tokens",
+    "reasoning_effort",
     "agent_prompt_sections",
     "rag_retrieval_top_k",
     "enable_anonymization",
@@ -52,6 +54,7 @@ class RuntimeConfig:
     temperature: float
     top_p: float
     max_tokens: int
+    reasoning_effort: str = "none"
     agent_prompt_sections: dict[str, str] = field(default_factory=dict)
     rag_collections: dict[str, str] = field(default_factory=dict)
     maintenance_message: str | None = None
@@ -62,7 +65,10 @@ class RuntimeConfig:
     updated_by: str | None = None
 
     def public_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        result = asdict(self)
+        # The client needs to show exactly which per-environment document it edits.
+        result["environment_document_id"] = settings.runtime_config_document_id
+        return result
 
 
 _cached_config: RuntimeConfig | None = None
@@ -156,6 +162,7 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,
+        reasoning_effort=str(data.get("reasoning_effort") or "none"),
         agent_prompt_sections=_configured_prompt_sections(data.get("agent_prompt_sections")),
         rag_collections=rag_collections,
         maintenance_message=_normalize_prompt(data.get("maintenance_message")),
@@ -252,6 +259,10 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
             if max_tokens < 0 or max_tokens > 8192:
                 raise ValueError("max_tokens must be between 0 and 8192")
             cleaned[key] = max_tokens
+        elif key == "reasoning_effort":
+            if value not in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}:
+                raise ValueError("reasoning_effort is invalid")
+            cleaned[key] = value
         elif key == "rag_retrieval_top_k":
             top_k = int(value)
             if top_k < 1 or top_k > 20:
@@ -278,6 +289,7 @@ def _default_runtime_document() -> dict[str, Any]:
         "temperature": settings.openrouter_temperature,
         "top_p": settings.openrouter_top_p,
         "max_tokens": settings.openrouter_max_tokens,
+        "reasoning_effort": "none",
         "agent_prompt_sections": get_default_prompt_sections(),
         "rag_retrieval_top_k": settings.rag_retrieval_top_k,
         "enable_anonymization": settings.enable_anonymization,

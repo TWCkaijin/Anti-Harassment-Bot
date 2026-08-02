@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict, dataclass, field
 from textwrap import dedent
+from typing import Any
 
 from openai import AsyncOpenAI
 
@@ -8,6 +9,11 @@ from backend.app.core.chat_response import OPENROUTER_RESPONSE_FORMAT
 from backend.app.core.config import get_settings
 from backend.app.core.logger import get_logger
 from backend.app.core.runtime_config import RuntimeConfig, get_runtime_config
+from backend.app.core.scenario_scripts import (
+    available_actions,
+    format_scenario_instruction,
+    get_matching_scenario_scripts,
+)
 from backend.app.rag.firestore_vector import FirestoreVectorRAG
 
 logger = get_logger(__name__)
@@ -136,6 +142,17 @@ _DEFAULT_SYSTEM_SECTIONS: tuple[tuple[str, str, str], ...] = (
             """
         ).strip(),
     ),
+    (
+        "retrieval_instructions",
+        "檢索指令",
+        dedent(
+            """
+            需要引用法規、申訴期限、構成要件、權利義務、通報或救濟流程時，優先檢索法律與救濟資料。
+            使用者提到判決、案例、過往經驗或法院見解時，應同時檢索判決資料。
+            檢索結果只作為參考依據；資料不足時請清楚說明限制，避免將推論說成確定事實。
+            """
+        ).strip(),
+    ),
 )
 
 
@@ -186,22 +203,6 @@ _RAG_TOOL = {
     },
 }
 
-_JUDGMENT_CONTEXT_MARKERS = (
-    "判決",
-    "判例",
-    "案例",
-    "過往",
-    "歷史經驗",
-    "實務經驗",
-    "法院",
-)
-
-
-def _requires_judgment_context(user_message: str) -> bool:
-    """Detect explicit requests for past cases before the model selects a single tool."""
-    return any(marker in user_message for marker in _JUDGMENT_CONTEXT_MARKERS)
-
-
 def _clean_final_response(final_text: str | None) -> str:
     if not final_text:
         raise ValueError("OpenRouter returned an empty assistant response")
@@ -234,6 +235,8 @@ class AgentResult:
     reply: str
     rag_used: bool = False
     sources: list[dict[str, str]] = field(default_factory=list)
+    available_actions: list[dict[str, str]] = field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _source_type_from_collection(
@@ -299,6 +302,26 @@ class OpenRouterAgent:
         runtime_config = get_runtime_config()
         model = runtime_config.openrouter_model
         messages = [{"role": "system", "content": _get_system_instruction(runtime_config)}]
+        matching_scripts = get_matching_scenario_scripts(user_message)
+        permitted_actions = available_actions(matching_scripts)
+        if matching_scripts:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": format_scenario_instruction(matching_scripts),
+                }
+            )
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "回覆 JSON 的 action_buttons 為選填欄位。僅當目前情境腳本列出可用動作且"
+                    "使用者明確表達想聯絡或撥打時才填入；不得自行發明 action 或電話號碼。"
+                    "資訊不足而需要追問時，interaction_mode 必須為 clarify，並以 "
+                    "clarifying_questions 輸出一到三個具體問題；否則為 answer 且輸出空陣列。"
+                ),
+            }
+        )
 
         # 轉換前端傳來的 history (role: user / assistant)
         if history:
@@ -332,52 +355,6 @@ class OpenRouterAgent:
         logger.info("Sending request to OpenRouter (%s)...", model)
 
         try:
-            # Explicit past-case requests do not need a separate LLM tool-selection turn.
-            # Fetch all relevant source types first, then generate the final answer once.
-            if use_rag and _requires_judgment_context(user_message):
-                docs = await self.rag.retrieve(
-                    user_message,
-                    top_k=runtime_config.rag_retrieval_top_k,
-                    data_type="all",
-                    collection_names_by_data_type=runtime_config.rag_collections,
-                )
-                sources: list[dict[str, str]] = []
-                seen_sources: set[tuple[str, str, str | None]] = set()
-                for doc in docs:
-                    source = _source_from_doc(doc, "all", runtime_config)
-                    if not source:
-                        continue
-                    source_key = (source.type, source.label, source.collection)
-                    if source_key not in seen_sources:
-                        seen_sources.add(source_key)
-                        sources.append(source.to_dict())
-                context_text = (
-                    "\n\n---\n\n".join(doc.to_context_string() for doc in docs)
-                    if docs
-                    else "查無相關法規、判決或救濟資料。"
-                )
-                messages.append(
-                    {
-                        "role": "system",
-                        "content": f"以下為已檢索的參考資料，請以此整理回覆：\n\n{context_text}",
-                    }
-                )
-                direct_create_kwargs = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": runtime_config.temperature,
-                    "top_p": runtime_config.top_p,
-                    "response_format": OPENROUTER_RESPONSE_FORMAT,
-                }
-                if runtime_config.max_tokens > 0:
-                    direct_create_kwargs["max_tokens"] = runtime_config.max_tokens
-                direct_response = await self.client.chat.completions.create(**direct_create_kwargs)
-                return AgentResult(
-                    reply=_clean_final_response(direct_response.choices[0].message.content),
-                    rag_used=bool(docs),
-                    sources=sources,
-                )
-
             # 第一次呼叫：讓模型決定是否要 Tool Call
             create_kwargs = {
                 "model": model,
@@ -388,6 +365,13 @@ class OpenRouterAgent:
             }
             if runtime_config.max_tokens > 0:
                 create_kwargs["max_tokens"] = runtime_config.max_tokens
+            if runtime_config.reasoning_effort != "none":
+                create_kwargs["extra_body"] = {
+                    "reasoning": {
+                        "effort": runtime_config.reasoning_effort,
+                        "exclude": True,
+                    }
+                }
             if use_rag:
                 create_kwargs["tools"] = [_RAG_TOOL]
                 create_kwargs["tool_choice"] = "auto"
@@ -399,6 +383,7 @@ class OpenRouterAgent:
             rag_used = False
             sources: list[dict[str, str]] = []
             seen_sources: set[tuple[str, str, str | None]] = set()
+            tool_call_traces: list[dict[str, Any]] = []
 
             # 若模型決定呼叫工具
             if use_rag and tool_calls:
@@ -407,13 +392,21 @@ class OpenRouterAgent:
                 for tool_call in tool_calls:
                     if tool_call.function.name == "retrieve_harassment_knowledge":
                         args = json.loads(tool_call.function.arguments)
-                        query = args.get("query", user_message)
-                        data_type = args.get("data_type", "law")
-                        if _requires_judgment_context(user_message):
-                            data_type = "all"
+                        if not isinstance(args, dict):
+                            raise ValueError("Tool call arguments must be an object")
+                        query = args.get("query")
+                        data_type = args.get("data_type")
+                        if not isinstance(query, str) or not query.strip():
+                            raise ValueError("Tool call query must be a non-empty string")
+                        if data_type not in {"law", "judgment", "remedy", "all"}:
+                            raise ValueError("Tool call data_type is invalid")
+                        query = query.strip()
                         harassment_type = args.get("harassment_type")
-                        if harassment_type:
+                        if isinstance(harassment_type, str) and harassment_type.strip():
+                            harassment_type = harassment_type.strip()
                             query = f"{harassment_type} {query}"
+                        else:
+                            harassment_type = None
                         logger.info(
                             "Tool called: retrieve_harassment_knowledge(query='%s', data_type='%s')",
                             query,
@@ -425,6 +418,16 @@ class OpenRouterAgent:
                             top_k=runtime_config.rag_retrieval_top_k,
                             data_type=data_type,
                             collection_names_by_data_type=runtime_config.rag_collections,
+                        )
+                        trace_arguments = {"query": query, "data_type": data_type}
+                        if harassment_type:
+                            trace_arguments["harassment_type"] = harassment_type
+                        tool_call_traces.append(
+                            {
+                                "name": tool_call.function.name,
+                                "arguments": trace_arguments,
+                                "result_count": len(docs),
+                            }
                         )
                         rag_used = bool(docs)
                         for doc in docs:
@@ -461,6 +464,13 @@ class OpenRouterAgent:
                 }
                 if runtime_config.max_tokens > 0:
                     second_create_kwargs["max_tokens"] = runtime_config.max_tokens
+                if runtime_config.reasoning_effort != "none":
+                    second_create_kwargs["extra_body"] = {
+                        "reasoning": {
+                            "effort": runtime_config.reasoning_effort,
+                            "exclude": True,
+                        }
+                    }
                 second_response = await self.client.chat.completions.create(**second_create_kwargs)
                 final_text = second_response.choices[0].message.content
             else:
@@ -471,6 +481,8 @@ class OpenRouterAgent:
                 reply=_clean_final_response(final_text),
                 rag_used=rag_used,
                 sources=sources,
+                available_actions=permitted_actions,
+                tool_calls=tool_call_traces,
             )
 
         except Exception:
