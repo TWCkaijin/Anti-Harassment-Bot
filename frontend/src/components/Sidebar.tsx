@@ -3,7 +3,8 @@
  * 導航式設計：品牌標識 → 滿版橘色新增對話按鈕 → 對話歷史清單 (卡片式) → 底部工具列。
  * RWD：桌面端固定左側，行動端可透過漢堡按鈕展開覆蓋。
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
 import type { ConversationSession } from "../hooks/useConversation";
@@ -12,12 +13,15 @@ interface SidebarProps {
   sessions: ConversationSession[];
   currentSessionId: string;
   isOpen: boolean;
+  isCollapsed: boolean;
   onClose: () => void;
+  onToggleCollapsed: () => void;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onDeleteSession: (id: string) => void;
   onRenameSession: (id: string, newTitle: string) => void;
   onOpenSettings: () => void;
+  onOpenAdmin: () => void;
 }
 
 function formatDate(timestamp: number, t: ReturnType<typeof useI18n>["t"]): string {
@@ -51,23 +55,54 @@ export default function Sidebar({
   sessions,
   currentSessionId,
   isOpen,
+  isCollapsed,
   onClose,
+  onToggleCollapsed,
   onSelectSession,
   onNewSession,
   onDeleteSession,
   onRenameSession,
   onOpenSettings,
+  onOpenAdmin,
 }: SidebarProps) {
   const { t } = useI18n();
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [isEmergencyMenuOpen, setIsEmergencyMenuOpen] = useState(false);
+  const [showDesktopContent, setShowDesktopContent] = useState(!isCollapsed);
+  const emergencyMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isCollapsed) return;
+
+    const timer = window.setTimeout(() => setShowDesktopContent(true), 300);
+    return () => window.clearTimeout(timer);
+  }, [isCollapsed]);
+
+  const handleToggleCollapsed = () => {
+    if (!isCollapsed) setShowDesktopContent(false);
+    onToggleCollapsed();
+  };
+
+  useEffect(() => {
+    if (!isEmergencyMenuOpen) return;
+
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      if (!emergencyMenuRef.current?.contains(event.target as Node)) {
+        setIsEmergencyMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", closeOnOutsidePointerDown);
+    return () => window.removeEventListener("pointerdown", closeOnOutsidePointerDown);
+  }, [isEmergencyMenuOpen]);
 
   // 只顯示有訊息的對話，由新到舊排序
   const sortedSessions = [...sessions]
     .filter((s) => s.messages.length > 0)
     .sort((a, b) => b.createdAt - a.createdAt);
+  const openMenuSession = sortedSessions.find((session) => session.id === menuOpenId);
 
   const handleExport = (session: ConversationSession) => {
     // 建立只包含有意義的文字紀錄的簡單匯出版本，或 JSON
@@ -101,13 +136,24 @@ export default function Sidebar({
 
       <aside
         className={`
-          fixed lg:static inset-y-0 left-0 z-50
+          fixed lg:relative inset-y-0 left-0 z-50
           w-[320px] flex flex-col bg-white
           border-r border-outline/20 p-6 gap-6
-          transform transition-transform duration-300 ease-in-out
+          transform transition-[transform,width,padding] duration-300 ease-in-out
+          ${isCollapsed ? "lg:w-0 lg:p-0 lg:gap-0 lg:border-r-0" : "lg:w-[320px]"}
           ${isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
         `}
       >
+        <button
+          type="button"
+          onClick={handleToggleCollapsed}
+          className="absolute right-0 top-1/2 z-20 hidden h-24 w-8 -translate-y-1/2 translate-x-full items-center justify-center rounded-r-2xl bg-primary text-white shadow-md transition-colors hover:bg-primary/90 lg:flex"
+          aria-label={isCollapsed ? "展開對話欄" : "收起對話欄"}
+        >
+          <MaterialIcon icon={isCollapsed ? "chevron_right" : "chevron_left"} size={22} />
+        </button>
+
+        <div className={`flex min-h-0 flex-1 flex-col gap-6 ${showDesktopContent ? "" : "lg:hidden"}`}>
         {/* 頂部 Logo */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -159,11 +205,11 @@ export default function Sidebar({
                       ? "bg-primary-container border-primary/20"
                       : "bg-surface hover:bg-surface-container border-transparent"
                   }
-                  ${menuOpenId === session.id ? "z-30" : "z-0"}
                 `}
                 onClick={() => {
                   if (editingId !== session.id) {
                     onSelectSession(session.id);
+                    setIsEmergencyMenuOpen(false);
                     onClose();
                   }
                 }}
@@ -217,55 +263,23 @@ export default function Sidebar({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setMenuOpenId(menuOpenId === session.id ? null : session.id);
+                      if (menuOpenId === session.id) {
+                        setMenuOpenId(null);
+                        setMenuPosition(null);
+                        return;
+                      }
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setMenuOpenId(session.id);
+                      setMenuPosition({
+                        top: rect.bottom + 6,
+                        right: window.innerWidth - rect.right,
+                      });
                     }}
                     className="p-1.5 rounded-lg hover:bg-surface-container-high text-on-surface/40 hover:text-on-surface"
                   >
                     <MaterialIcon icon="more_vert" size={16} />
                   </button>
 
-                  {/* 選單列表 */}
-                  {menuOpenId === session.id && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); }} />
-                      <div className="absolute right-0 top-full mt-1 w-32 bg-white rounded-xl shadow-lg border border-outline/10 py-1.5 z-50 flex flex-col text-sm">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingTitle(session.title || getSessionPreview(session, t));
-                            setEditingId(session.id);
-                            setMenuOpenId(null);
-                          }}
-                          className="px-4 py-2 text-left hover:bg-surface-container flex items-center gap-2 text-on-surface"
-                        >
-                          <MaterialIcon icon="edit" size={14} />
-                          重新命名
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleExport(session);
-                          }}
-                          className="px-4 py-2 text-left hover:bg-surface-container flex items-center gap-2 text-on-surface"
-                        >
-                          <MaterialIcon icon="download" size={14} />
-                          匯出紀錄
-                        </button>
-                        <div className="h-px bg-outline/10 my-1"></div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteSession(session.id);
-                            setMenuOpenId(null);
-                          }}
-                          className="px-4 py-2 text-left hover:bg-error-container/50 text-error flex items-center gap-2"
-                        >
-                          <MaterialIcon icon="delete" size={14} />
-                          {t.deleteChat}
-                        </button>
-                      </div>
-                    </>
-                  )}
                 </div>
               </div>
             );
@@ -273,47 +287,44 @@ export default function Sidebar({
         </div>
 
         {/* 底部工具列 */}
-        <div className="mt-auto space-y-6">
+        <div className="mt-auto space-y-3">
           {/* 隱私提示 */}
-          <div className="text-center space-y-2">
-            <p className="text-[11px] text-on-surface/40 flex items-center justify-center gap-1">
+          <div className="text-center">
+            <p className="flex items-center justify-center gap-1 text-[10px] text-on-surface/40">
               <MaterialIcon icon="lock" size={14} />
-              {t.privacyNote}
-            </p>
-            <p className="text-[11px] text-on-surface/40">
-              {t.privacyNoteSub}
+              <span>{t.privacyNote} · {t.privacyNoteSub}</span>
             </p>
           </div>
 
           {/* 緊急求助選單 */}
-          <div className="relative w-full">
+          <div ref={emergencyMenuRef} className="relative w-full">
             <button
               onClick={() => setIsEmergencyMenuOpen(!isEmergencyMenuOpen)}
-              className="w-full py-4 px-4 bg-secondary text-white rounded-full font-bold flex items-center justify-center gap-2 shadow-md hover:opacity-90 transition-opacity cursor-pointer"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-secondary px-3 py-3 text-sm font-bold text-white shadow-sm transition-opacity hover:opacity-90"
             >
               <MaterialIcon icon="call" size={20} />
               <span>專人緊急協助</span>
               <MaterialIcon icon="expand_less" size={20} className={`ml-auto transition-transform ${isEmergencyMenuOpen ? 'rotate-180' : ''}`} />
             </button>
             {/* 展開選單 (往上展開，避免超出畫面) */}
-            <div className={`absolute left-0 bottom-full mb-2 w-full bg-white border border-outline/20 rounded-2xl shadow-lg transition-all flex flex-col overflow-hidden z-50 origin-bottom ${
+            <div className={`absolute bottom-full left-0 z-50 mb-2 flex w-full origin-bottom flex-col overflow-hidden rounded-xl border border-outline/20 bg-white shadow-lg transition-all ${
               isEmergencyMenuOpen ? "opacity-100 visible" : "opacity-0 invisible"
             }`}>
-              <a href="tel:113" className="px-4 py-3 hover:bg-surface-container flex items-center gap-3 text-on-surface">
+              <a href="tel:113" className="flex items-center gap-3 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
                 <MaterialIcon icon="local_police" size={20} className="text-secondary" />
                 <div className="flex flex-col text-left">
                   <span className="font-bold">113 保護專線</span>
                   <span className="text-[10px] text-on-surface/60">24小時保護專線</span>
                 </div>
               </a>
-              <a href="tel:110" className="px-4 py-3 hover:bg-surface-container flex items-center gap-3 text-on-surface border-t border-outline/10">
+              <a href="tel:110" className="flex items-center gap-3 border-t border-outline/10 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
                 <MaterialIcon icon="local_police" size={20} className="text-secondary" />
                 <div className="flex flex-col text-left">
                   <span className="font-bold">110 報案專線</span>
                   <span className="text-[10px] text-on-surface/60">緊急報案</span>
                 </div>
               </a>
-              <a href="tel:02-2391-7133" className="px-4 py-3 hover:bg-surface-container flex items-center gap-3 text-on-surface border-t border-outline/10">
+              <a href="tel:02-2391-7133" className="flex items-center gap-3 border-t border-outline/10 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
                 <MaterialIcon icon="support_agent" size={20} className="text-secondary" />
                 <div className="flex flex-col text-left">
                   <span className="font-bold">現代婦女基金會</span>
@@ -324,18 +335,12 @@ export default function Sidebar({
           </div>
 
           {/* 工具連結列 */}
-          <div className="grid grid-cols-2 gap-4 border-t border-outline/10 pt-6">
-            <a
-              href="tel:113"
-              className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
-            >
-              <MaterialIcon icon="psychology" size={20} />
-              <span className="text-xs font-medium">
-                {t.counseling}
-              </span>
-            </a>
+          <div className="grid grid-cols-2 gap-3 border-t border-outline/10 pt-3">
             <button
-              onClick={onOpenSettings}
+              onClick={() => {
+                setIsEmergencyMenuOpen(false);
+                onOpenSettings();
+              }}
               className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
             >
               <MaterialIcon icon="settings" size={20} />
@@ -343,9 +348,72 @@ export default function Sidebar({
                 {t.settings}
               </span>
             </button>
+            <button
+              onClick={() => {
+                setIsEmergencyMenuOpen(false);
+                onOpenAdmin();
+              }}
+              className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
+            >
+              <MaterialIcon icon="admin_panel_settings" size={20} />
+              <span className="text-xs font-medium">
+                Admin
+              </span>
+            </button>
           </div>
         </div>
+        </div>
       </aside>
+      {openMenuSession && menuPosition && createPortal(
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-[90] cursor-default"
+            aria-label="關閉對話選單"
+            onClick={() => {
+              setMenuOpenId(null);
+              setMenuPosition(null);
+            }}
+          />
+          <div
+            className="fixed z-[100] flex w-36 flex-col rounded-lg border border-outline/10 bg-white py-1.5 text-sm shadow-float"
+            style={{ top: menuPosition.top, right: menuPosition.right }}
+          >
+            <button
+              onClick={() => {
+                setEditingTitle(openMenuSession.title || getSessionPreview(openMenuSession, t));
+                setEditingId(openMenuSession.id);
+                setMenuOpenId(null);
+                setMenuPosition(null);
+              }}
+              className="flex items-center gap-2 px-4 py-2 text-left text-on-surface hover:bg-surface-container"
+            >
+              <MaterialIcon icon="edit" size={14} />
+              重新命名
+            </button>
+            <button
+              onClick={() => handleExport(openMenuSession)}
+              className="flex items-center gap-2 px-4 py-2 text-left text-on-surface hover:bg-surface-container"
+            >
+              <MaterialIcon icon="download" size={14} />
+              匯出紀錄
+            </button>
+            <div className="my-1 h-px bg-outline/10" />
+            <button
+              onClick={() => {
+                onDeleteSession(openMenuSession.id);
+                setMenuOpenId(null);
+                setMenuPosition(null);
+              }}
+              className="flex items-center gap-2 px-4 py-2 text-left text-error hover:bg-error-container/50"
+            >
+              <MaterialIcon icon="delete" size={14} />
+              {t.deleteChat}
+            </button>
+          </div>
+        </>,
+        document.body
+      )}
     </>
   );
 }

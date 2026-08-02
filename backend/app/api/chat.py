@@ -1,6 +1,6 @@
 """
 性騷擾防治智能 AI — Chat API Blueprint
-接收前端對話請求，執行匿名化後透過 Google ADK 呼叫 AI 模型。
+接收前端對話請求，執行匿名化後透過 OpenRouter 呼叫 AI 模型。
 """
 
 import asyncio
@@ -10,11 +10,11 @@ import uuid
 from flask import Blueprint, jsonify, request
 from pydantic import BaseModel, Field, ValidationError
 
-from backend.app.agents.harass_agent import HarassmentCounselingAgent
+from backend.app.agents.openrouter_agent import OpenRouterAgent
 from backend.app.core.anonymizer import anonymize, anonymize_messages
-from backend.app.core.config import get_settings
+from backend.app.core.chat_response import AssistantChatResponse
 from backend.app.core.logger import get_logger
-from backend.app.rag.default_rag import DefaultRAG
+from backend.app.core.runtime_config import get_runtime_config
 
 logger = get_logger(__name__)
 
@@ -22,22 +22,73 @@ chat_bp = Blueprint("chat", __name__, url_prefix="/chat")
 
 # ── 依賴注入（Singleton per process）────────────────────────────────────────
 
-_agent_instance: HarassmentCounselingAgent | None = None
-_rag_instance: DefaultRAG | None = None
+_agent_instance: OpenRouterAgent | None = None
 
 
-def get_agent() -> HarassmentCounselingAgent:
+def get_agent() -> OpenRouterAgent:
     global _agent_instance
     if _agent_instance is None:
-        _agent_instance = HarassmentCounselingAgent()
+        _agent_instance = OpenRouterAgent()
     return _agent_instance
 
 
-def get_rag() -> DefaultRAG:
-    global _rag_instance
-    if _rag_instance is None:
-        _rag_instance = DefaultRAG()
-    return _rag_instance
+def _strip_json_code_fence(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    return cleaned.strip()
+
+
+def _escape_newlines_inside_json_strings(text: str) -> str:
+    """Escape bare line breaks only when they appear inside JSON strings."""
+    result: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if escaped:
+            result.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            result.append(char)
+            escaped = True
+            continue
+        if char == '"':
+            result.append(char)
+            in_string = not in_string
+            continue
+        if in_string and char == "\n":
+            result.append("\\n")
+            continue
+        if in_string and char == "\r":
+            result.append("\\r")
+            continue
+        result.append(char)
+    return "".join(result)
+
+
+def parse_agent_json_response(reply: str) -> dict | None:
+    cleaned = _strip_json_code_fence(reply)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        repaired = _escape_newlines_inside_json_strings(cleaned)
+        return json.loads(repaired)
+
+
+def _retryable_error(runtime_config, exc: Exception):
+    """Keep operational diagnostics server-side unless development mode is enabled."""
+    payload = {
+        "detail": "伺服器回傳錯誤，正在重試中",
+        "retryable": True,
+    }
+    if runtime_config.development_mode:
+        payload["debug_message"] = f"{type(exc).__name__}: {str(exc)[:2000]}"
+    return jsonify(payload), 502
 
 
 # ── 請求 / 回應模型 ─────────────────────────────────────────────────────────
@@ -70,8 +121,7 @@ class ChatRequest(BaseModel):
 def chat():
     """
     發送對話訊息
-    接收使用者訊息與對話歷史，執行 PII 匿名化後透過 Google ADK 呼叫 AI，回傳回覆。
-    後端不儲存任何對話紀錄。
+    接收使用者訊息與對話歷史，執行 PII 匿名化後透過 OpenRouter Agent 呼叫 AI，回傳回覆。
     """
     try:
         req_data = request.get_json()
@@ -83,94 +133,89 @@ def chat():
     except Exception as e:
         return jsonify({"detail": str(e)}), 400
 
-    settings = get_settings()
     agent = get_agent()
-    rag = get_rag()
+    runtime_config = get_runtime_config()
 
     # 1. 匿名化當前訊息
-    anon_result = anonymize(req_obj.message)
-    anonymized_message = anon_result.anonymized
-    was_anonymized = anon_result.was_modified
+    if runtime_config.enable_anonymization:
+        anon_result = anonymize(req_obj.message)
+        anonymized_message = anon_result.anonymized
+        was_anonymized = anon_result.was_modified
+    else:
+        anonymized_message = req_obj.message
+        was_anonymized = False
 
     # 2. 匿名化歷史訊息（批次處理）
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in req_obj.history]
-    anonymized_history = anonymize_messages(history_dicts)
+    anonymized_history = (
+        anonymize_messages(history_dicts) if runtime_config.enable_anonymization else history_dicts
+    )
 
-    # 將 RAG 查詢與 LLM 推理打包在一個 async function 裡面
     async def _run_chat_logic():
-        # 3. RAG 檢索（若啟用）
-        rag_context = ""
-        rag_used_status = False
-        rag_sources: list[str] = []
-        if req_obj.use_rag and settings.enable_anonymization:
-            try:
-                docs = await rag.retrieve(anonymized_message)
-                if docs:
-                    context_parts = [doc.to_context_string() for doc in docs]
-                    rag_context = "\n\n---\n\n".join(context_parts)
-                    rag_sources = [doc.metadata.get("source", "未知來源") for doc in docs]
-                    rag_used_status = True
-            except Exception:
-                # RAG 失敗不影響主要對話流程
-                pass
-
-        # 4. 若有 RAG 上下文，附加到訊息前
-        final_message = anonymized_message
-        if rag_context:
-            final_message = (
-                f"以下是相關的參考資料，請參考但不需逐字引用：\n\n"
-                f"{rag_context}\n\n"
-                f"---\n\n使用者的問題：{anonymized_message}"
-            )
-
-        # 5. 呼叫 ADK Agent
+        # 3. 呼叫 OpenRouter Agent (內部已實作 Agentic RAG)
         session_id = str(uuid.uuid4())
         try:
+            # 傳遞參數給 Agent (若後續 OpenRouterAgent 有回傳 RAG 狀態可再解構)
             reply = await agent.run(
-                user_message=final_message,
+                user_message=anonymized_message,
                 history=anonymized_history,
-                session_id=session_id,
-                image_base64=req_obj.image_base64,
+                image_base64=req_obj.image_base64 if runtime_config.enable_image_upload else None,
+                use_rag=req_obj.use_rag,
             )
-            return reply, session_id, rag_used_status, rag_sources
+            return (
+                reply.reply,
+                session_id,
+                reply.rag_used,
+                reply.sources or [],
+                reply.available_actions,
+                reply.tool_calls,
+            )
         except Exception as exc:
             logger.exception("AI agent run failed for session %s", session_id)
             raise exc
 
-    # 執行 Async 邏輯
+    # 執行 Async 邏輯並驗證 OpenRouter 的 structured response。
     try:
-        reply, session_id, rag_used_status, rag_sources = asyncio.run(_run_chat_logic())
+        reply, session_id, rag_used_status, rag_sources, permitted_actions, tool_calls = (
+            asyncio.run(_run_chat_logic())
+        )
     except Exception as exc:
-        return jsonify({"detail": f"AI 服務暫時無法使用，請稍後再試。({type(exc).__name__})"}), 503
+        logger.warning("OpenRouter request failed: %s", exc)
+        return _retryable_error(runtime_config, exc)
 
-    # 6. 解析 JSON 回應
-    emotion = None
-    emotion_color = None
-    parsed_reply = reply
+    # 4. 解析並驗證 JSON 回應；不完整或不符 schema 的回答由前端自動重試。
     try:
-        cleaned_reply = reply.strip()
-        if cleaned_reply.startswith("```json"):
-            cleaned_reply = cleaned_reply[7:]
-        elif cleaned_reply.startswith("```"):
-            cleaned_reply = cleaned_reply[3:]
-        if cleaned_reply.endswith("```"):
-            cleaned_reply = cleaned_reply[:-3]
+        data = parse_agent_json_response(reply)
+        if not isinstance(data, dict):
+            raise ValueError("OpenRouter response must be a JSON object")
+        structured_response = AssistantChatResponse.model_validate(data)
+    except Exception as exc:
+        logger.warning("OpenRouter response failed schema validation: %s", exc)
+        return _retryable_error(runtime_config, exc)
 
-        data = json.loads(cleaned_reply.strip())
-        parsed_reply = data.get("reply", reply)
-        emotion = data.get("emotion")
-        emotion_color = data.get("emotion_color")
-    except Exception:
-        logger.warning("Failed to parse JSON from AI response: %s", reply)
-        pass
+    available_actions = {
+        (action["action"], action["phone_number"]): action
+        for action in permitted_actions
+        if "action" in action and "phone_number" in action and "label" in action
+    }
+    action_buttons = [
+        available_actions[(action.action, action.phone_number)]
+        for action in structured_response.action_buttons
+        if (action.action, action.phone_number) in available_actions
+    ]
 
-    return jsonify(
-        {
-            "reply": parsed_reply,
-            "session_id": session_id,
-            "anonymized": was_anonymized,
-            "rag_used": {"status": rag_used_status, "sources": rag_sources},
-            "emotion": emotion,
-            "emotion_color": emotion_color,
-        }
-    )
+    response_payload = {
+        "reply": structured_response.reply,
+        "session_id": session_id,
+        "anonymized": was_anonymized,
+        "rag_used": {"status": rag_used_status, "sources": rag_sources},
+        "emotion": structured_response.emotion,
+        "emotion_color": structured_response.emotion_color,
+        "suggested_replies": structured_response.suggested_replies,
+        "action_buttons": action_buttons,
+        "interaction_mode": structured_response.interaction_mode,
+        "clarifying_questions": structured_response.clarifying_questions,
+    }
+    if runtime_config.development_mode:
+        response_payload["debug_tool_calls"] = tool_calls
+    return jsonify(response_payload)

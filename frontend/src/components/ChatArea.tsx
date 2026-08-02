@@ -15,15 +15,19 @@ import { checkHealth } from "../services/api";
 interface ChatAreaProps {
   messages: ConversationMessage[];
   isLoading: boolean;
+  retryStatus?: string | null;
   onSend: (message: string, imageBase64?: string, imageUrl?: string) => void;
   onOpenSidebar: () => void;
+  onStop: () => void;
 }
 
 export default function ChatArea({
   messages,
   isLoading,
+  retryStatus,
   onSend,
   onOpenSidebar,
+  onStop,
 }: ChatAreaProps) {
   const { t } = useI18n();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -51,6 +55,11 @@ export default function ChatArea({
   }, []);
 
   const hasMessages = messages.length > 0;
+  const latestMessage = messages.at(-1);
+  const suggestedReplies =
+    latestMessage?.role === "assistant" && !latestMessage.isError
+      ? latestMessage.suggestedReplies ?? []
+      : [];
 
   return (
     <main className="flex-1 flex flex-col h-screen relative bg-white lg:bg-transparent min-w-0">
@@ -120,9 +129,9 @@ export default function ChatArea({
         {hasMessages ? (
           <div className="w-full px-6 lg:px-10 py-8 space-y-10">
             {messages.map((msg) => (
-              <MessageItem key={msg.id} message={msg} />
+              <MessageItem key={msg.id} message={msg} isLoading={isLoading} onSend={onSend} />
             ))}
-            {isLoading && <TypingIndicator />}
+            {isLoading && <TypingIndicator message={retryStatus} />}
             <div ref={messagesEndRef} className="h-4" />
           </div>
         ) : (
@@ -131,7 +140,14 @@ export default function ChatArea({
       </section>
 
       {/* 底部輸入框（僅在有訊息時顯示，WelcomeHero 有自己的輸入框） */}
-      {hasMessages && <ChatInput onSend={onSend} isLoading={isLoading} />}
+      {hasMessages && (
+        <ChatInput
+          onSend={onSend}
+          isLoading={isLoading}
+          suggestedReplies={suggestedReplies}
+          onStop={onStop}
+        />
+      )}
     </main>
   );
 }
