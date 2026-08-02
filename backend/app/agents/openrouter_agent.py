@@ -203,6 +203,7 @@ _RAG_TOOL = {
     },
 }
 
+
 def _clean_final_response(final_text: str | None) -> str:
     if not final_text:
         raise ValueError("OpenRouter returned an empty assistant response")

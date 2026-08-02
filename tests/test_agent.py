@@ -177,9 +177,7 @@ async def test_agent_passes_runtime_reasoning_effort_to_openrouter(monkeypatch):
 
     await agent.run("測試", use_rag=False)
 
-    assert completions.calls[0]["extra_body"] == {
-        "reasoning": {"effort": "high", "exclude": True}
-    }
+    assert completions.calls[0]["extra_body"] == {"reasoning": {"effort": "high", "exclude": True}}
 
 
 @pytest.mark.asyncio
