@@ -3,7 +3,7 @@ const zhTW = {
   appTitle: "性騷擾防治智能 AI",
   appSubtitle: "溫暖守護 · 匿名安全 · 法律知識庫",
   brandName: "溫暖守護 AI",
-  brandSub: "AI 助理",
+  brandSub: "屏東縣政府性騷擾治理政策Agent",
 
   // ── Sidebar ──
   newChat: "開啟新對話",
@@ -48,8 +48,12 @@ const zhTW = {
   hotline113: "113 保護專線",
 
   // ── MessageItem ──
-  ragLabel: "已檢索法律知識庫",
-  ragTooltipTitle: "檢閱的條文：",
+  ragLabel: "已檢索資料庫",
+  ragTooltipTitle: "檢索依據：",
+  ragSourceLaw: "法律條文",
+  ragSourceJudgment: "歷史判決",
+  ragSourceRemedy: "救濟管道",
+  ragSourceUnknown: "其他資料",
   anonymizedLabel: "隱私去識別化保護",
 
   // ── EmergencyFab ──

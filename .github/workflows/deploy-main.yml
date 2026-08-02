@@ -4,10 +4,6 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches:
-      - main
 
 jobs:
   deploy-production:
@@ -15,9 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write  # 允許 PR comment
     env:
-      FIREBASE_PROJECT_ID: anti-harassment-bot
       FUNCTIONS_REGION: asia-east1
 
     steps:
@@ -87,16 +81,34 @@ jobs:
 
       - name: Write backend .env
         if: steps.filter.outputs.backend == 'true'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          RUNTIME_CONFIG_DOCUMENT_ID: app_main
+          ENVIRONMENT: production
         run: |
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
-          echo "ENVIRONMENT=production" >> .env
+          python - <<'PY'
+          import json
+          import os
+
+          keys = [
+              "OPENROUTER_API_KEY",
+              "ADMIN_API_KEY",
+              "RUNTIME_CONFIG_DOCUMENT_ID",
+              "ENVIRONMENT",
+          ]
+          with open(".env", "w", encoding="utf-8") as env_file:
+              for key in keys:
+                  value = os.environ.get(key, "")
+                  env_file.write(f"{key}={json.dumps(value, ensure_ascii=False)}\n")
+          PY
 
       - name: Deploy to Firebase Hosting (production)
         id: firebase-hosting-deploy
         if: steps.filter.outputs.frontend == 'true'
         run: |
           set -e
-          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only hosting --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
+          if ! firebase deploy --only hosting --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
             cat deploy.log
             echo "Firebase hosting deployment failed."
             exit 1
@@ -109,31 +121,9 @@ jobs:
         if: steps.filter.outputs.backend == 'true'
         run: |
           set -e
-          if ! firebase deploy --project ${{ env.FIREBASE_PROJECT_ID }} --only functions:api --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
+          if ! firebase deploy --only functions:api:api --token "${{ secrets.FIREBASE_TOKEN }}" --non-interactive --force > deploy.log 2>&1; then
             cat deploy.log
             echo "Firebase functions deployment failed."
             exit 1
           fi
           cat deploy.log
-
-      - name: Comment deployment URL on PR
-        if: github.event_name == 'pull_request' && (steps.filter.outputs.frontend == 'true' || steps.filter.outputs.backend == 'true')
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            let body = `## 🚀 Production Deployment\n\n`;
-            if ('${{ steps.filter.outputs.frontend }}' === 'true') {
-              const deployUrl = '${{ steps.firebase-hosting-deploy.outputs.deploy_url }}' || 'https://anti-harassment-bot.web.app';
-              body += `✅ 已部署至 Firebase Hosting（Production）\n🔗 **URL**: ${deployUrl}\n`;
-            }
-            if ('${{ steps.filter.outputs.backend }}' === 'true') {
-              body += `✅ Backend Updated\n📦 **API**: \`https://asia-east1-anti-harassment-bot.cloudfunctions.net/api\`\n`;
-            }
-            body += `\n*由 GitHub Actions 自動部署*`;
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });

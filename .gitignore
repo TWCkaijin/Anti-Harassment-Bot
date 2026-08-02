@@ -3,7 +3,6 @@
 Agent.md
 USAGE.md
 TODO.md
-README.md
 
 
 # ===== Python =====
@@ -27,6 +26,7 @@ wheels/
 firebase_admin.json
 *.pem
 *.key
+data
 
 # ===== Node / Frontend =====
 node_modules/

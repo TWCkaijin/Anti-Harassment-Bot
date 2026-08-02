@@ -48,8 +48,12 @@ const en = {
   hotline113: "113 Hotline",
 
   // ── MessageItem ──
-  ragLabel: "Legal knowledge retrieved",
-  ragTooltipTitle: "Retrieved articles:",
+  ragLabel: "Retrieved databases",
+  ragTooltipTitle: "Retrieved sources:",
+  ragSourceLaw: "Legal Articles",
+  ragSourceJudgment: "Judgments",
+  ragSourceRemedy: "Remedies",
+  ragSourceUnknown: "Other Sources",
   anonymizedLabel: "Privacy de-identification",
 
   // ── EmergencyFab ──

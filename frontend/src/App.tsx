@@ -8,16 +8,21 @@ import { useConversation } from "./hooks/useConversation";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
 import SettingsPanel from "./components/SettingsPanel";
+import AdminPanel from "./components/AdminPanel";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const {
     sessions,
     currentSessionId,
     messages,
     isLoading,
+    retryStatus,
+    stopCurrentResponse,
     sendMessage,
     createNewSession,
     setCurrentSessionId,
@@ -31,6 +36,11 @@ export default function App() {
     setSidebarOpen(false);
   }, []);
 
+  const handleOpenAdmin = useCallback(() => {
+    setAdminOpen(true);
+    setSidebarOpen(false);
+  }, []);
+
   return (
     <div className="flex w-full h-dvh bg-background overflow-hidden">
       {/* 側邊欄 */}
@@ -38,18 +48,23 @@ export default function App() {
         sessions={sessions}
         currentSessionId={currentSessionId}
         isOpen={sidebarOpen}
+        isCollapsed={sidebarCollapsed}
         onClose={() => setSidebarOpen(false)}
+        onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onSelectSession={setCurrentSessionId}
         onNewSession={createNewSession}
         onDeleteSession={deleteSession}
         onRenameSession={renameSession}
         onOpenSettings={handleOpenSettings}
+        onOpenAdmin={handleOpenAdmin}
       />
 
       {/* 主要對話區 */}
-      <ChatArea
-        messages={messages}
-        isLoading={isLoading}
+        <ChatArea
+          messages={messages}
+          isLoading={isLoading}
+          retryStatus={retryStatus}
+          onStop={stopCurrentResponse}
         onSend={sendMessage}
         onOpenSidebar={() => setSidebarOpen(true)}
       />
@@ -62,6 +77,11 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         sessions={sessions}
         onClearAll={clearAllSessions}
+      />
+
+      <AdminPanel
+        isOpen={adminOpen}
+        onClose={() => setAdminOpen(false)}
       />
     </div>
   );

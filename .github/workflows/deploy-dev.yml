@@ -13,7 +13,6 @@ jobs:
       contents: read
       pull-requests: write
     env:
-      FIREBASE_PROJECT_ID: anti-harassment-bot
       FUNCTIONS_REGION: asia-east1
       PREVIEW_CHANNEL: dev-preview
 
@@ -85,16 +84,33 @@ jobs:
 
       - name: Write backend .env
         if: steps.filter.outputs.backend == 'true'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          RUNTIME_CONFIG_DOCUMENT_ID: app_dev
+          ENVIRONMENT: preview
         run: |
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
-          echo "ENVIRONMENT=preview" >> .env
+          python - <<'PY'
+          import json
+          import os
+
+          keys = [
+              "OPENROUTER_API_KEY",
+              "ADMIN_API_KEY",
+              "RUNTIME_CONFIG_DOCUMENT_ID",
+              "ENVIRONMENT",
+          ]
+          with open(".env", "w", encoding="utf-8") as env_file:
+              for key in keys:
+                  value = os.environ.get(key, "")
+                  env_file.write(f"{key}={json.dumps(value, ensure_ascii=False)}\n")
+          PY
 
       - name: Deploy Functions (api_preview)
         if: steps.filter.outputs.backend == 'true'
         run: |
           firebase deploy \
-            --project ${{ env.FIREBASE_PROJECT_ID }} \
-            --only functions:api_preview \
+            --only functions:api:api_preview \
             --token "${{ secrets.FIREBASE_TOKEN }}" \
             --non-interactive \
             --force
@@ -104,7 +120,7 @@ jobs:
         if: steps.filter.outputs.frontend == 'true'
         run: |
           set -e
-          if ! firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} --project ${{ env.FIREBASE_PROJECT_ID }} --token "${{ secrets.FIREBASE_TOKEN }}" --expires 7d --non-interactive > deploy.log 2>&1; then
+          if ! firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} --token "${{ secrets.FIREBASE_TOKEN }}" --expires 30d --non-interactive > deploy.log 2>&1; then
             cat deploy.log
             echo "Firebase hosting deployment failed."
             exit 1
