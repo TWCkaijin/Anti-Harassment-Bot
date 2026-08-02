@@ -34,6 +34,12 @@ export interface RagInfo {
   sources: Array<RagSource | string>;
 }
 
+export interface DebugToolCall {
+  name: string;
+  arguments: Record<string, string>;
+  result_count: number;
+}
+
 export interface ChatResponse {
   reply: string;
   session_id: string;
@@ -42,7 +48,29 @@ export interface ChatResponse {
   emotion?: string;
   emotion_color?: string;
   suggested_replies: string[];
+  action_buttons: ActionButton[];
+  interaction_mode: "answer" | "clarify";
+  clarifying_questions: string[];
+  debug_tool_calls?: DebugToolCall[];
 }
+
+export interface ActionButton {
+  action: "tel";
+  phone_number: string;
+  label: string;
+}
+
+export interface ScenarioSkill {
+  id: string;
+  name: string;
+  enabled: boolean;
+  priority: number;
+  trigger_keywords: string[];
+  instruction: string;
+  actions: ActionButton[];
+}
+
+export type ScenarioSkillInput = Omit<ScenarioSkill, "id">;
 
 export interface HealthResponse {
   status: string;
@@ -58,6 +86,7 @@ export interface RuntimeConfig {
   temperature: number;
   top_p: number;
   max_tokens: number;
+  reasoning_effort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   agent_prompt_sections: Record<string, string>;
   rag_collections: {
     law: string;
@@ -68,6 +97,7 @@ export interface RuntimeConfig {
   enable_image_upload: boolean;
   development_mode: boolean;
   source: string;
+  environment_document_id?: string;
   updated_at?: string;
   updated_by?: string;
 }
@@ -81,6 +111,7 @@ export type RuntimeConfigUpdate = Partial<
     | "temperature"
     | "top_p"
     | "max_tokens"
+    | "reasoning_effort"
     | "agent_prompt_sections"
     | "rag_collections"
     | "maintenance_message"
@@ -149,6 +180,7 @@ async function apiFetch<T>(
     );
   }
 
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -157,10 +189,11 @@ async function apiFetch<T>(
 /**
  * 傳送對話訊息給 AI，並取得回覆。
  */
-export async function sendChat(request: ChatRequest): Promise<ChatResponse> {
+export async function sendChat(request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
   return apiFetch<ChatResponse>("/v1/chat/", {
     method: "POST",
     body: JSON.stringify(request),
+    signal,
   });
 }
 
@@ -207,5 +240,39 @@ export async function resetRuntimeConfig(adminToken: string): Promise<RuntimeCon
     headers: {
       Authorization: `Bearer ${adminToken}`,
     },
+  });
+}
+
+export async function seedScenarioScripts(adminToken: string): Promise<{ script_ids: string[] }> {
+  return apiFetch<{ script_ids: string[] }>("/v1/admin/scenario-scripts/seed", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+    },
+  });
+}
+
+export async function getScenarioSkills(adminToken: string): Promise<{ skills: ScenarioSkill[] }> {
+  return apiFetch<{ skills: ScenarioSkill[] }>("/v1/admin/scenario-scripts", {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+}
+
+export async function updateScenarioSkill(
+  adminToken: string,
+  id: string,
+  skill: ScenarioSkillInput
+): Promise<ScenarioSkill> {
+  return apiFetch<ScenarioSkill>(`/v1/admin/scenario-scripts/${id}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify(skill),
+  });
+}
+
+export async function deleteScenarioSkill(adminToken: string, id: string): Promise<void> {
+  await apiFetch<unknown>(`/v1/admin/scenario-scripts/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${adminToken}` },
   });
 }

@@ -3,7 +3,7 @@
  * 導航式設計：品牌標識 → 滿版橘色新增對話按鈕 → 對話歷史清單 (卡片式) → 底部工具列。
  * RWD：桌面端固定左側，行動端可透過漢堡按鈕展開覆蓋。
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
@@ -13,7 +13,9 @@ interface SidebarProps {
   sessions: ConversationSession[];
   currentSessionId: string;
   isOpen: boolean;
+  isCollapsed: boolean;
   onClose: () => void;
+  onToggleCollapsed: () => void;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onDeleteSession: (id: string) => void;
@@ -53,7 +55,9 @@ export default function Sidebar({
   sessions,
   currentSessionId,
   isOpen,
+  isCollapsed,
   onClose,
+  onToggleCollapsed,
   onSelectSession,
   onNewSession,
   onDeleteSession,
@@ -67,6 +71,32 @@ export default function Sidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [isEmergencyMenuOpen, setIsEmergencyMenuOpen] = useState(false);
+  const [showDesktopContent, setShowDesktopContent] = useState(!isCollapsed);
+  const emergencyMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isCollapsed) return;
+
+    const timer = window.setTimeout(() => setShowDesktopContent(true), 300);
+    return () => window.clearTimeout(timer);
+  }, [isCollapsed]);
+
+  const handleToggleCollapsed = () => {
+    if (!isCollapsed) setShowDesktopContent(false);
+    onToggleCollapsed();
+  };
+
+  useEffect(() => {
+    if (!isEmergencyMenuOpen) return;
+
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      if (!emergencyMenuRef.current?.contains(event.target as Node)) {
+        setIsEmergencyMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", closeOnOutsidePointerDown);
+    return () => window.removeEventListener("pointerdown", closeOnOutsidePointerDown);
+  }, [isEmergencyMenuOpen]);
 
   // 只顯示有訊息的對話，由新到舊排序
   const sortedSessions = [...sessions]
@@ -106,13 +136,24 @@ export default function Sidebar({
 
       <aside
         className={`
-          fixed lg:static inset-y-0 left-0 z-50
+          fixed lg:relative inset-y-0 left-0 z-50
           w-[320px] flex flex-col bg-white
           border-r border-outline/20 p-6 gap-6
-          transform transition-transform duration-300 ease-in-out
+          transform transition-[transform,width,padding] duration-300 ease-in-out
+          ${isCollapsed ? "lg:w-0 lg:p-0 lg:gap-0 lg:border-r-0" : "lg:w-[320px]"}
           ${isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
         `}
       >
+        <button
+          type="button"
+          onClick={handleToggleCollapsed}
+          className="absolute right-0 top-1/2 z-20 hidden h-24 w-8 -translate-y-1/2 translate-x-full items-center justify-center rounded-r-2xl bg-primary text-white shadow-md transition-colors hover:bg-primary/90 lg:flex"
+          aria-label={isCollapsed ? "展開對話欄" : "收起對話欄"}
+        >
+          <MaterialIcon icon={isCollapsed ? "chevron_right" : "chevron_left"} size={22} />
+        </button>
+
+        <div className={`flex min-h-0 flex-1 flex-col gap-6 ${showDesktopContent ? "" : "lg:hidden"}`}>
         {/* 頂部 Logo */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -168,6 +209,7 @@ export default function Sidebar({
                 onClick={() => {
                   if (editingId !== session.id) {
                     onSelectSession(session.id);
+                    setIsEmergencyMenuOpen(false);
                     onClose();
                   }
                 }}
@@ -245,47 +287,44 @@ export default function Sidebar({
         </div>
 
         {/* 底部工具列 */}
-        <div className="mt-auto space-y-6">
+        <div className="mt-auto space-y-3">
           {/* 隱私提示 */}
-          <div className="text-center space-y-2">
-            <p className="text-[11px] text-on-surface/40 flex items-center justify-center gap-1">
+          <div className="text-center">
+            <p className="flex items-center justify-center gap-1 text-[10px] text-on-surface/40">
               <MaterialIcon icon="lock" size={14} />
-              {t.privacyNote}
-            </p>
-            <p className="text-[11px] text-on-surface/40">
-              {t.privacyNoteSub}
+              <span>{t.privacyNote} · {t.privacyNoteSub}</span>
             </p>
           </div>
 
           {/* 緊急求助選單 */}
-          <div className="relative w-full">
+          <div ref={emergencyMenuRef} className="relative w-full">
             <button
               onClick={() => setIsEmergencyMenuOpen(!isEmergencyMenuOpen)}
-              className="w-full py-4 px-4 bg-secondary text-white rounded-full font-bold flex items-center justify-center gap-2 shadow-md hover:opacity-90 transition-opacity cursor-pointer"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-secondary px-3 py-3 text-sm font-bold text-white shadow-sm transition-opacity hover:opacity-90"
             >
               <MaterialIcon icon="call" size={20} />
               <span>專人緊急協助</span>
               <MaterialIcon icon="expand_less" size={20} className={`ml-auto transition-transform ${isEmergencyMenuOpen ? 'rotate-180' : ''}`} />
             </button>
             {/* 展開選單 (往上展開，避免超出畫面) */}
-            <div className={`absolute left-0 bottom-full mb-2 w-full bg-white border border-outline/20 rounded-2xl shadow-lg transition-all flex flex-col overflow-hidden z-50 origin-bottom ${
+            <div className={`absolute bottom-full left-0 z-50 mb-2 flex w-full origin-bottom flex-col overflow-hidden rounded-xl border border-outline/20 bg-white shadow-lg transition-all ${
               isEmergencyMenuOpen ? "opacity-100 visible" : "opacity-0 invisible"
             }`}>
-              <a href="tel:113" className="px-4 py-3 hover:bg-surface-container flex items-center gap-3 text-on-surface">
+              <a href="tel:113" className="flex items-center gap-3 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
                 <MaterialIcon icon="local_police" size={20} className="text-secondary" />
                 <div className="flex flex-col text-left">
                   <span className="font-bold">113 保護專線</span>
                   <span className="text-[10px] text-on-surface/60">24小時保護專線</span>
                 </div>
               </a>
-              <a href="tel:110" className="px-4 py-3 hover:bg-surface-container flex items-center gap-3 text-on-surface border-t border-outline/10">
+              <a href="tel:110" className="flex items-center gap-3 border-t border-outline/10 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
                 <MaterialIcon icon="local_police" size={20} className="text-secondary" />
                 <div className="flex flex-col text-left">
                   <span className="font-bold">110 報案專線</span>
                   <span className="text-[10px] text-on-surface/60">緊急報案</span>
                 </div>
               </a>
-              <a href="tel:02-2391-7133" className="px-4 py-3 hover:bg-surface-container flex items-center gap-3 text-on-surface border-t border-outline/10">
+              <a href="tel:02-2391-7133" className="flex items-center gap-3 border-t border-outline/10 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
                 <MaterialIcon icon="support_agent" size={20} className="text-secondary" />
                 <div className="flex flex-col text-left">
                   <span className="font-bold">現代婦女基金會</span>
@@ -296,18 +335,12 @@ export default function Sidebar({
           </div>
 
           {/* 工具連結列 */}
-          <div className="grid grid-cols-3 gap-3 border-t border-outline/10 pt-6">
-            <a
-              href="tel:113"
-              className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
-            >
-              <MaterialIcon icon="psychology" size={20} />
-              <span className="text-xs font-medium">
-                {t.counseling}
-              </span>
-            </a>
+          <div className="grid grid-cols-2 gap-3 border-t border-outline/10 pt-3">
             <button
-              onClick={onOpenSettings}
+              onClick={() => {
+                setIsEmergencyMenuOpen(false);
+                onOpenSettings();
+              }}
               className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
             >
               <MaterialIcon icon="settings" size={20} />
@@ -316,7 +349,10 @@ export default function Sidebar({
               </span>
             </button>
             <button
-              onClick={onOpenAdmin}
+              onClick={() => {
+                setIsEmergencyMenuOpen(false);
+                onOpenAdmin();
+              }}
               className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
             >
               <MaterialIcon icon="admin_panel_settings" size={20} />
@@ -325,6 +361,7 @@ export default function Sidebar({
               </span>
             </button>
           </div>
+        </div>
         </div>
       </aside>
       {openMenuSession && menuPosition && createPortal(

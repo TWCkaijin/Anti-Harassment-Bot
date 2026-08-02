@@ -15,6 +15,8 @@ import type { RagSource, RagSourceType } from "../services/api";
 
 interface MessageItemProps {
   message: ConversationMessage;
+  isLoading?: boolean;
+  onSend?: (message: string) => void;
 }
 
 const getEmotionColorClasses = (color?: string) => {
@@ -80,11 +82,13 @@ const getSourceStyle = (type: RagSourceType) => {
   }
 };
 
-export default function MessageItem({ message }: MessageItemProps) {
+export default function MessageItem({ message, isLoading, onSend }: MessageItemProps) {
   const { t } = useI18n();
   const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
+  const [clarification, setClarification] = React.useState("");
   const isUser = message.role === "user";
   const isError = message.isError;
+  const isCancelled = message.isCancelled;
   const sourceGroups = React.useMemo(() => {
     const sources = message.ragUsed?.sources ?? [];
     const groups = new Map<RagSourceType, RagSource[]>();
@@ -176,7 +180,7 @@ export default function MessageItem({ message }: MessageItemProps) {
         )}
 
         {/* 訊息內容 */}
-        <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
+        {!isCancelled && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
           {isUser || isError ? (
             message.content
           ) : (
@@ -193,7 +197,84 @@ export default function MessageItem({ message }: MessageItemProps) {
               {message.content}
             </ReactMarkdown>
           )}
-        </div>
+        </div>}
+
+        {isCancelled && <p className="text-sm font-medium text-on-surface/55">使用者已終止回覆</p>}
+        {!isUser && !isError && !isCancelled && message.debugToolCalls !== undefined && (
+          <details className="mt-3 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-xs text-amber-950">
+            <summary className="flex cursor-pointer items-center gap-1.5 font-semibold">
+              <MaterialIcon icon="code" size={15} />
+              模型 Tool Call：{message.debugToolCalls.length > 0 ? `${message.debugToolCalls.length} 次` : "未使用"}
+            </summary>
+            {message.debugToolCalls.length > 0 && (
+              <div className="mt-2 space-y-2 border-t border-amber-300/50 pt-2 font-mono text-[11px] leading-5">
+                {message.debugToolCalls.map((toolCall, index) => (
+                  <div key={`${toolCall.name}-${index}`}>
+                    <p className="font-semibold">{toolCall.name}</p>
+                    <p className="break-words">參數：{JSON.stringify(toolCall.arguments)}</p>
+                    <p>檢索結果：{toolCall.result_count} 筆</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </details>
+        )}
+        {!isUser && !isError && !isCancelled && message.actionButtons && message.actionButtons.length > 0 && (
+          <div className="flex flex-wrap gap-2 pt-2">
+            {message.actionButtons.map((action) => (
+              <a
+                key={`${action.action}-${action.phone_number}`}
+                href={`tel:${action.phone_number}`}
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-bold text-white shadow-md transition-transform hover:scale-[1.02] hover:bg-secondary/90 focus:outline-none focus:ring-2 focus:ring-secondary/30"
+              >
+                <MaterialIcon icon="call" size={18} />
+                <span>{action.label}</span>
+              </a>
+            ))}
+          </div>
+        )}
+
+        {!isUser &&
+          !isError &&
+          message.interactionMode === "clarify" &&
+          message.clarifyingQuestions &&
+          message.clarifyingQuestions.length > 0 && (
+            <section className="mt-3 rounded-lg border border-secondary/20 bg-secondary-container/20 p-4">
+              <div className="flex items-center gap-2 text-sm font-bold text-secondary">
+                <MaterialIcon icon="help" size={18} />
+                <span>AI 需要更多您的資訊</span>
+              </div>
+              <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-on-surface">
+                {message.clarifyingQuestions.map((question) => (
+                  <li key={question}>{question}</li>
+                ))}
+              </ol>
+              <div className="mt-4 flex items-end gap-2 rounded-lg border border-secondary/20 bg-white p-2 shadow-sm">
+                <textarea
+                  value={clarification}
+                  onChange={(event) => setClarification(event.target.value)}
+                  placeholder="補充您願意提供的資訊"
+                  rows={2}
+                  disabled={isLoading}
+                  className="min-h-14 flex-1 resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-on-surface/40 disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const content = clarification.trim();
+                    if (!content || isLoading || !onSend) return;
+                    onSend(content);
+                    setClarification("");
+                  }}
+                  disabled={!clarification.trim() || isLoading || !onSend}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="傳送補充資訊"
+                >
+                  <MaterialIcon icon="arrow_forward" size={18} />
+                </button>
+              </div>
+            </section>
+          )}
 
         {/* 底部標示列 */}
         {!isUser && !isError && (message.ragUsed?.status || message.anonymized) && (

@@ -22,6 +22,15 @@ def test_validate_generation_settings():
     }
 
 
+def test_validate_reasoning_effort():
+    assert validate_runtime_config_update({"reasoning_effort": "high"}) == {
+        "reasoning_effort": "high"
+    }
+
+    with pytest.raises(ValueError, match="reasoning_effort is invalid"):
+        validate_runtime_config_update({"reasoning_effort": "deep"})
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

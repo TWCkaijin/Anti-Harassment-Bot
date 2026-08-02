@@ -160,6 +160,12 @@ Prompt Sections 儲存在同一份 Firestore document 的 `agent_prompt_sections
 
 `dev` 的 Admin API 僅寫入 `runtime_config/app_dev`；`main` 僅寫入 `runtime_config/app_main`。
 
+### 情境腳本
+
+情境腳本存放在 Firestore 共用的 `scenario_scripts` collection，dev 與 main 讀取同一份資料。它們由後端依使用者輸入的觸發詞選取，再加入同一次模型請求，不會額外增加模型呼叫。管理面板可新增、編輯、啟用或刪除腳本及其電話 Actions；系統與 Prompt 設定則仍分別寫入 `runtime_config/app_dev` 或 `runtime_config/app_main`。
+
+Admin Panel 的「建立範例情境腳本」會建立目前環境的 `*_call_support` 範例。它在使用者表達想撥打電話、聯絡 113 或基金會時，提供可用電話 action 白名單；模型只能從白名單輸出 action，後端也會再次過濾後才回傳前端的 `tel:` 撥號按鈕。
+
 Admin API：
 
 ```bash

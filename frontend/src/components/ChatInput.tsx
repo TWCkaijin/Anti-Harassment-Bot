@@ -16,9 +16,10 @@ interface ChatInputProps {
   onSend: (message: string, imageBase64?: string, imageUrl?: string) => void;
   isLoading?: boolean;
   suggestedReplies?: string[];
+  onStop?: () => void;
 }
 
-export default function ChatInput({ onSend, isLoading, suggestedReplies = [] }: ChatInputProps) {
+export default function ChatInput({ onSend, isLoading, suggestedReplies = [], onStop }: ChatInputProps) {
   const { t } = useI18n();
   const [value, setValue] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -110,11 +111,10 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [] }: 
   const hasContent = value.trim().length > 0 || selectedFile !== null;
 
   return (
-    <footer className="px-6 lg:px-10 pb-6 lg:pb-10 bg-transparent">
+    <footer className="px-6 lg:px-10 pb-2 lg:pb-4 bg-transparent">
       <div className="w-full relative">
         {suggestedReplies.length > 0 && (
-          <section className="mb-3" aria-label="建議提問">
-            <p className="mb-2 text-xs font-semibold text-on-surface/60">建議提問</p>
+          <section className="my-3" aria-label="建議回覆">
             <div className="flex flex-wrap gap-2">
               {suggestedReplies.map((suggestion) => (
                 <button
@@ -177,20 +177,20 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [] }: 
           />
 
           <button
-            onClick={handleSend}
-            disabled={!hasContent || isLoading}
+            onClick={isLoading ? onStop : handleSend}
+            disabled={isLoading ? !onStop : !hasContent}
             className={`
               w-10 h-10 lg:w-12 lg:h-12 rounded-full flex items-center justify-center text-white transition-all group shrink-0 mb-0.5 cursor-pointer
               ${
-                hasContent && !isLoading
+                (hasContent && !isLoading) || isLoading
                   ? "bg-primary hover:bg-primary/90 shadow-md"
                   : "bg-primary/40 cursor-not-allowed"
               }
             `}
-            aria-label={t.sendMessage}
+            aria-label={isLoading ? "停止回覆" : t.sendMessage}
           >
             <MaterialIcon
-              icon="arrow_forward"
+              icon={isLoading ? "stop" : "arrow_forward"}
               size={24}
               className={hasContent && !isLoading ? "group-hover:translate-x-0.5 transition-transform" : ""}
             />
@@ -198,8 +198,8 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [] }: 
         </div>
 
         {/* 底部免責聲明 */}
-        <div className="text-center mt-4">
-          <p className="text-[12px] text-on-surface/40">
+        <div className="mt-2 text-center">
+          <p className="text-[10px] leading-4 text-on-surface/40">
             {t.aiDisclaimer}{" "}
             <span className="text-primary font-bold cursor-pointer hover:underline">
               {t.hotline113}

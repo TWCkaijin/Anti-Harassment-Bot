@@ -83,6 +83,44 @@ def test_chat_response_shape(monkeypatch):
     assert data["emotion_color"] == "green"
     assert data["suggested_replies"] == ["我想先了解申訴流程", "我需要緊急協助"]
     assert "session_id" in data
+    assert "debug_tool_calls" not in data
+
+
+def test_chat_returns_tool_call_diagnostics_in_development_mode(monkeypatch):
+    class FakeAgent:
+        async def run(self, **kwargs):
+            return AgentResult(
+                reply=(
+                    '{"emotion":"冷靜","emotion_color":"green","reply":"我已完成查詢。",'
+                    '"suggested_replies":["我想看更多資料","我想知道下一步"]}'
+                ),
+                tool_calls=[
+                    {
+                        "name": "retrieve_harassment_knowledge",
+                        "arguments": {"query": "申訴期限", "data_type": "law"},
+                        "result_count": 2,
+                    }
+                ],
+            )
+
+    monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(
+        chat_module, "get_runtime_config", lambda: fake_runtime_config(development_mode=True)
+    )
+
+    response = app.test_client().post(
+        "/api/v1/chat/",
+        json={"message": "申訴期限多久", "history": [], "use_rag": True},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["debug_tool_calls"] == [
+        {
+            "name": "retrieve_harassment_knowledge",
+            "arguments": {"query": "申訴期限", "data_type": "law"},
+            "result_count": 2,
+        }
+    ]
 
 
 def test_chat_passes_use_rag_false(monkeypatch):
@@ -111,6 +149,43 @@ def test_chat_passes_use_rag_false(monkeypatch):
     assert response.get_json()["rag_used"] == {"status": False, "sources": []}
 
 
+def test_chat_returns_only_scenario_approved_phone_actions(monkeypatch):
+    class FakeAgent:
+        async def run(self, **kwargs):
+            return AgentResult(
+                reply=(
+                    '{"emotion":"焦慮","emotion_color":"yellow","reply":"可以撥打 113。",'
+                    '"suggested_replies":["我想撥打 113","我想先了解流程"],'
+                    '"action_buttons":[{"action":"tel","phone_number":"113"},'
+                    '{"action":"tel","phone_number":"000"}]}'
+                ),
+                available_actions=[
+                    {
+                        "action": "tel",
+                        "phone_number": "113",
+                        "label": "撥打 113 保護專線",
+                    }
+                ],
+            )
+
+    monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(chat_module, "get_runtime_config", lambda: fake_runtime_config())
+
+    response = app.test_client().post(
+        "/api/v1/chat/",
+        json={"message": "我想撥打 113", "history": [], "use_rag": False},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["action_buttons"] == [
+        {
+            "action": "tel",
+            "phone_number": "113",
+            "label": "撥打 113 保護專線",
+        }
+    ]
+
+
 def test_chat_repairs_bare_newlines_inside_json_string(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
@@ -134,6 +209,57 @@ def test_chat_repairs_bare_newlines_inside_json_string(monkeypatch):
     assert data["reply"] == "第一段\n\n第二段"
     assert data["emotion"] == "冷靜"
     assert data["emotion_color"] == "green"
+
+
+def test_chat_renders_literal_escape_sequences_before_markdown_response(monkeypatch):
+    class FakeAgent:
+        async def run(self, **kwargs):
+            return AgentResult(
+                reply=(
+                    '{"emotion":"冷靜","emotion_color":"green",'
+                    '"reply":"第一段\\\\n\\\\n## 下一步\\\\n- 保留訊息紀錄",'
+                    '"suggested_replies":["我想補充細節","我想知道申訴期限"]}'
+                )
+            )
+
+    monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(chat_module, "get_runtime_config", lambda: fake_runtime_config())
+
+    response = app.test_client().post(
+        "/api/v1/chat/",
+        json={"message": "測試跳脫字元", "history": [], "use_rag": False},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["reply"] == "第一段\n\n## 下一步\n- 保留訊息紀錄"
+
+
+def test_chat_returns_clarification_questions(monkeypatch):
+    class FakeAgent:
+        async def run(self, **kwargs):
+            return AgentResult(
+                reply=(
+                    '{"emotion":"焦慮","emotion_color":"yellow","reply":"我想先了解情況。",'
+                    '"suggested_replies":["我可以補充關係","我可以補充發生地點"],'
+                    '"interaction_mode":"clarify",'
+                    '"clarifying_questions":["對方和您是什麼關係？","事件發生在哪個場域？"]}'
+                )
+            )
+
+    monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
+    monkeypatch.setattr(chat_module, "get_runtime_config", lambda: fake_runtime_config())
+
+    response = app.test_client().post(
+        "/api/v1/chat/",
+        json={"message": "我不知道這算不算", "history": [], "use_rag": False},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["interaction_mode"] == "clarify"
+    assert response.get_json()["clarifying_questions"] == [
+        "對方和您是什麼關係？",
+        "事件發生在哪個場域？",
+    ]
 
 
 def test_parse_agent_json_response_strips_code_fence():

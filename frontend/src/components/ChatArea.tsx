@@ -18,6 +18,7 @@ interface ChatAreaProps {
   retryStatus?: string | null;
   onSend: (message: string, imageBase64?: string, imageUrl?: string) => void;
   onOpenSidebar: () => void;
+  onStop: () => void;
 }
 
 export default function ChatArea({
@@ -26,6 +27,7 @@ export default function ChatArea({
   retryStatus,
   onSend,
   onOpenSidebar,
+  onStop,
 }: ChatAreaProps) {
   const { t } = useI18n();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -127,7 +129,7 @@ export default function ChatArea({
         {hasMessages ? (
           <div className="w-full px-6 lg:px-10 py-8 space-y-10">
             {messages.map((msg) => (
-              <MessageItem key={msg.id} message={msg} />
+              <MessageItem key={msg.id} message={msg} isLoading={isLoading} onSend={onSend} />
             ))}
             {isLoading && <TypingIndicator message={retryStatus} />}
             <div ref={messagesEndRef} className="h-4" />
@@ -143,6 +145,7 @@ export default function ChatArea({
           onSend={onSend}
           isLoading={isLoading}
           suggestedReplies={suggestedReplies}
+          onStop={onStop}
         />
       )}
     </main>

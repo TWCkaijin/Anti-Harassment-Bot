@@ -116,6 +116,11 @@ def fake_runtime_config(**overrides):
     return RuntimeConfig(**data)
 
 
+@pytest.fixture(autouse=True)
+def disable_scenario_script_firestore_reads(monkeypatch):
+    monkeypatch.setattr(agent_module, "get_matching_scenario_scripts", lambda user_message: ())
+
+
 @pytest.mark.asyncio
 async def test_agent_returns_without_tool_call(monkeypatch):
     completions = FakeCompletions(
@@ -156,6 +161,25 @@ async def test_agent_omits_max_tokens_when_runtime_config_is_unlimited(monkeypat
     await agent.run("測試", use_rag=False)
 
     assert "max_tokens" not in completions.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_agent_passes_runtime_reasoning_effort_to_openrouter(monkeypatch):
+    completions = FakeCompletions(
+        [FakeResponse(FakeMessage(content='{"emotion":"冷靜"}', tool_calls=None))]
+    )
+    agent = make_agent(completions)
+    monkeypatch.setattr(
+        agent_module,
+        "get_runtime_config",
+        lambda: fake_runtime_config(reasoning_effort="high"),
+    )
+
+    await agent.run("測試", use_rag=False)
+
+    assert completions.calls[0]["extra_body"] == {
+        "reasoning": {"effort": "high", "exclude": True}
+    }
 
 
 @pytest.mark.asyncio
@@ -234,6 +258,8 @@ async def test_agent_tool_call_returns_sources(monkeypatch):
     assert completions.calls[0]["temperature"] == completions.calls[1]["temperature"]
     assert completions.calls[0]["top_p"] == completions.calls[1]["top_p"]
     assert completions.calls[0]["max_tokens"] == completions.calls[1]["max_tokens"]
+    assert "extra_body" not in completions.calls[0]
+    assert "extra_body" not in completions.calls[1]
     assert agent.rag.calls[0]["data_type"] == "law"
     assert agent.rag.calls[0]["top_k"] == 3
     assert agent.rag.calls[0]["collection_names_by_data_type"] == {
@@ -241,6 +267,13 @@ async def test_agent_tool_call_returns_sources(monkeypatch):
         "judgment": "rag_judgments",
         "remedy": "rag_remedies",
     }
+    assert result.tool_calls == [
+        {
+            "name": "retrieve_harassment_knowledge",
+            "arguments": {"query": "申訴期限", "data_type": "law"},
+            "result_count": 1,
+        }
+    ]
     tool_message = completions.calls[1]["messages"][-1]
     assert tool_message["role"] == "tool"
     assert "[參考資料 - 性騷擾防治法第13條]" in tool_message["content"]
@@ -268,15 +301,32 @@ async def test_agent_tool_call_passes_judgment_data_type(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_agent_directly_retrieves_all_sources_for_past_case_questions(monkeypatch):
+async def test_agent_never_falls_back_to_user_message_for_missing_tool_query(monkeypatch):
+    invalid_tool_call = FakeToolCall("placeholder", data_type="all")
+    invalid_tool_call.function.arguments = json.dumps({"data_type": "all"})
+    completions = FakeCompletions([FakeResponse(FakeMessage(tool_calls=[invalid_tool_call]))])
+    agent = make_agent(completions)
+    monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
+
+    with pytest.raises(ValueError, match="Tool call query must be a non-empty string"):
+        await agent.run("使用者原始問題不得成為檢索 query", use_rag=True)
+
+    assert agent.rag.calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_uses_model_tool_call_for_past_case_questions(monkeypatch):
     completions = FakeCompletions(
         [
+            FakeResponse(
+                FakeMessage(tool_calls=[FakeToolCall("性騷擾判決案例與準備資料", data_type="all")])
+            ),
             FakeResponse(
                 FakeMessage(
                     content='{"emotion":"冷靜","emotion_color":"green","reply":"先整理證據。"}',
                     tool_calls=None,
                 )
-            )
+            ),
         ]
     )
     agent = make_agent(completions)
@@ -286,8 +336,9 @@ async def test_agent_directly_retrieves_all_sources_for_past_case_questions(monk
 
     assert result.rag_used is True
     assert agent.rag.calls[0]["data_type"] == "all"
-    assert len(completions.calls) == 1
-    assert "tools" not in completions.calls[0]
+    assert agent.rag.calls[0]["query"] == "性騷擾判決案例與準備資料"
+    assert len(completions.calls) == 2
+    assert "tools" in completions.calls[0]
 
 
 @pytest.mark.asyncio

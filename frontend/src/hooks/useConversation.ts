@@ -5,7 +5,15 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { ApiError, sendChat, type ChatResponse, type MessageItem, type RagInfo } from "../services/api";
+import {
+  ApiError,
+  sendChat,
+  type ActionButton,
+  type ChatResponse,
+  type DebugToolCall,
+  type MessageItem,
+  type RagInfo,
+} from "../services/api";
 
 // ── 型別定義 ──────────────────────────────────────────────────────────────
 
@@ -17,9 +25,14 @@ export interface ConversationMessage {
   anonymized?: boolean;
   ragUsed?: RagInfo;
   isError?: boolean;
+  isCancelled?: boolean;
   emotion?: string; // 加入的情緒標籤
   emotionColor?: string; // 情緒對應的顏色
   suggestedReplies?: string[];
+  actionButtons?: ActionButton[];
+  interactionMode?: "answer" | "clarify";
+  clarifyingQuestions?: string[];
+  debugToolCalls?: DebugToolCall[];
   imageUrl?: string; // 圖片預覽網址 (僅 frontend 顯示用)
 }
 
@@ -38,6 +51,14 @@ const MAX_MESSAGES_PER_SESSION = 100;
 const MAX_HISTORY_TO_SEND = 20; // 每次最多傳送最近 20 輪給後端
 const MAX_RETRYABLE_CHAT_ATTEMPTS = 2;
 const RETRY_MESSAGE = "伺服器回傳錯誤，正在重試中";
+const CHAT_PROGRESS_STAGES = [
+  "正在匿名化",
+  "正在分析",
+  "正在產生檢索資訊",
+  "正在檢索資料庫",
+  "正在生成回覆",
+] as const;
+const CHAT_PROGRESS_STAGE_DURATION_MS = 1000;
 
 // ── 輔助函式 ─────────────────────────────────────────────────────────────
 
@@ -95,6 +116,7 @@ export function useConversation(sessionId?: string) {
   // 同步到 localStorage
   const sessionsRef = useRef(sessions);
   const loadingSessionIdsRef = useRef<Set<string>>(new Set());
+  const abortControllersRef = useRef(new Map<string, AbortController>());
   useEffect(() => {
     sessionsRef.current = sessions;
   });
@@ -177,8 +199,17 @@ export function useConversation(sessionId?: string) {
       }
 
       setError(null);
-      setSessionRetryStatus(targetSessionId, null);
+      setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_STAGES[0]);
       setSessionLoading(targetSessionId, true);
+      const abortController = new AbortController();
+      abortControllersRef.current.set(targetSessionId, abortController);
+      const progressStartedAt = Date.now();
+      const progressTimers = CHAT_PROGRESS_STAGES.slice(1).map((stage, index) =>
+        window.setTimeout(
+          () => setSessionRetryStatus(targetSessionId, stage),
+          CHAT_PROGRESS_STAGE_DURATION_MS * (index + 1)
+        )
+      );
 
       // 建立使用者訊息
       const userMsg: ConversationMessage = {
@@ -215,7 +246,7 @@ export function useConversation(sessionId?: string) {
               history: recentHistory,
               use_rag: true,
               image_base64: imageBase64,
-            });
+            }, abortController.signal);
             break;
           } catch (err) {
             if (
@@ -223,6 +254,7 @@ export function useConversation(sessionId?: string) {
               err.retryable &&
               attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
             ) {
+              progressTimers.forEach((timer) => window.clearTimeout(timer));
               setSessionRetryStatus(targetSessionId, RETRY_MESSAGE);
               await delay(500 * (attempt + 1));
               continue;
@@ -235,6 +267,24 @@ export function useConversation(sessionId?: string) {
           throw new Error("Chat response is missing after retry attempts");
         }
 
+        const minimumProgressDuration =
+          CHAT_PROGRESS_STAGES.length * CHAT_PROGRESS_STAGE_DURATION_MS;
+        const remainingProgressTime = Math.max(
+          0,
+          minimumProgressDuration - (Date.now() - progressStartedAt)
+        );
+        if (remainingProgressTime > 0) {
+          await delay(remainingProgressTime);
+        }
+
+        if (abortController.signal.aborted) {
+          setSessions((prev) => prev.map((session) => session.id === targetSessionId ? {
+            ...session,
+            messages: [...session.messages, { id: generateId(), role: "assistant", content: "", timestamp: Date.now(), isCancelled: true }],
+          } : session));
+          return;
+        }
+
         const assistantMsg: ConversationMessage = {
           id: generateId(),
           role: "assistant",
@@ -243,6 +293,10 @@ export function useConversation(sessionId?: string) {
           anonymized: response.anonymized,
           ragUsed: response.rag_used,
           suggestedReplies: response.suggested_replies,
+          actionButtons: response.action_buttons,
+          interactionMode: response.interaction_mode,
+          clarifyingQuestions: response.clarifying_questions,
+          debugToolCalls: response.debug_tool_calls,
         };
 
         setSessions((prev) =>
@@ -267,6 +321,13 @@ export function useConversation(sessionId?: string) {
           })
         );
       } catch (err) {
+        if (abortController.signal.aborted) {
+          setSessions((prev) => prev.map((session) => session.id === targetSessionId ? {
+            ...session,
+            messages: [...session.messages, { id: generateId(), role: "assistant", content: "", timestamp: Date.now(), isCancelled: true }],
+          } : session));
+          return;
+        }
         const errorMsg =
           err instanceof ApiError
             ? `服務暫時無法使用：${err.debugMessage ?? err.detail ?? err.message}`
@@ -290,12 +351,18 @@ export function useConversation(sessionId?: string) {
           )
         );
       } finally {
+        progressTimers.forEach((timer) => window.clearTimeout(timer));
         setSessionRetryStatus(targetSessionId, null);
         setSessionLoading(targetSessionId, false);
+        abortControllersRef.current.delete(targetSessionId);
       }
     },
     [currentSessionId, messages, setSessionLoading, setSessionRetryStatus]
   );
+
+  const stopCurrentResponse = useCallback(() => {
+    abortControllersRef.current.get(currentSessionId)?.abort();
+  }, [currentSessionId]);
 
   // ── 清除當前 Session ──────────────────────────────────────────────────
 
@@ -362,6 +429,7 @@ export function useConversation(sessionId?: string) {
     isLoading,
     error,
     retryStatus,
+    stopCurrentResponse,
     sendMessage,
     createNewSession,
     setCurrentSessionId,

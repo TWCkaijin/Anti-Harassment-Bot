@@ -3,7 +3,7 @@ const zhTW = {
   appTitle: "性騷擾防治智能 AI",
   appSubtitle: "溫暖守護 · 匿名安全 · 法律知識庫",
   brandName: "溫暖守護 AI",
-  brandSub: "AI 助理",
+  brandSub: "屏東縣政府性騷擾治理政策Agent",
 
   // ── Sidebar ──
   newChat: "開啟新對話",
