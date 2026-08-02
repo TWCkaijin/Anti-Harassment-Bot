@@ -95,7 +95,9 @@ def _parse_script(script_id: str, data: dict[str, Any]) -> ScenarioScript | None
         return None
     normalized_instruction = instruction.strip()
     normalized_keywords = tuple(
-        keyword.strip().lower() for keyword in keywords if isinstance(keyword, str) and keyword.strip()
+        keyword.strip().lower()
+        for keyword in keywords
+        if isinstance(keyword, str) and keyword.strip()
     )
     if not normalized_instruction or not normalized_keywords:
         return None
@@ -131,7 +133,11 @@ def list_scenario_scripts(force_refresh: bool = False) -> tuple[ScenarioScript, 
     """Return all shared scripts, including disabled ones, for Admin management."""
     global _cached_at, _cached_scripts
     now = monotonic()
-    if not force_refresh and _cached_scripts is not None and now - _cached_at < SCENARIO_SCRIPTS_CACHE_TTL_SECONDS:
+    if (
+        not force_refresh
+        and _cached_scripts is not None
+        and now - _cached_at < SCENARIO_SCRIPTS_CACHE_TTL_SECONDS
+    ):
         return _cached_scripts
     try:
         _cached_scripts = _scripts_from_firestore()
@@ -173,7 +179,9 @@ def validate_scenario_script(script_id: str, payload: dict[str, Any]) -> dict[st
     }
 
 
-def upsert_scenario_script(script_id: str, payload: dict[str, Any], updated_by: str) -> ScenarioScript:
+def upsert_scenario_script(
+    script_id: str, payload: dict[str, Any], updated_by: str
+) -> ScenarioScript:
     document = validate_scenario_script(script_id, payload)
     document["updated_by"] = updated_by
     document["updated_at"] = firestore.SERVER_TIMESTAMP
@@ -202,9 +210,7 @@ def seed_example_scenario_scripts(updated_by: str = "admin") -> tuple[ScenarioSc
     invalidate_scenario_scripts_cache()
     example_ids = set(example_documents)
     return tuple(
-        script
-        for script in list_scenario_scripts(True)
-        if script.script_id in example_ids
+        script for script in list_scenario_scripts(True) if script.script_id in example_ids
     )
 
 

@@ -176,8 +176,8 @@ def chat():
 
     # 執行 Async 邏輯並驗證 OpenRouter 的 structured response。
     try:
-        reply, session_id, rag_used_status, rag_sources, permitted_actions, tool_calls = asyncio.run(
-            _run_chat_logic()
+        reply, session_id, rag_used_status, rag_sources, permitted_actions, tool_calls = (
+            asyncio.run(_run_chat_logic())
         )
     except Exception as exc:
         logger.warning("OpenRouter request failed: %s", exc)
@@ -205,16 +205,16 @@ def chat():
     ]
 
     response_payload = {
-            "reply": structured_response.reply,
-            "session_id": session_id,
-            "anonymized": was_anonymized,
-            "rag_used": {"status": rag_used_status, "sources": rag_sources},
-            "emotion": structured_response.emotion,
-            "emotion_color": structured_response.emotion_color,
-            "suggested_replies": structured_response.suggested_replies,
-            "action_buttons": action_buttons,
-            "interaction_mode": structured_response.interaction_mode,
-            "clarifying_questions": structured_response.clarifying_questions,
+        "reply": structured_response.reply,
+        "session_id": session_id,
+        "anonymized": was_anonymized,
+        "rag_used": {"status": rag_used_status, "sources": rag_sources},
+        "emotion": structured_response.emotion,
+        "emotion_color": structured_response.emotion_color,
+        "suggested_replies": structured_response.suggested_replies,
+        "action_buttons": action_buttons,
+        "interaction_mode": structured_response.interaction_mode,
+        "clarifying_questions": structured_response.clarifying_questions,
     }
     if runtime_config.development_mode:
         response_payload["debug_tool_calls"] = tool_calls
