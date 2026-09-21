@@ -11,9 +11,12 @@ import {
   type ActionButton,
   type ChatResponse,
   type DebugToolCall,
-  type MessageItem,
   type RagInfo,
 } from "../services/api";
+import {
+  createChatRequest,
+  getUserMessageValidationError,
+} from "./conversationHistory";
 
 // ── 型別定義 ──────────────────────────────────────────────────────────────
 
@@ -48,7 +51,6 @@ export interface ConversationSession {
 const STORAGE_KEY = "harass_bot_conversations";
 const MAX_SESSIONS = 10;
 const MAX_MESSAGES_PER_SESSION = 100;
-const MAX_HISTORY_TO_SEND = 20; // 每次最多傳送最近 20 輪給後端
 const MAX_RETRYABLE_CHAT_ATTEMPTS = 2;
 const RETRY_MESSAGE = "伺服器回傳錯誤，正在重試中";
 const CHAT_PROGRESS_STAGES = [
@@ -191,10 +193,14 @@ export function useConversation(sessionId?: string) {
   const sendMessage = useCallback(
     async (userInput: string, imageBase64?: string, imageUrl?: string) => {
       const targetSessionId = currentSessionId;
-      if (
-        (!userInput.trim() && !imageBase64) ||
-        loadingSessionIdsRef.current.has(targetSessionId)
-      ) {
+      if (loadingSessionIdsRef.current.has(targetSessionId)) return;
+
+      const normalizedUserInput = userInput.trim();
+      if (!normalizedUserInput && !imageBase64) return;
+
+      const validationError = getUserMessageValidationError(userInput);
+      if (validationError) {
+        setError(validationError);
         return;
       }
 
@@ -215,7 +221,7 @@ export function useConversation(sessionId?: string) {
       const userMsg: ConversationMessage = {
         id: generateId(),
         role: "user",
-        content: userInput.trim(),
+        content: normalizedUserInput,
         timestamp: Date.now(),
         imageUrl: imageUrl, // 加入圖片預覽 URL
       };
@@ -232,26 +238,24 @@ export function useConversation(sessionId?: string) {
         )
       );
 
-      // 取得最近 N 輪歷史（不含剛加入的使用者訊息）
-      const recentHistory: MessageItem[] = messages
-        .slice(-MAX_HISTORY_TO_SEND * 2)
-        .map(({ role, content }) => ({ role, content }));
+      // 取得 API-safe 歷史（不含剛加入的使用者訊息）
+      const request = createChatRequest(messages, normalizedUserInput, imageBase64);
 
       try {
         let response: ChatResponse | undefined;
         for (let attempt = 0; attempt <= MAX_RETRYABLE_CHAT_ATTEMPTS; attempt += 1) {
           try {
-            response = await sendChat({
-              message: userInput.trim(),
-              history: recentHistory,
-              use_rag: true,
-              image_base64: imageBase64,
-            }, abortController.signal);
+            response = await sendChat(request, abortController.signal);
             break;
           } catch (err) {
             if (
               err instanceof ApiError &&
               err.retryable &&
+              // A rate-limit response must not be retried before its Retry-After
+              // window. The client does not hold requests that long, so surface the
+              // error and let the person retry intentionally instead of consuming
+              // the remaining quota with fixed 0.5/1 second retries.
+              err.status !== 429 &&
               attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
             ) {
               progressTimers.forEach((timer) => window.clearTimeout(timer));

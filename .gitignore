@@ -3,6 +3,7 @@
 Agent.md
 USAGE.md
 TODO.md
+!/TODO.md
 
 
 # ===== Python =====
@@ -30,6 +31,7 @@ data
 
 # ===== Node / Frontend =====
 node_modules/
+.pnpm-store/
 frontend/dist/
 frontend/.vite/
 frontend/coverage/

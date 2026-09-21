@@ -17,6 +17,18 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 
+class RAGUnavailableError(RuntimeError):
+    """A temporary RAG dependency failure, distinct from a valid empty result."""
+
+
+class RAGEmbeddingError(RAGUnavailableError):
+    """The configured embedding provider could not produce a query vector."""
+
+
+class RAGVectorSearchError(RAGUnavailableError):
+    """The vector database could not complete a retrieval query."""
+
+
 @dataclass
 class RAGDocument:
     """
