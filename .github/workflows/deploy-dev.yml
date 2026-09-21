@@ -5,19 +5,35 @@ on:
     branches:
       - dev
 
+concurrency:
+  group: deploy-preview-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  deploy-preview:
-    name: Build & Deploy to Preview
-    runs-on: ubuntu-latest
+  quality-gate:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
-      pull-requests: write
+
+  deploy-preview:
+    name: Build & Deploy to Preview
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_changed: ${{ steps.filter.outputs.frontend }}
+      backend_changed: ${{ steps.filter.outputs.backend }}
+      preview_url: ${{ steps.preview-deploy.outputs.preview_url }}
+    permissions:
+      contents: read
     env:
       FUNCTIONS_REGION: asia-east1
       PREVIEW_CHANNEL: dev-preview
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Check for changes
         uses: dorny/paths-filter@v3
@@ -26,11 +42,19 @@ jobs:
           filters: |
             frontend:
               - 'frontend/**'
+              - 'firebase.json'
+              - '.firebaserc'
+              - '.firebaseignore'
+              - '.github/workflows/**'
             backend:
               - 'backend/**'
               - 'main.py'
               - 'pyproject.toml'
               - 'uv.lock'
+              - 'firebase.json'
+              - '.firebaserc'
+              - '.firebaseignore'
+              - '.github/workflows/**'
 
       # ── Frontend Build ──────────────────────────────────────────────────
       - name: Setup pnpm
@@ -129,10 +153,19 @@ jobs:
           PREVIEW_URL=$(grep -oP 'Channel URL \(\K[^\)]+' deploy.log | head -1 || echo "https://anti-harassment-bot--dev-preview.web.app")
           echo "preview_url=${PREVIEW_URL}" >> $GITHUB_OUTPUT
 
+  comment-preview:
+    name: Comment Preview Result
+    needs: deploy-preview
+    if: >-
+      needs.deploy-preview.outputs.frontend_changed == 'true' ||
+      needs.deploy-preview.outputs.backend_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
       - name: Find open PRs targeting dev
         id: find-pr
         uses: actions/github-script@v7
-        if: steps.filter.outputs.frontend == 'true' || steps.filter.outputs.backend == 'true'
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -146,19 +179,24 @@ jobs:
             return pr ? pr.number : null;
 
       - name: Comment preview URL on dev PR
-        if: steps.find-pr.outputs.result != 'null' && (steps.filter.outputs.frontend == 'true' || steps.filter.outputs.backend == 'true')
+        if: steps.find-pr.outputs.result != 'null'
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.find-pr.outputs.result }}
+          FRONTEND_CHANGED: ${{ needs.deploy-preview.outputs.frontend_changed }}
+          BACKEND_CHANGED: ${{ needs.deploy-preview.outputs.backend_changed }}
+          PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const prNumber = ${{ steps.find-pr.outputs.result }};
-            if (!prNumber) return;
+            const prNumber = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(prNumber) || prNumber <= 0) return;
             let body = `## 🔍 Preview Deployment (dev)\n\n`;
-            if ('${{ steps.filter.outputs.frontend }}' === 'true') {
-              const previewUrl = '${{ steps.preview-deploy.outputs.preview_url }}';
+            if (process.env.FRONTEND_CHANGED === 'true') {
+              const previewUrl = process.env.PREVIEW_URL;
               body += `✅ 已部署至 Firebase Hosting Preview Channel\n🔗 **Preview URL**: ${previewUrl}\n`;
             }
-            if ('${{ steps.filter.outputs.backend }}' === 'true') {
+            if (process.env.BACKEND_CHANGED === 'true') {
               body += `✅ Backend Updated\n📦 **Preview API**: \`https://asia-east1-anti-harassment-bot.cloudfunctions.net/api_preview\`\n`;
             }
             body += `⏳ **有效期限**: 7 天\n\n*由 GitHub Actions 自動部署*`;

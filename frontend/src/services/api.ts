@@ -15,7 +15,7 @@ export interface MessageItem {
 
 export interface ChatRequest {
   message: string;
-  history: Array<{ role: string; content: string }>;
+  history: MessageItem[];
   use_rag: boolean;
   image_base64?: string;
 }
@@ -27,6 +27,7 @@ export interface RagSource {
   type: RagSourceType;
   collection?: string;
   doc_id?: string;
+  distance?: number;
 }
 
 export interface RagInfo {
@@ -54,11 +55,32 @@ export interface ChatResponse {
   debug_tool_calls?: DebugToolCall[];
 }
 
-export interface ActionButton {
+export interface TelActionButton {
   action: "tel";
   phone_number: string;
   label: string;
 }
+
+export interface UrlActionButton {
+  action: "url";
+  url: string;
+  label: string;
+}
+
+export interface ActionOption {
+  label: string;
+  value: string;
+}
+
+export interface OptionsActionButton {
+  action: "options";
+  id: string;
+  label: string;
+  title: string;
+  options: ActionOption[];
+}
+
+export type ActionButton = TelActionButton | UrlActionButton | OptionsActionButton;
 
 export interface ScenarioSkill {
   id: string;
@@ -82,6 +104,7 @@ export interface HealthResponse {
 export interface RuntimeConfig {
   openrouter_model: string;
   rag_retrieval_top_k: number;
+  rag_distance_threshold: number | null;
   enable_anonymization: boolean;
   temperature: number;
   top_p: number;
@@ -107,6 +130,7 @@ export type RuntimeConfigUpdate = Partial<
     RuntimeConfig,
     | "openrouter_model"
     | "rag_retrieval_top_k"
+    | "rag_distance_threshold"
     | "enable_anonymization"
     | "temperature"
     | "top_p"
@@ -144,6 +168,47 @@ export class ApiError extends Error {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeValidationIssue(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (!isRecord(value)) return undefined;
+
+  const legacyLocation = Array.isArray(value.loc)
+    ? value.loc.filter((part): part is string | number =>
+        typeof part === "string" || typeof part === "number"
+      ).join(".")
+    : "";
+  const location = typeof value.field === "string" ? value.field : legacyLocation;
+  const message = typeof value.message === "string"
+    ? value.message
+    : typeof value.msg === "string"
+      ? value.msg
+      : "";
+  const combined = [location, message].filter(Boolean).join(": ");
+  return combined || undefined;
+}
+
+export function normalizeApiErrorDetail(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const issues = value.map(normalizeValidationIssue).filter((issue): issue is string => Boolean(issue));
+    return issues.length > 0 ? issues.join("; ") : undefined;
+  }
+  if (!isRecord(value)) return undefined;
+
+  const issue = normalizeValidationIssue(value);
+  if (issue) return issue;
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
 // ── 共用 fetch 包裝 ──────────────────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -164,10 +229,18 @@ async function apiFetch<T>(
     let retryable = false;
     let debugMessage: string | undefined;
     try {
-      const errorData = await response.json();
-      detail = errorData.detail ?? undefined;
-      retryable = errorData.retryable === true;
-      debugMessage = errorData.debug_message ?? undefined;
+      const errorData: unknown = await response.json();
+      if (isRecord(errorData)) {
+        const summary = normalizeApiErrorDetail(errorData.detail);
+        const validationErrors = normalizeApiErrorDetail(errorData.errors);
+        detail = validationErrors
+          ? [summary, validationErrors].filter(Boolean).join(": ")
+          : summary;
+        retryable = errorData.retryable === true;
+        debugMessage = typeof errorData.debug_message === "string"
+          ? errorData.debug_message
+          : undefined;
+      }
     } catch {
       // 非 JSON 回應
     }

@@ -117,9 +117,9 @@ pnpm run build
 
 ## CI/CD
 
-- `CI - Lint & Test`：所有 branch push 與 PR 都會執行後端 ruff、pytest、前端 ESLint 與 build。
-- `Deploy - Preview (dev)`：push 到 `dev` 時，依變更範圍建置前端與/或部署 preview function。
-- `Deploy - Production (main)`：只有變更合併並 push 到 `main` 後，才依變更範圍部署正式 Hosting 與/或 production function。PR 則只執行 `CI - Lint & Test`，不會部署 production。
+- `CI - Lint & Test`：所有 branch push 與 PR 都會執行後端 Ruff/pytest、前端 ESLint/Vitest coverage 與 build。
+- `Deploy - Preview (dev)`：push 到 `dev` 時，必須先通過同一份 CI gate，再依變更範圍建置前端與/或部署 preview function。
+- `Deploy - Production (main)`：只有變更合併並 push 到 `main`、通過 CI gate 後，才依變更範圍部署正式 Hosting 與/或 production function。PR 則只執行 `CI - Lint & Test`，不會部署 production。
 
 ## Runtime Admin Panel
 
@@ -140,6 +140,7 @@ Runtime config 預設存放於：
 - `development_mode`
 - `agent_prompt_sections`
 - `rag_retrieval_top_k`
+- `rag_distance_threshold`（`0`–`2`，`null` 表示不套用門檻）
 - `enable_anonymization`
 - `enable_image_upload`
 - `rag_collections.law`
@@ -149,7 +150,7 @@ Runtime config 預設存放於：
 
 Prompt Sections 儲存在同一份 Firestore document 的 `agent_prompt_sections` map。未設定的 section 只會使用程式碼內建的預設內容；不會再讀取 Firebase Remote Config、GitHub Actions Variables 或整份 legacy prompt。
 
-`max_tokens` 設為 `0` 時，後端不會把 token 上限傳給 OpenRouter；其他正整數則會成為單次模型回覆的上限。`development_mode` 僅建議在 `app_dev` 開啟：它會在可重試的模型或 schema 錯誤中，額外回傳伺服器診斷字串給前端，正式環境應維持關閉。
+`max_tokens` 設為 `0` 時，後端不會把 token 上限傳給 OpenRouter；其他正整數則會成為單次模型回覆的上限。`development_mode` 僅建議在 `app_dev` 開啟：它會在可重試的模型或 schema 錯誤中，額外回傳伺服器診斷字串給前端；當 `ENVIRONMENT=production` 時，後端會強制將它關閉。
 
 聊天回覆採用 OpenRouter Structured Outputs 的 JSON Schema 契約，必須包含情緒、回覆文字與 2 至 4 個建議回覆。若模型或供應端無法符合契約，前端會顯示「伺服器回傳錯誤，正在重試中」並自動重試兩次；請選用支援 Structured Outputs 的 OpenRouter 模型。
 
@@ -162,9 +163,19 @@ Prompt Sections 儲存在同一份 Firestore document 的 `agent_prompt_sections
 
 ### 情境腳本
 
-情境腳本存放在 Firestore 共用的 `scenario_scripts` collection，dev 與 main 讀取同一份資料。它們由後端依使用者輸入的觸發詞選取，再加入同一次模型請求，不會額外增加模型呼叫。管理面板可新增、編輯、啟用或刪除腳本及其電話 Actions；系統與 Prompt 設定則仍分別寫入 `runtime_config/app_dev` 或 `runtime_config/app_main`。
+情境行為由 [`backend/app/skills/`](backend/app/skills/README.md) 的 `SKILL.md` 定義；Firestore 共用的 `scenario_scripts` collection 可用相同 ID 覆寫內建設定，dev 與 main 讀取同一份資料。後端依目前訊息與上一輪對話的觸發詞選取 Skills，將指令與可用動作加入同一次模型請求，不增加模型呼叫。Firestore 尚無資料時也能使用內建 Skills。
 
-Admin Panel 的「建立範例情境腳本」會建立目前環境的 `*_call_support` 範例。它在使用者表達想撥打電話、聯絡 113 或基金會時，提供可用電話 action 白名單；模型只能從白名單輸出 action，後端也會再次過濾後才回傳前端的 `tel:` 撥號按鈕。
+Action button 是共用元件與資料契約，機關名稱及不同情境的使用方式都由 Skill 設定：
+
+| 動作 | Skill 設定內容 | 使用者點擊後 |
+| --- | --- | --- |
+| `tel` | `label`、`phone_number` | 開啟裝置撥號介面 |
+| `url` | `label`、`url` | 在新分頁開啟 HTTP(S) 網頁 |
+| `options` | 唯一 `id`、`label`、`title`、2–8 個 `{label, value}` 選項 | 開啟選項彈窗；選定後將 `value` 作為使用者訊息送出，取消不送出 |
+
+內建範例包括「電話求助」、「官方網站入口」（屏東縣政府首頁）及「選擇下一步」。可分別輸入「我想撥打 113」、「請提供屏東縣政府網頁」、「請彈出選項讓我選擇下一步」驗證。Skill 指令會教 agent 何時提供按鈕；模型只回傳動作 selector，API 從已核准的 Skill 補齊標籤、網址與選項，不採用模型自行編造的按鈕內容。
+
+管理面板的 Skills 設定可編輯觸發詞、情境指令及三種通用 Actions。「建立範例」只把缺少的內建 Skills 寫入共用 collection，不覆蓋已有設定；儲存同 ID 可覆寫內建 Skill，停用則阻止它在對話中使用。刪除內建 Skill 會保留停用覆寫，避免內建預設再次出現；自訂 Skill 則刪除文件。設定快取為 60 秒，管理操作會清除目前程序的快取。系統與 Prompt 設定仍分別寫入 `runtime_config/app_dev` 或 `runtime_config/app_main`。
 
 Admin API：
 
@@ -202,8 +213,21 @@ curl -X POST -H "Authorization: Bearer $ADMIN_API_KEY" \
 - `RUNTIME_CONFIG_DOCUMENT_ID`
 - `RUNTIME_CONFIG_CACHE_TTL_SECONDS`
 - `CORS_ORIGINS`
+- `CORS_PREVIEW_ORIGIN_REGEXES`
+- `API_MAX_CONTENT_LENGTH_BYTES`
+- `CHAT_APP_CHECK_ENABLED`
+- `CHAT_RATE_LIMIT_ENABLED`
+- `CHAT_RATE_LIMIT_REQUESTS`
+- `CHAT_RATE_LIMIT_WINDOW_SECONDS`
 - `ENABLE_ANONYMIZATION`
 - `ENVIRONMENT`
+
+`CORS_ORIGINS` 必須使用完整 origin allowlist，不接受 `*`。Firebase Hosting preview URL
+會加入隨機 hash，因此另由 `CORS_PREVIEW_ORIGIN_REGEXES` 控制；後端只接受錨定且符合
+Firebase preview hostname 形狀的安全 pattern。`CHAT_APP_CHECK_ENABLED`
+預設為 `false`；只有在前端已對每個 chat request 附上有效
+`X-Firebase-AppCheck` 後才可啟用。內建 chat rate limit 僅為單一 Functions/Cloud Run
+instance 的 burst defense，不取代跨 instance 全域限流、預算告警或 circuit breaker。
 
 GitHub Actions 部署只需要設定 Secrets：`FIREBASE_TOKEN`、`FIREBASE_SERVICE_ACCOUNT_JSON`、`OPENROUTER_API_KEY` 與 `ADMIN_API_KEY`。不要再設定模型、RAG、匿名化或 Prompt 的 GitHub Actions Variables；它們的雲端來源是 Firestore runtime config。
 
@@ -228,3 +252,7 @@ uv run python -m backend.scripts.ingest.all_to_firestore
 - 請勿將 `.env`、Firebase service account、OpenRouter API key 或任何真實個資提交到 Git。
 - 本服務不應被視為法律意見、醫療建議或心理諮商。
 - 若使用者處於立即危險，請優先聯絡 `110`、`113`、`1955` 或所在地正式求助管道。
+
+## 授權
+
+Copyright 2026 Kai-Chun Wu. 授權採用 [Apache License 2.0](LICENSE)，授權日期為 2026-08-03。

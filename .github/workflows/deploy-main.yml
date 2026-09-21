@@ -5,9 +5,20 @@ on:
     branches:
       - main
 
+concurrency:
+  group: deploy-production-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  quality-gate:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   deploy-production:
     name: Build & Deploy to Production
+    needs: quality-gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -16,6 +27,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Check for changes
         uses: dorny/paths-filter@v3
@@ -24,11 +37,19 @@ jobs:
           filters: |
             frontend:
               - 'frontend/**'
+              - 'firebase.json'
+              - '.firebaserc'
+              - '.firebaseignore'
+              - '.github/workflows/**'
             backend:
               - 'backend/**'
               - 'main.py'
               - 'pyproject.toml'
               - 'uv.lock'
+              - 'firebase.json'
+              - '.firebaserc'
+              - '.firebaseignore'
+              - '.github/workflows/**'
 
       # ── Frontend Build ──────────────────────────────────────────────────
       - name: Setup pnpm
