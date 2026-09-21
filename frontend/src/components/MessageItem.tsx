@@ -8,6 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import MaterialIcon from "./MaterialIcon";
+import ActionButtons from "./ActionButtons";
 import { useI18n } from "../i18n";
 import React from "react";
 import type { ConversationMessage } from "../hooks/useConversation";
@@ -220,18 +221,7 @@ export default function MessageItem({ message, isLoading, onSend }: MessageItemP
           </details>
         )}
         {!isUser && !isError && !isCancelled && message.actionButtons && message.actionButtons.length > 0 && (
-          <div className="flex flex-wrap gap-2 pt-2">
-            {message.actionButtons.map((action) => (
-              <a
-                key={`${action.action}-${action.phone_number}`}
-                href={`tel:${action.phone_number}`}
-                className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-bold text-white shadow-md transition-transform hover:scale-[1.02] hover:bg-secondary/90 focus:outline-none focus:ring-2 focus:ring-secondary/30"
-              >
-                <MaterialIcon icon="call" size={18} />
-                <span>{action.label}</span>
-              </a>
-            ))}
-          </div>
+          <ActionButtons actions={message.actionButtons} isLoading={isLoading} onSend={onSend} />
         )}
 
         {!isUser &&

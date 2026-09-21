@@ -11,6 +11,10 @@ import {
 } from "react";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
+import {
+  getUserMessageValidationError,
+  MAX_USER_MESSAGE_CHARACTERS,
+} from "../hooks/conversationHistory";
 
 interface ChatInputProps {
   onSend: (message: string, imageBase64?: string, imageUrl?: string) => void;
@@ -69,6 +73,7 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], on
     if (isLoading) return;
     const trimmed = value.trim();
     if (!trimmed && !selectedFile) return;
+    if (getUserMessageValidationError(value)) return;
 
     let base64: string | undefined;
     if (selectedFile) {
@@ -108,7 +113,10 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], on
     }
   };
 
-  const hasContent = value.trim().length > 0 || selectedFile !== null;
+  const messageLength = value.trim().length;
+  const messageValidationError = getUserMessageValidationError(value);
+  const hasContent = messageLength > 0 || selectedFile !== null;
+  const canSend = hasContent && !messageValidationError;
 
   return (
     <footer className="px-6 lg:px-10 pb-2 lg:pb-4 bg-transparent">
@@ -170,6 +178,8 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], on
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onInput={handleInput}
+            aria-invalid={Boolean(messageValidationError)}
+            aria-describedby="chat-message-length"
             placeholder={t.inputPlaceholder}
             rows={1}
             className="flex-1 bg-transparent border-none focus:border-none focus:ring-0 outline-none focus:outline-none px-2 lg:px-4 py-2.5 text-on-surface placeholder:text-on-surface/30 font-medium resize-none leading-relaxed"
@@ -178,11 +188,11 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], on
 
           <button
             onClick={isLoading ? onStop : handleSend}
-            disabled={isLoading ? !onStop : !hasContent}
+            disabled={isLoading ? !onStop : !canSend}
             className={`
               w-10 h-10 lg:w-12 lg:h-12 rounded-full flex items-center justify-center text-white transition-all group shrink-0 mb-0.5 cursor-pointer
               ${
-                (hasContent && !isLoading) || isLoading
+                (canSend && !isLoading) || isLoading
                   ? "bg-primary hover:bg-primary/90 shadow-md"
                   : "bg-primary/40 cursor-not-allowed"
               }
@@ -192,10 +202,18 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], on
             <MaterialIcon
               icon={isLoading ? "stop" : "arrow_forward"}
               size={24}
-              className={hasContent && !isLoading ? "group-hover:translate-x-0.5 transition-transform" : ""}
+              className={canSend && !isLoading ? "group-hover:translate-x-0.5 transition-transform" : ""}
             />
           </button>
         </div>
+
+        <p
+          id="chat-message-length"
+          className={`mt-1 px-4 text-right text-[11px] ${messageValidationError ? "text-error" : "text-on-surface/45"}`}
+          role={messageValidationError ? "alert" : undefined}
+        >
+          {messageValidationError ?? `${messageLength.toLocaleString("en-US")} / ${MAX_USER_MESSAGE_CHARACTERS.toLocaleString("en-US")}`}
+        </p>
 
         {/* 底部免責聲明 */}
         <div className="mt-2 text-center">
