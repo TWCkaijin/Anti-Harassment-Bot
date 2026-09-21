@@ -10,13 +10,13 @@ import {
   seedScenarioScripts,
   updateRuntimeConfig,
   updateScenarioSkill,
-  type ActionButton,
   type RuntimeConfig,
   type RuntimeConfigUpdate,
   type ScenarioSkill,
   type ScenarioSkillInput,
 } from "../services/api";
 import MaterialIcon from "./MaterialIcon";
+import SkillActionsEditor from "./SkillActionsEditor";
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -26,6 +26,8 @@ interface AdminPanelProps {
 type AdminTab = "system" | "prompts" | "skills";
 
 const TOKEN_STORAGE_KEY = "harassment_bot_admin_token";
+// TODO(auth): Replace the persistent static token with short-lived admin authentication.
+// Token lifecycle changes are intentionally outside this implementation batch.
 const PROMPT_SECTION_FIELDS = [
   ["core_mission", "你的核心使命", 5],
   ["communication_principles", "溝通原則", 5],
@@ -41,6 +43,7 @@ const emptyPromptSections = Object.fromEntries(PROMPT_SECTION_FIELDS.map(([key])
 const emptyConfig: RuntimeConfig = {
   openrouter_model: "",
   rag_retrieval_top_k: 3,
+  rag_distance_threshold: null,
   enable_anonymization: true,
   temperature: 0.2,
   top_p: 1,
@@ -70,6 +73,7 @@ function configToUpdate(config: RuntimeConfig): RuntimeConfigUpdate {
   return {
     openrouter_model: config.openrouter_model,
     rag_retrieval_top_k: config.rag_retrieval_top_k,
+    rag_distance_threshold: config.rag_distance_threshold,
     enable_anonymization: config.enable_anonymization,
     temperature: config.temperature,
     top_p: config.top_p,
@@ -130,11 +134,15 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
   };
 
   const handleError = (err: unknown, fallback: string) => {
-    if (err instanceof ApiError && err.status === 401) {
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      setVerifiedToken("");
-      setIsAuthenticated(false);
-      setError("Token 無效或已失效，請重新驗證");
+    if (err instanceof ApiError) {
+      if (err.status === 401) {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+        setVerifiedToken("");
+        setIsAuthenticated(false);
+        setError("Token 無效或已失效，請重新驗證");
+        return;
+      }
+      setError(err.debugMessage ?? err.detail ?? err.message);
       return;
     }
     setError(err instanceof Error ? err.message : fallback);
@@ -229,13 +237,17 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
 
   const removeSkill = async () => {
     if (!verifiedToken || !selectedSkill) return;
-    if (!window.confirm(`刪除「${selectedSkill.name}」？`)) return;
+    if (!window.confirm(`刪除「${selectedSkill.name}」？內建 Skill 會改為停用。`)) return;
     setIsSaving(true);
     try {
       await deleteScenarioSkill(verifiedToken, selectedSkill.id);
-      setSkills((current) => current.filter((skill) => skill.id !== selectedSkill.id));
-      setSelectedSkillId(null);
-      setStatus("已刪除共用 Skill");
+      const result = await getScenarioSkills(verifiedToken);
+      const retainedSkill = result.skills.find((skill) => skill.id === selectedSkill.id);
+      setSkills((current) => retainedSkill
+        ? current.map((skill) => skill.id === selectedSkill.id ? retainedSkill : skill)
+        : current.filter((skill) => skill.id !== selectedSkill.id));
+      setSelectedSkillId(retainedSkill?.id ?? null);
+      setStatus(retainedSkill ? "已停用內建 Skill，可重新啟用" : "已刪除共用 Skill");
     } catch (err) {
       handleError(err, "刪除 Skill 失敗");
     } finally {
@@ -251,7 +263,7 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
       const result = await getScenarioSkills(verifiedToken);
       setSkills(result.skills);
       setSelectedSkillId("call_support");
-      setStatus("已建立共用的電話求助範例 Skill");
+      setStatus("已建立共用的範例 Skills");
     } catch (err) {
       handleError(err, "建立範例 Skill 失敗");
     } finally {
@@ -317,7 +329,7 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
 
 function SystemSettings({ config, onChange }: { config: RuntimeConfig; onChange: (config: RuntimeConfig) => void }) {
   const set = (updates: Partial<RuntimeConfig>) => onChange({ ...config, ...updates });
-  return <div className="mx-auto max-w-2xl space-y-7"><div><h3 className="text-xl font-bold">系統設定</h3><p className="mt-1 text-sm text-on-surface/60">模型、檢索資料庫與 runtime 開關只作用於目前環境。</p></div><section className="space-y-4"><h4 className="text-sm font-bold text-on-surface">模型與生成</h4><Field label="OpenRouter Model"><input value={config.openrouter_model} onChange={(event) => set({ openrouter_model: event.target.value })} className="input" /></Field><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="Temperature"><input type="number" min="0" max="2" step="0.05" value={config.temperature} onChange={(event) => set({ temperature: Number(event.target.value) })} className="input" /></Field><Field label="Top P"><input type="number" min="0.01" max="1" step="0.05" value={config.top_p} onChange={(event) => set({ top_p: Number(event.target.value) })} className="input" /></Field><Field label="Max tokens"><input type="number" min="0" max="8192" value={config.max_tokens} onChange={(event) => set({ max_tokens: Number(event.target.value) })} className="input" /><span className="mt-1 block text-[11px] text-on-surface/50">0 表示不設定上限</span></Field><Field label="思考等級"><select value={config.reasoning_effort} onChange={(event) => set({ reasoning_effort: event.target.value as RuntimeConfig["reasoning_effort"] })} className="input"><option value="none">關閉</option><option value="minimal">最少</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">很高</option><option value="max">最大</option></select><span className="mt-1 block text-[11px] text-on-surface/50">需使用支援 reasoning 的模型</span></Field></div></section><section className="space-y-4 border-t border-outline/10 pt-6"><h4 className="text-sm font-bold">檢索設定</h4><Field label="RAG Retrieval Top K"><input type="number" min="1" max="20" value={config.rag_retrieval_top_k} onChange={(event) => set({ rag_retrieval_top_k: Number(event.target.value) })} className="input" /></Field>{(["law", "judgment", "remedy"] as const).map((key) => <Field key={key} label={key}><input value={config.rag_collections[key]} onChange={(event) => set({ rag_collections: { ...config.rag_collections, [key]: event.target.value } })} className="input" /></Field>)}</section><section className="space-y-3 border-t border-outline/10 pt-6"><h4 className="text-sm font-bold">Runtime 開關</h4><Toggle label="啟用 PII 匿名化" checked={config.enable_anonymization} onChange={(checked) => set({ enable_anonymization: checked })} /><Toggle label="允許圖片送入模型" checked={config.enable_image_upload} onChange={(checked) => set({ enable_image_upload: checked })} /><Toggle label="Development mode" checked={config.development_mode} onChange={(checked) => set({ development_mode: checked })} /></section></div>;
+  return <div className="mx-auto max-w-2xl space-y-7"><div><h3 className="text-xl font-bold">系統設定</h3><p className="mt-1 text-sm text-on-surface/60">模型、檢索資料庫與 runtime 開關只作用於目前環境。</p></div><section className="space-y-4"><h4 className="text-sm font-bold text-on-surface">模型與生成</h4><Field label="OpenRouter Model"><input value={config.openrouter_model} onChange={(event) => set({ openrouter_model: event.target.value })} className="input" /></Field><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="Temperature"><input type="number" min="0" max="2" step="0.05" value={config.temperature} onChange={(event) => set({ temperature: Number(event.target.value) })} className="input" /></Field><Field label="Top P"><input type="number" min="0.01" max="1" step="0.05" value={config.top_p} onChange={(event) => set({ top_p: Number(event.target.value) })} className="input" /></Field><Field label="Max tokens"><input type="number" min="0" max="8192" value={config.max_tokens} onChange={(event) => set({ max_tokens: Number(event.target.value) })} className="input" /><span className="mt-1 block text-[11px] text-on-surface/50">0 表示不設定上限</span></Field><Field label="思考等級"><select value={config.reasoning_effort} onChange={(event) => set({ reasoning_effort: event.target.value as RuntimeConfig["reasoning_effort"] })} className="input"><option value="none">關閉</option><option value="minimal">最少</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">很高</option><option value="max">最大</option></select><span className="mt-1 block text-[11px] text-on-surface/50">需使用支援 reasoning 的模型</span></Field></div></section><section className="space-y-4 border-t border-outline/10 pt-6"><h4 className="text-sm font-bold">檢索設定</h4><Field label="RAG Retrieval Top K"><input type="number" min="1" max="20" value={config.rag_retrieval_top_k} onChange={(event) => set({ rag_retrieval_top_k: Number(event.target.value) })} className="input" /></Field><Field label="RAG Distance Threshold"><input type="number" min="0" max="2" step="0.01" value={config.rag_distance_threshold ?? ""} onChange={(event) => set({ rag_distance_threshold: event.target.value === "" ? null : Number(event.target.value) })} className="input" placeholder="停用" /><span className="mt-1 block text-[11px] text-on-surface/50">0–2；留空表示停用，數值越小代表越相似</span></Field>{(["law", "judgment", "remedy"] as const).map((key) => <Field key={key} label={key}><input value={config.rag_collections[key]} onChange={(event) => set({ rag_collections: { ...config.rag_collections, [key]: event.target.value } })} className="input" /></Field>)}</section><section className="space-y-3 border-t border-outline/10 pt-6"><h4 className="text-sm font-bold">Runtime 開關</h4><Toggle label="啟用 PII 匿名化" checked={config.enable_anonymization} onChange={(checked) => set({ enable_anonymization: checked })} /><Toggle label="允許圖片送入模型" checked={config.enable_image_upload} onChange={(checked) => set({ enable_image_upload: checked })} /><Toggle label="Development mode" checked={config.development_mode} onChange={(checked) => set({ development_mode: checked })} /></section></div>;
 }
 
 function PromptSettings({ config, onChange }: { config: RuntimeConfig; onChange: (config: RuntimeConfig) => void }) {
@@ -325,9 +337,42 @@ function PromptSettings({ config, onChange }: { config: RuntimeConfig; onChange:
 }
 
 function SkillsSettings({ skills, selectedSkill, onSelect, onCreate, onChange }: { skills: ScenarioSkill[]; selectedSkill: ScenarioSkill | null; onSelect: (id: string) => void; onCreate: () => void; onChange: (changes: Partial<ScenarioSkill>) => void }) {
-  const actions = selectedSkill?.actions ?? [];
-  const setActions = (next: ActionButton[]) => onChange({ actions: next });
-  return <div className="mx-auto flex max-w-3xl flex-col gap-5 md:flex-row"><aside className="w-full shrink-0 border-b border-outline/10 pb-4 md:w-48 md:border-r md:border-b-0 md:pr-4 md:pb-0"><div className="mb-3 flex items-center justify-between"><h3 className="font-bold">Skills</h3><button onClick={onCreate} className="rounded-md p-1 text-primary hover:bg-primary-container" aria-label="新增 Skill"><MaterialIcon icon="add" size={18} /></button></div><p className="mb-3 text-xs leading-5 text-on-surface/55">共用於 dev 與 main。</p><div className="flex gap-1 overflow-x-auto md:block md:space-y-1">{skills.map((skill) => <button key={skill.id} onClick={() => onSelect(skill.id)} className={`w-40 shrink-0 rounded-lg px-3 py-2 text-left text-sm md:w-full ${selectedSkill?.id === skill.id ? "bg-primary-container text-primary" : "hover:bg-surface-container"}`}><span className="block truncate font-semibold">{skill.name}</span><span className="text-[11px] opacity-65">{skill.enabled ? "啟用" : "停用"} · {skill.priority}</span></button>)}</div></aside>{selectedSkill ? <div className="min-w-0 flex-1 space-y-5"><div><h3 className="text-xl font-bold">{selectedSkill.name}</h3><p className="mt-1 text-sm text-on-surface/60">觸發後會在同一次模型呼叫注入情境腳本。</p></div><Field label="Skill ID"><input value={selectedSkill.id} disabled className="input cursor-not-allowed opacity-55" /></Field><div className="grid gap-3 sm:grid-cols-[1fr_140px]"><Field label="名稱"><input value={selectedSkill.name} onChange={(event) => onChange({ name: event.target.value })} className="input" /></Field><Field label="優先順序"><input type="number" value={selectedSkill.priority} onChange={(event) => onChange({ priority: Number(event.target.value) })} className="input" /></Field></div><Toggle label="啟用此 Skill" checked={selectedSkill.enabled} onChange={(enabled) => onChange({ enabled })} /><Field label="觸發詞（以逗號分隔）"><input value={selectedSkill.trigger_keywords.join(", ")} onChange={(event) => onChange({ trigger_keywords: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} className="input" placeholder="撥打, 電話, 113" /></Field><Field label="情境指令"><textarea value={selectedSkill.instruction} onChange={(event) => onChange({ instruction: event.target.value })} rows={8} className="input resize-y leading-6" placeholder="模型在此情境下必須遵守的行為" /></Field><section className="space-y-3 border-t border-outline/10 pt-5"><div className="flex items-center justify-between"><div><h4 className="font-bold">電話 Actions</h4><p className="text-xs text-on-surface/55">僅允許 tel；伺服器會以此白名單過濾模型輸出。</p></div><button onClick={() => setActions([...actions, { action: "tel", label: "", phone_number: "" }])} className="rounded-lg border border-secondary/25 px-3 py-2 text-xs font-bold text-secondary">新增電話</button></div>{actions.map((action, index) => <div key={index} className="grid gap-2 sm:grid-cols-[1fr_150px_32px]"><input value={action.label} onChange={(event) => setActions(actions.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item))} className="input" placeholder="按鈕文字" /><input value={action.phone_number} onChange={(event) => setActions(actions.map((item, itemIndex) => itemIndex === index ? { ...item, phone_number: event.target.value } : item))} className="input" placeholder="113" /><button onClick={() => setActions(actions.filter((_, itemIndex) => itemIndex !== index))} className="rounded-lg px-2 py-2 text-error hover:bg-error-container/40 sm:px-0" aria-label="移除電話"><MaterialIcon icon="delete" size={18} /></button></div>)}</section></div> : <div className="flex flex-1 items-center justify-center text-sm text-on-surface/55">選擇或新增一個 Skill</div>}</div>;
+  return (
+    <div className="mx-auto flex max-w-3xl flex-col gap-5 md:flex-row">
+      <aside className="w-full shrink-0 border-b border-outline/10 pb-4 md:w-48 md:border-r md:border-b-0 md:pr-4 md:pb-0">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-bold">Skills</h3>
+          <button onClick={onCreate} className="rounded-md p-1 text-primary hover:bg-primary-container" aria-label="新增 Skill"><MaterialIcon icon="add" size={18} /></button>
+        </div>
+        <p className="mb-3 text-xs leading-5 text-on-surface/55">共用於 dev 與 main。</p>
+        <div className="flex gap-1 overflow-x-auto md:block md:space-y-1">
+          {skills.map((skill) => (
+            <button key={skill.id} onClick={() => onSelect(skill.id)} className={`w-40 shrink-0 rounded-lg px-3 py-2 text-left text-sm md:w-full ${selectedSkill?.id === skill.id ? "bg-primary-container text-primary" : "hover:bg-surface-container"}`}>
+              <span className="block truncate font-semibold">{skill.name}</span>
+              <span className="text-[11px] opacity-65">{skill.enabled ? "啟用" : "停用"} · {skill.priority}</span>
+            </button>
+          ))}
+        </div>
+      </aside>
+      {selectedSkill ? (
+        <div className="min-w-0 flex-1 space-y-5">
+          <div>
+            <h3 className="text-xl font-bold">{selectedSkill.name}</h3>
+            <p className="mt-1 text-sm text-on-surface/60">觸發後會在同一次模型呼叫注入情境指令與可用按鈕。</p>
+          </div>
+          <Field label="Skill ID"><input value={selectedSkill.id} disabled className="input cursor-not-allowed opacity-55" /></Field>
+          <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
+            <Field label="名稱"><input value={selectedSkill.name} onChange={(event) => onChange({ name: event.target.value })} className="input" /></Field>
+            <Field label="優先順序"><input type="number" value={selectedSkill.priority} onChange={(event) => onChange({ priority: Number(event.target.value) })} className="input" /></Field>
+          </div>
+          <Toggle label="啟用此 Skill" checked={selectedSkill.enabled} onChange={(enabled) => onChange({ enabled })} />
+          <Field label="觸發詞（以逗號分隔）"><input value={selectedSkill.trigger_keywords.join(", ")} onChange={(event) => onChange({ trigger_keywords: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} className="input" placeholder="請輸入此情境的關鍵詞" /></Field>
+          <Field label="情境指令"><textarea value={selectedSkill.instruction} onChange={(event) => onChange({ instruction: event.target.value })} rows={8} className="input resize-y leading-6" placeholder="說明何時使用下方按鈕、選擇哪些按鈕，以及如何回應使用者" /></Field>
+          <SkillActionsEditor key={selectedSkill.id} actions={selectedSkill.actions} onChange={(actions) => onChange({ actions })} />
+        </div>
+      ) : <div className="flex flex-1 items-center justify-center text-sm text-on-surface/55">選擇或新增一個 Skill</div>}
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="block"><span className="text-xs font-semibold text-on-surface/60">{label}</span>{children}</label>; }

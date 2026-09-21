@@ -1,15 +1,129 @@
 """Structured response contract shared by the OpenRouter agent and chat API."""
 
-from typing import Literal
+import ipaddress
+import re
+from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+
+ASSISTANT_REPLY_MAX_LENGTH = 6000
 
 
-class AssistantActionButton(BaseModel):
-    """A structured action chosen by the model and verified by the server."""
+PHONE_PATTERN = r"^[0-9+()-]{3,24}$"
+ACTION_ID_PATTERN = r"^[a-z][a-z0-9_-]{1,63}$"
 
+
+def validate_action_url(value: str) -> str:
+    """Accept an explicit HTTP(S) destination without ambiguous authority syntax."""
+    if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError("Action URLs must not contain whitespace or control characters")
+    if "\\" in value:
+        raise ValueError("Action URLs must not contain backslashes")
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        port = parsed.port
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or (port is not None and not 1 <= port <= 65535)
+        ):
+            raise ValueError("Action URLs require an HTTP(S) host without credentials")
+        try:
+            ipaddress.ip_address(hostname)
+        except ValueError:
+            ascii_host = hostname.rstrip(".").encode("idna").decode("ascii")
+            if len(ascii_host) > 253 or not all(
+                re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label)
+                for label in ascii_host.split(".")
+            ):
+                raise ValueError("Action URL host is invalid") from None
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError("Action URL must be a valid HTTP(S) URL without credentials") from exc
+    return value
+
+
+class _StrictAction(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class TelephoneActionButton(_StrictAction):
     action: Literal["tel"]
-    phone_number: str = Field(pattern=r"^[0-9+()-]{3,24}$")
+    phone_number: str = Field(pattern=PHONE_PATTERN)
+
+
+class URLActionButton(_StrictAction):
+    action: Literal["url"]
+    url: str = Field(min_length=1, max_length=2048)
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def require_http_url(cls, value):
+        return validate_action_url(value) if isinstance(value, str) else value
+
+
+class OptionsActionButton(_StrictAction):
+    action: Literal["options"]
+    id: str = Field(pattern=ACTION_ID_PATTERN)
+
+
+AssistantActionButton = Annotated[
+    TelephoneActionButton | URLActionButton | OptionsActionButton, Field(discriminator="action")
+]
+
+
+class ActionOption(_StrictAction):
+    label: str = Field(min_length=1, max_length=80)
+    value: str = Field(min_length=1, max_length=500)
+
+
+class ConfiguredTelephoneAction(TelephoneActionButton):
+    label: str = Field(min_length=1, max_length=80)
+
+
+class ConfiguredURLAction(URLActionButton):
+    label: str = Field(min_length=1, max_length=80)
+
+
+class ConfiguredOptionsAction(OptionsActionButton):
+    label: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=160)
+    options: list[ActionOption] = Field(min_length=2, max_length=8)
+
+    @field_validator("options")
+    @classmethod
+    def require_distinct_values(cls, values: list[ActionOption]) -> list[ActionOption]:
+        if len({option.value for option in values}) != len(values):
+            raise ValueError("Options must have distinct values")
+        return values
+
+
+ConfiguredAction = Annotated[
+    ConfiguredTelephoneAction | ConfiguredURLAction | ConfiguredOptionsAction,
+    Field(discriminator="action"),
+]
+configured_action_adapter = TypeAdapter(ConfiguredAction)
+
+
+def action_selector(action: BaseModel | dict[str, Any]) -> dict[str, str]:
+    """Project trusted display configuration into the selector the model may return."""
+    data = action.model_dump() if isinstance(action, BaseModel) else action
+    kind = data.get("action")
+    target_field = {"tel": "phone_number", "url": "url", "options": "id"}.get(kind)
+    if target_field is None or not isinstance(data.get(target_field), str):
+        raise ValueError("Unknown or incomplete action selector")
+    return {"action": kind, target_field: data[target_field]}
+
+
+def action_key(action: BaseModel | dict[str, Any]) -> tuple[str, str] | None:
+    try:
+        selector = action_selector(action)
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return selector["action"], next(value for key, value in selector.items() if key != "action")
 
 
 class AssistantChatResponse(BaseModel):
@@ -17,7 +131,7 @@ class AssistantChatResponse(BaseModel):
 
     emotion: str = Field(min_length=1, max_length=40)
     emotion_color: Literal["red", "yellow", "green", "blue", "gray"]
-    reply: str = Field(min_length=1, max_length=6000)
+    reply: str = Field(min_length=1, max_length=ASSISTANT_REPLY_MAX_LENGTH)
     suggested_replies: list[str] = Field(min_length=2, max_length=4)
     action_buttons: list[AssistantActionButton] = Field(default_factory=list, max_length=3)
     interaction_mode: Literal["answer", "clarify"] = "answer"
@@ -84,6 +198,8 @@ OPENROUTER_RESPONSE_FORMAT = {
                 "reply": {
                     "type": "string",
                     "description": "給使用者的完整繁體中文回覆。",
+                    "minLength": 1,
+                    "maxLength": ASSISTANT_REPLY_MAX_LENGTH,
                 },
                 "suggested_replies": {
                     "type": "array",
@@ -94,19 +210,38 @@ OPENROUTER_RESPONSE_FORMAT = {
                 },
                 "action_buttons": {
                     "type": "array",
-                    "description": "僅在目前情境腳本允許時提供的可執行動作。",
+                    "description": "僅選擇目前 Skills 允許的 tel、url 或 options 動作；原樣使用其 selector。",
                     "maxItems": 3,
                     "items": {
-                        "type": "object",
-                        "properties": {
-                            "action": {"type": "string", "enum": ["tel"]},
-                            "phone_number": {
-                                "type": "string",
-                                "description": "情境腳本允許的電話號碼。",
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["tel"]},
+                                    "phone_number": {"type": "string", "pattern": PHONE_PATTERN},
+                                },
+                                "required": ["action", "phone_number"],
+                                "additionalProperties": False,
                             },
-                        },
-                        "required": ["action", "phone_number"],
-                        "additionalProperties": False,
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["url"]},
+                                    "url": {"type": "string", "minLength": 1, "maxLength": 2048},
+                                },
+                                "required": ["action", "url"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "action": {"type": "string", "enum": ["options"]},
+                                    "id": {"type": "string", "pattern": ACTION_ID_PATTERN},
+                                },
+                                "required": ["action", "id"],
+                                "additionalProperties": False,
+                            },
+                        ],
                     },
                 },
                 "interaction_mode": {"type": "string", "enum": ["answer", "clarify"]},

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
+from math import isfinite
 from time import monotonic
 from typing import Any
 
@@ -36,6 +37,7 @@ WRITABLE_FIELDS = {
     "reasoning_effort",
     "agent_prompt_sections",
     "rag_retrieval_top_k",
+    "rag_distance_threshold",
     "enable_anonymization",
     "rag_collections",
     "maintenance_message",
@@ -60,6 +62,7 @@ class RuntimeConfig:
     maintenance_message: str | None = None
     enable_image_upload: bool = True
     development_mode: bool = False
+    rag_distance_threshold: float | None = None
     source: str = "defaults"
     updated_at: str | None = None
     updated_by: str | None = None
@@ -73,6 +76,7 @@ class RuntimeConfig:
 
 _cached_config: RuntimeConfig | None = None
 _cached_at = 0.0
+_last_known_good_config: RuntimeConfig | None = None
 
 
 def _normalize_prompt(value: Any) -> str | None:
@@ -95,7 +99,7 @@ def _validate_prompt_sections(payload: Any) -> dict[str, str]:
             continue
         if not isinstance(value, str):
             raise ValueError(f"{key} must be a string")
-        normalized = value.replace("\r\n", "\n").strip()
+        normalized = value.replace("\\n", "\n").replace("\r\n", "\n").strip()
         if len(normalized) > PROMPT_MAX_LENGTH:
             raise ValueError(f"{key} must be at most {PROMPT_MAX_LENGTH} characters")
         cleaned[key] = normalized
@@ -134,40 +138,46 @@ def _timestamp_to_iso(value: Any) -> str | None:
 
 def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig:
     data = doc_data or {}
-    rag_collections = _default_rag_collections()
-    configured_collections = data.get("rag_collections")
-    if isinstance(configured_collections, dict):
-        for key in RAG_DATA_TYPES:
-            value = configured_collections.get(key)
-            if isinstance(value, str) and value.strip():
-                rag_collections[key] = value.strip()
+    validated: dict[str, Any] = {}
+    invalid_fields: set[str] = set()
+    for key in WRITABLE_FIELDS:
+        if key not in data:
+            continue
+        try:
+            validated.update(validate_runtime_config_update({key: data[key]}))
+        except (TypeError, ValueError, OverflowError) as exc:
+            invalid_fields.add(key)
+            logger.warning("Ignoring invalid Firestore runtime field %s: %s", key, exc)
 
-    try:
-        temperature = float(data.get("temperature", settings.openrouter_temperature))
-    except (TypeError, ValueError):
-        temperature = settings.openrouter_temperature
-    try:
-        top_p = float(data.get("top_p", settings.openrouter_top_p))
-    except (TypeError, ValueError):
-        top_p = settings.openrouter_top_p
-    try:
-        max_tokens = int(data.get("max_tokens", settings.openrouter_max_tokens))
-    except (TypeError, ValueError):
-        max_tokens = settings.openrouter_max_tokens
+    rag_collections = _default_rag_collections()
+    rag_collections.update(validated.get("rag_collections", {}))
 
     return RuntimeConfig(
-        openrouter_model=str(data.get("openrouter_model") or settings.openrouter_model),
-        rag_retrieval_top_k=int(data.get("rag_retrieval_top_k") or settings.rag_retrieval_top_k),
-        enable_anonymization=bool(data.get("enable_anonymization", settings.enable_anonymization)),
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        reasoning_effort=str(data.get("reasoning_effort") or "none"),
-        agent_prompt_sections=_configured_prompt_sections(data.get("agent_prompt_sections")),
+        openrouter_model=validated.get("openrouter_model", settings.openrouter_model),
+        rag_retrieval_top_k=validated.get("rag_retrieval_top_k", settings.rag_retrieval_top_k),
+        enable_anonymization=(
+            True
+            if "enable_anonymization" in invalid_fields
+            else validated.get("enable_anonymization", settings.enable_anonymization)
+        ),
+        temperature=validated.get("temperature", settings.openrouter_temperature),
+        top_p=validated.get("top_p", settings.openrouter_top_p),
+        max_tokens=validated.get("max_tokens", settings.openrouter_max_tokens),
+        reasoning_effort=validated.get("reasoning_effort", "none"),
+        agent_prompt_sections=_configured_prompt_sections(validated.get("agent_prompt_sections")),
         rag_collections=rag_collections,
-        maintenance_message=_normalize_prompt(data.get("maintenance_message")),
-        enable_image_upload=bool(data.get("enable_image_upload", True)),
-        development_mode=bool(data.get("development_mode", False)),
+        maintenance_message=_normalize_prompt(validated.get("maintenance_message")),
+        enable_image_upload=(
+            False
+            if "enable_image_upload" in invalid_fields
+            else validated.get("enable_image_upload", True)
+        ),
+        development_mode=(
+            False
+            if settings.environment == "production"
+            else validated.get("development_mode", False)
+        ),
+        rag_distance_threshold=validated.get("rag_distance_threshold"),
         source=source,
         updated_at=_timestamp_to_iso(data.get("updated_at")),
         updated_by=data.get("updated_by") if isinstance(data.get("updated_by"), str) else None,
@@ -176,7 +186,7 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
 
 def get_runtime_config(force_refresh: bool = False) -> RuntimeConfig:
     """Return runtime config with a short process-local TTL cache."""
-    global _cached_at, _cached_config
+    global _cached_at, _cached_config, _last_known_good_config
     ttl = settings.runtime_config_cache_ttl_seconds
     now = monotonic()
     if not force_refresh and _cached_config is not None and ttl > 0 and now - _cached_at < ttl:
@@ -196,9 +206,21 @@ def get_runtime_config(force_refresh: bool = False) -> RuntimeConfig:
             source = "firestore"
     except Exception as exc:
         logger.warning("Failed to read Firestore runtime config: %s", exc)
+        fallback = _last_known_good_config or _build_config(None, "defaults")
+        safe_fallback = replace(
+            fallback,
+            enable_anonymization=True,
+            development_mode=False,
+            enable_image_upload=False,
+            source="last_known_good" if _last_known_good_config is not None else "safe_defaults",
+        )
+        _cached_config = safe_fallback
+        _cached_at = now
+        return safe_fallback
 
     config = _build_config(doc_data, source)
     _cached_config = config
+    _last_known_good_config = config
     _cached_at = now
     return config
 
@@ -237,7 +259,7 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
                 continue
             if not isinstance(value, str):
                 raise ValueError(f"{key} must be a string")
-            normalized = value.replace("\r\n", "\n").strip()
+            normalized = value.replace("\\n", "\n").replace("\r\n", "\n").strip()
             if key == "openrouter_model" and not normalized:
                 raise ValueError("openrouter_model must be a non-empty string")
             cleaned[key] = normalized
@@ -246,6 +268,8 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
                 numeric_value = float(value)
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{key} must be a number") from exc
+            if not isfinite(numeric_value):
+                raise ValueError(f"{key} must be finite")
             if key == "temperature" and not 0 <= numeric_value <= 2:
                 raise ValueError("temperature must be between 0 and 2")
             if key == "top_p" and not 0 < numeric_value <= 1:
@@ -264,10 +288,24 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("reasoning_effort is invalid")
             cleaned[key] = value
         elif key == "rag_retrieval_top_k":
-            top_k = int(value)
+            try:
+                top_k = int(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("rag_retrieval_top_k must be an integer") from exc
             if top_k < 1 or top_k > 20:
                 raise ValueError("rag_retrieval_top_k must be between 1 and 20")
             cleaned[key] = top_k
+        elif key == "rag_distance_threshold":
+            if value is None:
+                cleaned[key] = None
+                continue
+            try:
+                threshold = float(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("rag_distance_threshold must be a number or null") from exc
+            if not isfinite(threshold) or not 0 <= threshold <= 2:
+                raise ValueError("rag_distance_threshold must be between 0 and 2")
+            cleaned[key] = threshold
         elif key in {"enable_anonymization", "enable_image_upload", "development_mode"}:
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be a boolean")
@@ -292,6 +330,7 @@ def _default_runtime_document() -> dict[str, Any]:
         "reasoning_effort": "none",
         "agent_prompt_sections": get_default_prompt_sections(),
         "rag_retrieval_top_k": settings.rag_retrieval_top_k,
+        "rag_distance_threshold": None,
         "enable_anonymization": settings.enable_anonymization,
         "rag_collections": _default_rag_collections(),
         "maintenance_message": "",
@@ -311,7 +350,7 @@ def _missing_runtime_defaults(existing: dict[str, Any], defaults: dict[str, Any]
                 missing[key] = completed_map
         elif (
             key not in existing
-            or current_value is None
+            or (current_value is None and default_value is not None)
             or (key == "openrouter_model" and not str(current_value).strip())
         ):
             missing[key] = default_value
