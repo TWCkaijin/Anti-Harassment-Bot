@@ -94,12 +94,14 @@ _DEFAULT_SYSTEM_SECTIONS: tuple[tuple[str, str, str], ...] = (
               "emotion": "使用者的當前情緒標籤，例如：焦慮、憤怒、恐懼、冷靜、悲傷、未知",
               "emotion_color": "請從以下預定義顏色中選擇：'red' (恐懼/憤怒), 'yellow' (焦慮/緊張), 'green' (冷靜/放鬆), 'blue' (悲傷/低落), 'gray' (未知/一般)",
               "reply": "你原本準備要回應使用者的完整內容",
-              "suggested_replies": ["根據你剛剛的回覆，提供 2 到 4 個使用者可直接點選的下一句繁體中文短句"],
+              "suggested_replies": ["根據目前的問題，提供 2 到 4 個使用者可選擇後送出的繁體中文短句"],
               "action_buttons": [],
               "interaction_mode": "answer",
               "clarifying_questions": []
             }
             `suggested_replies` 必須是使用者可能會回答的具體短句，不得與 `reply` 重複，也不得放入解釋文字。
+            需要追問時，優先每輪只問一個主要問題，`suggested_replies` 應直接回答該問題；例如詢問事件發生場域時，可提供「在工作場所」、「在學校」、「在公共場所」。
+            `suggested_replies` 一律提供 2 到 4 個不重複的非空短句。若已有適用的 Skill `options` 選單，前端優先呈現設定選項；`suggested_replies` 仍須提供 2 到 4 個相關的延伸回覆，不必複製選單選項。前端自動提供「其他」文字欄位，不要把「其他」加進選項。
             """
         ).strip(),
     ),
@@ -366,9 +368,26 @@ class OpenRouterAgent:
                     "使用者要求開啟網頁、取得連結或選擇下一步時，應依 Skill 提供對應按鈕；"
                     "不能只在 reply 承諾提供按鈕或把 action JSON 寫進 reply。"
                     "不得自行發明電話、網址、選項 ID 或其他 action；標籤與選項由伺服器補齊。"
-                    "按鈕必須由使用者點選才執行；不得宣稱已代為開啟、撥打或送出選擇。"
+                    "tel、url 按鈕必須由使用者點選才執行；不得宣稱已代為開啟或撥打。"
+                    "options 會在回覆下方原本的下一個問答建議位置直接呈現，"
+                    "以設定中的 title 作為問題，各組問題與選項分別對應；不是彈出視窗。"
+                    "使用者先選擇選項或填寫其他文字，再按送出才提交，點選選項不會立即送出。"
+                    "不要宣稱已替使用者選定或送出答案。"
                     "資訊不足而需要追問時，interaction_mode 必須為 clarify，並以 "
-                    "clarifying_questions 輸出一到三個具體問題；否則為 answer 且輸出空陣列。"
+                    "clarifying_questions 輸出具體問題；否則為 answer 且輸出空陣列。"
+                    "優先每輪只問一個主要問題，讓 suggested_replies 的每個短句都是該問題的具體可能答案，"
+                    "例如問發生場域時提供在工作場所、在學校、在公共場所。"
+                    "現有 suggested_replies 沒有逐題綁定欄位，不要用一組互不相干的短句回答多個問題。"
+                    "若確實需要同時追問多題，選項短句必須能清楚回答整組問題，"
+                    "若難以列舉具體答案，仍須提供與問題相關的短句，例如我目前不確定發生地點、"
+                    "我暫時不方便提供發生地點；使用者也能在其他文字欄位自行填寫。"
+                    "追問事實時，不要同時提供無關的 choose_next_step 討論方向選單；"
+                    "只選用能回答當前問題的既有 Skill options，沒有適用選單時使用 "
+                    "clarifying_questions 與 suggested_replies，不自行編造 options payload 或選單 ID。"
+                    "suggested_replies 一律提供 2 到 4 個不重複的非空短句，不可省略或輸出空陣列。"
+                    "已有適用 options 選單時，前端優先呈現設定選項；suggested_replies 仍須提供 "
+                    "2 到 4 個相關的延伸回覆，不必重複選單選項。"
+                    "前端會自動提供其他文字欄位，不要在 suggested_replies 或 Skill 選項額外加入其他。"
                 ),
             }
         )

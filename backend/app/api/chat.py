@@ -171,6 +171,37 @@ def _service_error(
     error_id: str | None = None,
 ):
     """Keep operational diagnostics server-side unless development mode is enabled."""
+    error_message = (
+        json.dumps(
+            exc.errors(include_input=False, include_context=False, include_url=False),
+            ensure_ascii=False,
+        )
+        if isinstance(exc, ValidationError)
+        else str(exc)
+    )
+    # Pydantic's default traceback renders input_value (the model's response).
+    # Keep the original frames but replace its final exception text for logging.
+    log_exception = (
+        ValueError(f"{type(exc).__name__}: {error_message}")
+        if isinstance(exc, ValidationError)
+        else exc
+    )
+    logger.error(
+        "Chat request failed [%s]: %s: %s",
+        code,
+        type(exc).__name__,
+        error_message,
+        exc_info=(type(log_exception), log_exception, exc.__traceback__),
+        extra={
+            "event": "chat_request_failed",
+            "error_code": code,
+            "error_type": type(exc).__name__,
+            "error_message": error_message,
+            "http_status": status_code,
+            "retryable": retryable,
+            **({"error_id": error_id} if error_id else {}),
+        },
+    )
     payload = {"code": code, "detail": detail, "retryable": retryable}
     if error_id:
         payload["error_id"] = error_id
@@ -330,25 +361,21 @@ def chat():
     async def _run_chat_logic():
         # 3. 呼叫 OpenRouter Agent (內部已實作 Agentic RAG)
         session_id = str(uuid.uuid4())
-        try:
-            # 傳遞參數給 Agent (若後續 OpenRouterAgent 有回傳 RAG 狀態可再解構)
-            reply = await agent.run(
-                user_message=anonymized_message,
-                history=anonymized_history,
-                image_base64=req_obj.image_base64 if runtime_config.enable_image_upload else None,
-                use_rag=req_obj.use_rag,
-            )
-            return (
-                reply.reply,
-                session_id,
-                reply.rag_used,
-                reply.sources or [],
-                reply.available_actions,
-                reply.tool_calls,
-            )
-        except Exception as exc:
-            logger.exception("AI agent run failed for session %s", session_id)
-            raise exc
+        # Exceptions are recorded with their final status/code by _service_error.
+        reply = await agent.run(
+            user_message=anonymized_message,
+            history=anonymized_history,
+            image_base64=req_obj.image_base64 if runtime_config.enable_image_upload else None,
+            use_rag=req_obj.use_rag,
+        )
+        return (
+            reply.reply,
+            session_id,
+            reply.rag_used,
+            reply.sources or [],
+            reply.available_actions,
+            reply.tool_calls,
+        )
 
     # 執行 Async 邏輯並驗證 OpenRouter 的 structured response。
     try:
@@ -356,7 +383,6 @@ def chat():
             asyncio.run(_run_chat_logic())
         )
     except RAGUnavailableError as exc:
-        logger.warning("RAG request unavailable: %s", exc)
         return _service_error(
             runtime_config,
             exc,
@@ -366,10 +392,8 @@ def chat():
             status_code=503,
         )
     except _RETRYABLE_AGENT_ERRORS as exc:
-        logger.warning("OpenRouter request failed: %s", exc)
         return _retryable_error(runtime_config, exc)
     except _PERMANENT_UPSTREAM_ERRORS as exc:
-        logger.error("OpenRouter rejected the server request: %s", exc)
         return _service_error(
             runtime_config,
             exc,
@@ -380,7 +404,6 @@ def chat():
         )
     except Exception as exc:
         error_id = uuid.uuid4().hex
-        logger.exception("Unexpected chat execution failure error_id=%s", error_id)
         return _service_error(
             runtime_config,
             exc,
@@ -398,7 +421,6 @@ def chat():
             raise ValueError("OpenRouter response must be a JSON object")
         structured_response = AssistantChatResponse.model_validate(data)
     except Exception as exc:
-        logger.warning("OpenRouter response failed schema validation: %s", exc)
         return _retryable_error(runtime_config, exc)
 
     approved_actions = {}

@@ -1,10 +1,12 @@
 """Tests for the Firebase HTTP-to-Flask wrapper."""
 
+import json
 from uuid import UUID
 
 from flask import Request
 
 import main as function_main
+from backend.app.core.logger import GCPJsonFormatter
 
 
 def test_wrapper_delegates_preflight_to_allowlisted_flask_cors():
@@ -44,8 +46,17 @@ def test_wrapper_500_returns_only_generic_detail_and_logged_error_id(monkeypatch
         raise RuntimeError("sensitive wrapper detail")
 
     monkeypatch.setattr(function_main, "app", exploding_app)
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
     origin = function_main.settings.cors_origins[0]
-    request = Request.from_values("/", headers={"Origin": origin})
+    trace_id = "0123456789abcdef0123456789abcdef"
+    request = Request.from_values(
+        "/?token=not-for-logs",
+        headers={
+            "Origin": origin,
+            "X-Cloud-Trace-Context": f"{trace_id}/74;o=1",
+            "Authorization": "Bearer not-for-logs",
+        },
+    )
 
     with caplog.at_level("ERROR"):
         response = function_main.handle_request(request)
@@ -57,6 +68,18 @@ def test_wrapper_500_returns_only_generic_detail_and_logged_error_id(monkeypatch
     assert payload["error_id"] in caplog.text
     assert "sensitive wrapper detail" not in response.get_data(as_text=True)
     assert response.headers["Access-Control-Allow-Origin"] == origin
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "firebase_wrapper_error"
+    )
+    entry = json.loads(GCPJsonFormatter().format(record))
+    assert entry["logging.googleapis.com/trace"] == f"projects/test-project/traces/{trace_id}"
+    assert entry["logging.googleapis.com/spanId"] == "000000000000004a"
+    assert entry["error_id"] == payload["error_id"]
+    assert entry["request_path"] == "/"
+    assert "sensitive wrapper detail" in entry["exception"]
+    assert "not-for-logs" not in json.dumps(entry)
 
 
 def test_wrapper_500_allows_strict_preview_origin_but_not_cross_project(monkeypatch):

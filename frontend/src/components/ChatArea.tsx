@@ -5,7 +5,7 @@
 import { useRef, useEffect, useState} from "react";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
-import type { ConversationMessage } from "../hooks/useConversation";
+import type { ConversationMessage, ReplyContext } from "../hooks/useConversation";
 import MessageItem from "./MessageItem";
 import WelcomeHero from "./WelcomeHero";
 import ChatInput from "./ChatInput";
@@ -16,7 +16,7 @@ interface ChatAreaProps {
   messages: ConversationMessage[];
   isLoading: boolean;
   retryStatus?: string | null;
-  onSend: (message: string, imageBase64?: string, imageUrl?: string) => void;
+  onSend: (message: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext) => void;
   onOpenSidebar: () => void;
   onStop: () => void;
 }
@@ -56,13 +56,13 @@ export default function ChatArea({
 
   const hasMessages = messages.length > 0;
   const latestMessage = messages.at(-1);
-  const suggestedReplies =
-    latestMessage?.role === "assistant" && !latestMessage.isError
-      ? latestMessage.suggestedReplies ?? []
-      : [];
+  const replyPrompt =
+    latestMessage?.role === "assistant" && !latestMessage.isError && !latestMessage.isCancelled
+      ? latestMessage
+      : undefined;
 
   return (
-    <main className="flex-1 flex flex-col h-screen relative bg-white lg:bg-transparent min-w-0">
+    <main className="flex-1 flex flex-col h-full min-h-0 relative bg-white lg:bg-transparent min-w-0">
       {/* 頂部導航列 */}
       <header className="flex items-center justify-between px-6 lg:px-10 py-6 border-b border-outline/10 bg-white shrink-0">
         <div className="flex items-center gap-4 min-w-0">
@@ -125,11 +125,11 @@ export default function ChatArea({
       </header>
 
       {/* 訊息區域 */}
-      <section className="flex-1 overflow-y-auto chat-scrollbar hero-mesh-gradient flex flex-col">
+      <section className="min-h-0 flex-1 overflow-y-auto chat-scrollbar hero-mesh-gradient flex flex-col">
         {hasMessages ? (
           <div className="w-full px-6 lg:px-10 py-8 space-y-10">
             {messages.map((msg) => (
-              <MessageItem key={msg.id} message={msg} isLoading={isLoading} onSend={onSend} />
+              <MessageItem key={msg.id} message={msg} />
             ))}
             {isLoading && <TypingIndicator message={retryStatus} />}
             <div ref={messagesEndRef} className="h-4" />
@@ -144,7 +144,7 @@ export default function ChatArea({
         <ChatInput
           onSend={onSend}
           isLoading={isLoading}
-          suggestedReplies={suggestedReplies}
+          replyPrompt={replyPrompt}
           onStop={onStop}
         />
       )}

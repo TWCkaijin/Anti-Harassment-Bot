@@ -152,6 +152,20 @@ Prompt Sections 儲存在同一份 Firestore document 的 `agent_prompt_sections
 
 `max_tokens` 設為 `0` 時，後端不會把 token 上限傳給 OpenRouter；其他正整數則會成為單次模型回覆的上限。`development_mode` 僅建議在 `app_dev` 開啟：它會在可重試的模型或 schema 錯誤中，額外回傳伺服器診斷字串給前端；當 `ENVIRONMENT=production` 時，後端會強制將它關閉。
 
+`maintenance_message` 有內容時會啟用維護模式，聊天 API 回傳 `503`、`code: "maintenance"`，並顯示該訊息。要恢復服務，請在管理面板「系統設定 → 維護模式」清空維護訊息，再按「儲存變更」。只清空表單但尚未儲存不會改變線上狀態；不需要重置其他 runtime 設定。
+
+Cloud Run／Firebase Functions 的應用日誌一律輸出結構化 JSON，即使 `ENVIRONMENT=development` 也不使用彩色文字或 SDK DEBUG 日誌。所有 5xx 回應（包含維護模式 503）會記錄 `ERROR`，4xx 記錄 `WARNING`；摘要含 `http_status`、`error_code`（若有）、`error_detail`、請求方法與路徑。聊天、管理操作與未捕捉例外另保留錯誤類型、實際原因及 traceback。日誌不擷取聊天本文、圖片、授權標頭、query string 或回應的 `debug_message`，模型 schema 驗證錯誤也排除輸入值。
+
+Logs Explorer 的 `run.googleapis.com/requests` 是平台請求摘要，應用錯誤位於 `run.googleapis.com/stdout`。重新部署 Functions 後可用以下查詢查看應用的錯誤訊息（勿額外只篩選 requests）：
+
+```text
+resource.type="cloud_run_revision"
+severity>=ERROR
+jsonPayload.message:*
+```
+
+展開 `jsonPayload.message`、`error_message`（若有）及 `exception` 查看原因；`http_error_response` 是回應摘要，`chat_request_failed`／`admin_operation_failed` 是操作例外。收到有效的 `X-Cloud-Trace-Context` 且執行環境提供 project ID 時，日誌會帶同一個 `trace`，可與平台請求紀錄對應。日誌修正僅影響重新部署後的新請求，無法補回過去未寫出的內容。GCP 欄位及關聯規則見 [Cloud Run logging](https://docs.cloud.google.com/run/docs/logging)。
+
 聊天回覆採用 OpenRouter Structured Outputs 的 JSON Schema 契約，必須包含情緒、回覆文字與 2 至 4 個建議回覆。若模型或供應端無法符合契約，前端會顯示「伺服器回傳錯誤，正在重試中」並自動重試兩次；請選用支援 Structured Outputs 的 OpenRouter 模型。
 
 設定優先順序固定為：
@@ -171,9 +185,13 @@ Action button 是共用元件與資料契約，機關名稱及不同情境的使
 | --- | --- | --- |
 | `tel` | `label`、`phone_number` | 開啟裝置撥號介面 |
 | `url` | `label`、`url` | 在新分頁開啟 HTTP(S) 網頁 |
-| `options` | 唯一 `id`、`label`、`title`、2–8 個 `{label, value}` 選項 | 開啟選項彈窗；選定後將 `value` 作為使用者訊息送出，取消不送出 |
+| `options` | 唯一 `id`、`label`、`title`、2–8 個 `{label, value}` 選項 | 以選項問答取代一般輸入區；選擇選項或輸入「其他」，再按「送出回覆」 |
 
 內建範例包括「電話求助」、「官方網站入口」（屏東縣政府首頁）及「選擇下一步」。可分別輸入「我想撥打 113」、「請提供屏東縣政府網頁」、「請彈出選項讓我選擇下一步」驗證。Skill 指令會教 agent 何時提供按鈕；模型只回傳動作 selector，API 從已核准的 Skill 補齊標籤、網址與選項，不採用模型自行編造的按鈕內容。
+
+「AI 需要更多您的資訊」、選項 Actions 與建議回覆共用詢問選單，顯示時取代一般輸入區。只有最新且有效的 AI 訊息會顯示可操作的選單；點選右上角的隱藏按鈕可恢復一般輸入，並透過「顯示選單」入口再次開啟，切換時保留選項、「其他」內容與一般輸入草稿。點選選項不會立即送出，可改選或填寫「其他」後確認。多組選項可切換並一併送出，各題保留問題與答案的對應；沒有設定選單時，使用 `suggested_replies` 提供選項，並呈現 `clarifying_questions`。網址與電話 Actions 也顯示在同一區。
+
+透過選單送出的使用者訊息會將問題以淡色顯示在泡泡上方，答案顯示在下方。問題與答案的顯示 metadata 僅保存在本機 UI；聊天 API 仍收到保留完整問答脈絡的文字。
 
 管理面板的 Skills 設定可編輯觸發詞、情境指令及三種通用 Actions。「建立範例」只把缺少的內建 Skills 寫入共用 collection，不覆蓋已有設定；儲存同 ID 可覆寫內建 Skill，停用則阻止它在對話中使用。刪除內建 Skill 會保留停用覆寫，避免內建預設再次出現；自訂 Skill 則刪除文件。設定快取為 60 秒，管理操作會清除目前程序的快取。系統與 Prompt 設定仍分別寫入 `runtime_config/app_dev` 或 `runtime_config/app_main`。
 

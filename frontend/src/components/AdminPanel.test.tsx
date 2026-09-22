@@ -85,10 +85,10 @@ describe("AdminPanel Skills actions", () => {
 
     fireEvent.change(screen.getByLabelText("新增按鈕類型"), { target: { value: "options" } });
     fireEvent.click(screen.getByRole("button", { name: "新增按鈕" }));
-    const options = within(screen.getByRole("group", { name: "按鈕 3 · 彈出選項" }));
+    const options = within(screen.getByRole("group", { name: "按鈕 3 · 選項問答" }));
     fireEvent.change(options.getByLabelText("按鈕文字"), { target: { value: "選擇需求" } });
     fireEvent.change(options.getByLabelText(/^選項 ID/), { target: { value: "support_choice" } });
-    fireEvent.change(options.getByLabelText("彈窗標題"), { target: { value: "你希望得到哪種協助？" } });
+    fireEvent.change(options.getByLabelText("問題標題"), { target: { value: "你希望得到哪種協助？" } });
     [
       { label: "了解流程", value: "我希望先了解處理流程。" },
       { label: "尋找資源", value: "請協助我尋找合適的支援資源。" },
@@ -140,7 +140,7 @@ describe("AdminPanel Skills actions", () => {
     await screen.findByText("已儲存至共用的 scenario_scripts collection");
     fireEvent.click(screen.getByRole("button", { name: "移除按鈕 1" }));
     expect(screen.queryByLabelText("網頁網址")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("彈窗標題")).toHaveValue("請選擇");
+    expect(screen.getByLabelText("問題標題")).toHaveValue("請選擇");
   });
 
   it("keeps a deleted built-in Skill visible as disabled when the server retains it", async () => {
@@ -156,6 +156,78 @@ describe("AdminPanel Skills actions", () => {
 });
 
 describe("AdminPanel runtime config", () => {
+  async function openSystemSettings() {
+    render(<AdminPanel isOpen onClose={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("輸入 ADMIN_API_KEY"), {
+      target: { value: "admin-token" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /驗證並進入/ }));
+    return screen.findByLabelText("維護訊息");
+  }
+
+  it("shows the active maintenance message and resumes only after saving the cleared field", async () => {
+    vi.mocked(getRuntimeConfig).mockResolvedValueOnce({
+      ...runtimeConfig,
+      maintenance_message: "TESTING 1 from Kai",
+    });
+    vi.mocked(updateRuntimeConfig).mockResolvedValueOnce(runtimeConfig);
+    const message = await openSystemSettings();
+
+    expect(message).toHaveValue("TESTING 1 from Kai");
+    expect(screen.getByText("目前服務已暫停（維護模式）")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "清空維護訊息" }));
+    expect(message).toHaveValue("");
+    expect(updateRuntimeConfig).not.toHaveBeenCalled();
+    expect(screen.getByText("目前服務已暫停（維護模式）")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+
+    await waitFor(() => expect(updateRuntimeConfig).toHaveBeenCalledWith("admin-token", expect.objectContaining({
+      maintenance_message: "",
+      openrouter_model: runtimeConfig.openrouter_model,
+      temperature: runtimeConfig.temperature,
+      top_p: runtimeConfig.top_p,
+      max_tokens: runtimeConfig.max_tokens,
+      reasoning_effort: runtimeConfig.reasoning_effort,
+      rag_retrieval_top_k: runtimeConfig.rag_retrieval_top_k,
+      rag_distance_threshold: runtimeConfig.rag_distance_threshold,
+      rag_collections: runtimeConfig.rag_collections,
+      enable_anonymization: runtimeConfig.enable_anonymization,
+      enable_image_upload: runtimeConfig.enable_image_upload,
+      development_mode: runtimeConfig.development_mode,
+    })));
+    expect(await screen.findByText("目前維護模式已關閉")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "已同步" })).toBeDisabled();
+  });
+
+  it("allows an administrator to intentionally save a maintenance message", async () => {
+    const maintenanceMessage = "系統維護中，請稍後再試。";
+    vi.mocked(updateRuntimeConfig).mockResolvedValueOnce({ ...runtimeConfig, maintenance_message: maintenanceMessage });
+    const message = await openSystemSettings();
+    expect(screen.getByRole("button", { name: "清空維護訊息" })).toBeDisabled();
+    fireEvent.change(message, { target: { value: maintenanceMessage } });
+    expect(screen.getByText("目前維護模式已關閉")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+
+    await waitFor(() => expect(updateRuntimeConfig).toHaveBeenCalledWith("admin-token", expect.objectContaining({
+      maintenance_message: maintenanceMessage,
+    })));
+    expect(await screen.findByText("目前服務已暫停（維護模式）")).toBeInTheDocument();
+  });
+
+  it("retains the pending cleared message and active status when saving fails", async () => {
+    vi.mocked(getRuntimeConfig).mockResolvedValueOnce({ ...runtimeConfig, maintenance_message: "TESTING 1 from Kai" });
+    vi.mocked(updateRuntimeConfig).mockRejectedValueOnce(new ApiError(500, "儲存失敗", "設定暫時無法儲存"));
+    const message = await openSystemSettings();
+    fireEvent.click(screen.getByRole("button", { name: "清空維護訊息" }));
+    fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+
+    expect(await screen.findByText("設定暫時無法儲存")).toBeInTheDocument();
+    expect(message).toHaveValue("");
+    expect(screen.getByText("目前服務已暫停（維護模式）")).toBeInTheDocument();
+    expect(screen.queryByText("目前維護模式已關閉")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "儲存變更" })).toBeEnabled();
+  });
+
   it("shows a normalized validation detail when saving fails", async () => {
     vi.mocked(updateRuntimeConfig).mockRejectedValueOnce(
       new ApiError(

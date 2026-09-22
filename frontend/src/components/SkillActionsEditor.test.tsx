@@ -19,7 +19,7 @@ describe("SkillActionsEditor", () => {
     const ids = screen.getAllByLabelText(/^選項 ID/);
     expect((ids[0] as HTMLInputElement).value).toMatch(/^choice_[a-z0-9-]+$/);
     expect((ids[1] as HTMLInputElement).value).not.toEqual((ids[0] as HTMLInputElement).value);
-    const first = within(screen.getByRole("group", { name: "按鈕 1 · 彈出選項" }));
+    const first = within(screen.getByRole("group", { name: "按鈕 1 · 選項問答" }));
     expect(first.getByRole("button", { name: "移除按鈕 1 的選項 1" })).toBeDisabled();
     for (let i = 0; i < 6; i++) fireEvent.click(first.getByRole("button", { name: "新增選項" }));
     expect(first.getByRole("button", { name: "新增選項" })).toBeDisabled();

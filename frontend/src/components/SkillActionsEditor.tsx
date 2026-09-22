@@ -27,7 +27,7 @@ function createAction(type: ActionButton["action"], actions: ActionButton[]): Ac
 const actionNames: Record<ActionButton["action"], string> = {
   tel: "撥打電話",
   url: "開啟網頁",
-  options: "彈出選項",
+  options: "選項問答",
 };
 
 export default function SkillActionsEditor({ actions, onChange }: SkillActionsEditorProps) {
@@ -41,7 +41,7 @@ export default function SkillActionsEditor({ actions, onChange }: SkillActionsEd
       <div>
         <h4 className="font-bold">通用 Actions</h4>
         <p className="mt-1 text-xs leading-5 text-on-surface/55">
-          設定可重複使用的電話、網頁或選項按鈕；在情境指令中教 Agent 何時使用。選項的回覆內容會在使用者選擇後送出。
+          設定可重複使用的電話、網頁或選項按鈕；在情境指令中教 Agent 何時使用。使用者先選擇選項或填寫「其他」，再按「送出回覆」。
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -87,7 +87,7 @@ export default function SkillActionsEditor({ actions, onChange }: SkillActionsEd
                 <span className="mt-1 block font-normal">以小寫英文字母開頭，使用 2–64 個小寫字母、數字、底線或連字號。</span>
               </label>
               <label className="block text-xs font-semibold text-on-surface/60">
-                彈窗標題
+                問題標題
                 <input value={action.title} maxLength={160} onChange={(event) => replaceAction(index, { ...action, title: event.target.value })} className="input" />
               </label>
               {action.options.map((option, optionIndex) => (
@@ -109,7 +109,7 @@ export default function SkillActionsEditor({ actions, onChange }: SkillActionsEd
               <button type="button" disabled={action.options.length >= 8} onClick={() => replaceAction(index, { ...action, options: [...action.options, { label: "", value: "" }] })} className="rounded-lg border border-secondary/25 px-3 py-2 text-xs font-bold text-secondary disabled:opacity-40">
                 新增選項
               </button>
-              <p className="text-xs text-on-surface/55">每個彈窗包含 2–8 個選項。</p>
+              <p className="text-xs text-on-surface/55">每組問題包含 2–8 個選項；使用者也可填寫「其他」。</p>
             </>
           )}
         </fieldset>

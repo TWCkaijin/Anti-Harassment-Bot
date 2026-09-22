@@ -16,6 +16,7 @@ from backend.app.api.chat import chat_bp
 from backend.app.api.health import health_bp
 from backend.app.core.config import get_settings
 from backend.app.core.logger import setup_logging
+from backend.app.core.request_logging import register_error_response_logging
 from backend.app.core.security import (
     build_cors_origin_allowlist,
     new_error_id,
@@ -44,6 +45,7 @@ if not firebase_admin._apps:
 
 # ── Flask 應用程式 ─────────────────────────────────────────────────────────
 app = Flask(__name__)
+register_error_response_logging(app)
 
 # ── CORS 設定 ────────────────────────────────────────────────────────────────
 CORS(
@@ -107,6 +109,11 @@ def handle_unexpected_error(error: Exception):
     logging.getLogger(__name__).exception(
         "Unhandled Flask request exception error_id=%s",
         error_id,
+        extra={
+            "event": "unhandled_request_error",
+            "error_id": error_id,
+            "error_type": type(error).__name__,
+        },
     )
     return jsonify({"detail": "Internal Server Error", "error_id": error_id}), 500
 

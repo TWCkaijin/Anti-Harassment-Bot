@@ -6,6 +6,7 @@ from flask import Response as FlaskResponse
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 from backend.app.core.config import get_settings
+from backend.app.core.logger import get_request_log_context
 from backend.app.core.security import cors_headers_for_origin, new_error_id
 from backend.app.main import app
 
@@ -27,6 +28,12 @@ def handle_request(req: https_fn.Request) -> https_fn.Response:
         logger.exception(
             "Unhandled Firebase HTTP wrapper exception error_id=%s",
             error_id,
+            extra={
+                **get_request_log_context(req),
+                "event": "firebase_wrapper_error",
+                "error_id": error_id,
+                "http_status": 500,
+            },
         )
         return FlaskResponse(
             response=json.dumps(
