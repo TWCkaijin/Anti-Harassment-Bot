@@ -20,6 +20,11 @@ import {
 
 // ── 型別定義 ──────────────────────────────────────────────────────────────
 
+/** Local display metadata; content remains the complete model-visible message. */
+export interface ReplyContext {
+  answers: Array<{ question: string; answer: string }>;
+}
+
 export interface ConversationMessage {
   id: string;
   role: "user" | "assistant";
@@ -37,6 +42,7 @@ export interface ConversationMessage {
   clarifyingQuestions?: string[];
   debugToolCalls?: DebugToolCall[];
   imageUrl?: string; // 圖片預覽網址 (僅 frontend 顯示用)
+  replyContext?: ReplyContext;
 }
 
 export interface ConversationSession {
@@ -191,7 +197,7 @@ export function useConversation(sessionId?: string) {
   // ── 傳送訊息 ──────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(
-    async (userInput: string, imageBase64?: string, imageUrl?: string) => {
+    async (userInput: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext) => {
       const targetSessionId = currentSessionId;
       if (loadingSessionIdsRef.current.has(targetSessionId)) return;
 
@@ -224,6 +230,7 @@ export function useConversation(sessionId?: string) {
         content: normalizedUserInput,
         timestamp: Date.now(),
         imageUrl: imageUrl, // 加入圖片預覽 URL
+        ...(replyContext ? { replyContext } : {}),
       };
 
       // 先將使用者訊息加入畫面

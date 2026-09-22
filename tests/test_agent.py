@@ -8,7 +8,7 @@ import backend.app.agents.openrouter_agent as agent_module
 from backend.app.agents.openrouter_agent import OpenRouterAgent
 from backend.app.core.chat_response import ASSISTANT_REPLY_MAX_LENGTH
 from backend.app.core.runtime_config import RuntimeConfig
-from backend.app.core.scenario_scripts import _parse_script
+from backend.app.core.scenario_scripts import _builtin_scenario_documents, _parse_script
 from backend.app.rag.base import RAGDocument
 
 
@@ -216,6 +216,64 @@ async def test_agent_injects_generic_skill_actions_and_passes_followup_context(m
     assert "options 使用 id" in system_text
     assert "僅當目前情境腳本列出可用動作且使用者明確表達想聯絡或撥打" not in system_text
     assert len(completions.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prompt_sections",
+    [{}, {"output_format": "依照管理員的自訂回覆格式。"}],
+)
+async def test_agent_keeps_inline_question_guidance_with_custom_prompt(
+    monkeypatch, prompt_sections
+):
+    script = _parse_script("choose_next_step", _builtin_scenario_documents()["choose_next_step"])
+    assert script is not None
+    completions = FakeCompletions(
+        [FakeResponse(FakeMessage(content='{"action_buttons":[]}', tool_calls=None))]
+    )
+    agent = make_agent(completions)
+    monkeypatch.setattr(
+        agent_module,
+        "get_runtime_config",
+        lambda: fake_runtime_config(agent_prompt_sections=prompt_sections),
+    )
+    monkeypatch.setattr(
+        agent_module, "get_matching_scenario_scripts", lambda user_message, history=None: (script,)
+    )
+
+    await agent.run("我不知道該如何處理。", use_rag=False)
+
+    # Interaction guidance must reach the model even when an admin replaces the format section.
+    interaction_instruction = next(
+        message["content"]
+        for message in completions.calls[0]["messages"]
+        if message["role"] == "system" and "回覆 JSON 必須包含 action_buttons" in message["content"]
+    )
+    assert "原本的下一個問答建議位置直接呈現" in interaction_instruction
+    assert "以設定中的 title 作為問題，各組問題與選項分別對應" in interaction_instruction
+    assert "再按送出才提交，點選選項不會立即送出" in interaction_instruction
+    assert "interaction_mode 必須為 clarify" in interaction_instruction
+    assert "優先每輪只問一個主要問題" in interaction_instruction
+    assert "suggested_replies 的每個短句都是該問題的具體可能答案" in interaction_instruction
+    assert "不要同時提供無關的 choose_next_step" in interaction_instruction
+    assert "不自行編造 options payload 或選單 ID" in interaction_instruction
+    assert "前端會自動提供其他文字欄位" in interaction_instruction
+    assert "不要在 suggested_replies 或 Skill 選項額外加入其他" in interaction_instruction
+    suggestions_schema = completions.calls[0]["response_format"]["json_schema"]["schema"][
+        "properties"
+    ]["suggested_replies"]
+    minimum = suggestions_schema["minItems"]
+    maximum = suggestions_schema["maxItems"]
+    assert (
+        f"suggested_replies 一律提供 {minimum} 到 {maximum} 個不重複的非空短句"
+        in interaction_instruction
+    )
+    assert "不可省略或輸出空陣列" in interaction_instruction
+    assert "前端優先呈現設定選項；suggested_replies 仍須提供" in interaction_instruction
+    assert "`suggested_replies` 仍須提供 2 至 4 個不重複的非空短句" in script.instruction
+    for message in completions.calls[0]["messages"]:
+        if message["role"] == "system":
+            assert "可為空陣列" not in message["content"]
 
 
 @pytest.mark.asyncio

@@ -316,7 +316,7 @@ def format_scenario_instruction(scripts: tuple[ScenarioScript, ...]) -> str:
         action_lines = "\n".join(
             f"- {action.label}: {json.dumps(action_selector(action.public_dict()), ensure_ascii=False)}"
             + (
-                f"；彈窗內容：{json.dumps({'title': action.title, 'options': action.options}, ensure_ascii=False)}"
+                f"；選項問答內容：{json.dumps({'title': action.title, 'options': action.options}, ensure_ascii=False)}"
                 if action.action == "options"
                 else ""
             )
