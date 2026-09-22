@@ -109,6 +109,39 @@ describe("useConversation image requests", () => {
   });
 });
 
+describe("useConversation quoted replies", () => {
+  it("persists reply presentation while sending complete plain-text context to the API", async () => {
+    vi.mocked(sendChat).mockResolvedValue(successfulResponse);
+    const { result, unmount } = renderHook(() => useConversation("reply-session"));
+    const content = "事情發生在哪裡？\n在學校";
+    const replyContext = { answers: [{ question: "事情發生在哪裡？", answer: "在學校" }] };
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.sendMessage(content, undefined, undefined, replyContext);
+    });
+    expect(result.current.messages[0]).toMatchObject({ content, replyContext });
+    expect(vi.mocked(sendChat).mock.calls[0][0].message).toBe(content);
+    expect(vi.mocked(sendChat).mock.calls[0][0]).not.toHaveProperty("replyContext");
+    await act(async () => {
+      await vi.runAllTimersAsync();
+      await request;
+    });
+    unmount();
+
+    const restored = renderHook(() => useConversation("reply-session"));
+    expect(restored.result.current.messages[0]).toMatchObject({ content, replyContext });
+    act(() => {
+      request = restored.result.current.sendMessage("下一步呢？");
+    });
+    expect(vi.mocked(sendChat).mock.calls[1][0].history[0]).toEqual({ role: "user", content });
+    expect(restored.result.current.messages.at(-1)).not.toHaveProperty("replyContext");
+    await act(async () => {
+      await vi.runAllTimersAsync();
+      await request;
+    });
+  });
+});
+
 describe("useConversation retries", () => {
   it("retries a retryable 502 at most twice before succeeding", async () => {
     vi.mocked(sendChat)

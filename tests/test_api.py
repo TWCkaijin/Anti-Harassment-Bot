@@ -367,7 +367,9 @@ def test_parse_agent_json_response_strips_code_fence():
     assert data == {"emotion": "未知", "emotion_color": "gray", "reply": "好的"}
 
 
-def test_chat_returns_retryable_error_for_invalid_model_schema(monkeypatch):
+def test_chat_returns_retryable_error_for_invalid_model_schema(monkeypatch, caplog):
+    caplog.set_level("ERROR")
+
     class FakeAgent:
         async def run(self, **kwargs):
             return AgentResult(reply='{"reply":"缺少必要欄位"}')
@@ -386,6 +388,16 @@ def test_chat_returns_retryable_error_for_invalid_model_schema(monkeypatch):
     assert response.get_json()["detail"] == "伺服器回傳錯誤，正在重試中"
     assert response.get_json()["retryable"] is True
     assert "ValidationError" in response.get_json()["debug_message"]
+    failure = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "chat_request_failed"
+    )
+    assert failure.levelname == "ERROR"
+    assert failure.error_type == "ValidationError"
+    assert failure.exc_info is not None
+    assert "缺少必要欄位" not in caplog.text
+    assert "input_value" not in caplog.text
 
 
 def test_chat_marks_unexpected_error_non_retryable_with_opaque_id(monkeypatch):
@@ -412,7 +424,9 @@ def test_chat_marks_unexpected_error_non_retryable_with_opaque_id(monkeypatch):
     assert UUID(hex=payload["error_id"]).hex == payload["error_id"]
 
 
-def test_chat_returns_retryable_error_for_transient_upstream_failure(monkeypatch):
+def test_chat_returns_retryable_error_for_transient_upstream_failure(monkeypatch, caplog):
+    caplog.set_level("ERROR")
+
     class FakeAgent:
         async def run(self, **kwargs):
             raise TimeoutError("upstream timed out")
@@ -428,6 +442,15 @@ def test_chat_returns_retryable_error_for_transient_upstream_failure(monkeypatch
     assert response.status_code == 502
     assert response.get_json()["code"] == "upstream_invalid_response"
     assert response.get_json()["retryable"] is True
+    failure = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "chat_request_failed"
+    )
+    assert failure.error_message == "upstream timed out"
+    assert failure.error_type == "TimeoutError"
+    assert failure.http_status == 502
+    assert failure.exc_info is not None
 
 
 def test_chat_returns_retryable_503_for_typed_rag_failure(monkeypatch):
@@ -536,7 +559,11 @@ def test_chat_rejects_image_when_runtime_upload_is_disabled(monkeypatch):
     assert response.get_json()["retryable"] is False
 
 
-def test_chat_returns_explicit_maintenance_response_without_initializing_agent(monkeypatch):
+@pytest.mark.parametrize("path", ["/api/v1/chat/", "/v1/chat/"])
+def test_chat_returns_explicit_maintenance_response_without_initializing_agent(
+    monkeypatch, caplog, path
+):
+    caplog.set_level("ERROR")
     monkeypatch.setattr(
         chat_module,
         "get_runtime_config",
@@ -549,8 +576,8 @@ def test_chat_returns_explicit_maintenance_response_without_initializing_agent(m
     )
 
     response = app.test_client().post(
-        "/api/v1/chat/",
-        json={"message": "你好", "history": []},
+        path,
+        json={"message": "private-chat-do-not-log", "history": []},
     )
 
     assert response.status_code == 503
@@ -559,6 +586,19 @@ def test_chat_returns_explicit_maintenance_response_without_initializing_agent(m
         "detail": "系統維護中，請稍後再試。",
         "retryable": False,
     }
+    summary = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "http_error_response"
+    )
+    assert summary.levelname == "ERROR"
+    assert summary.http_status == 503
+    assert summary.error_code == "maintenance"
+    assert summary.error_detail == "系統維護中，請稍後再試。"
+    assert summary.request_path == path
+    assert summary.request_method == "POST"
+    assert "系統維護中，請稍後再試。" in summary.getMessage()
+    assert "private-chat-do-not-log" not in caplog.text
 
 
 def test_history_accepts_full_assistant_reply_but_keeps_user_limit():

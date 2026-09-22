@@ -8,7 +8,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import MaterialIcon from "./MaterialIcon";
-import ActionButtons from "./ActionButtons";
 import { useI18n } from "../i18n";
 import React from "react";
 import type { ConversationMessage } from "../hooks/useConversation";
@@ -16,8 +15,6 @@ import type { RagSource, RagSourceType } from "../services/api";
 
 interface MessageItemProps {
   message: ConversationMessage;
-  isLoading?: boolean;
-  onSend?: (message: string) => void;
 }
 
 const getEmotionColorClasses = (color?: string) => {
@@ -83,13 +80,17 @@ const getSourceStyle = (type: RagSourceType) => {
   }
 };
 
-export default function MessageItem({ message, isLoading, onSend }: MessageItemProps) {
+export default function MessageItem({ message }: MessageItemProps) {
   const { t } = useI18n();
   const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
-  const [clarification, setClarification] = React.useState("");
   const isUser = message.role === "user";
   const isError = message.isError;
   const isCancelled = message.isCancelled;
+  // Older saved conversations have no reply metadata and keep their plain bubble.
+  const replyAnswers = isUser && Array.isArray(message.replyContext?.answers)
+    ? message.replyContext.answers.filter((item) => item && typeof item.question === "string"
+      && item.question.trim() && typeof item.answer === "string" && item.answer.trim())
+    : [];
   const sourceGroups = React.useMemo(() => {
     const sources = message.ragUsed?.sources ?? [];
     const groups = new Map<RagSourceType, RagSource[]>();
@@ -161,7 +162,7 @@ export default function MessageItem({ message, isLoading, onSend }: MessageItemP
 
       {/* 訊息氣泡 */}
       <div
-        className={`text-sm flex flex-col gap-2
+        className={`min-w-0 text-sm flex flex-col gap-2
           ${
               isUser
                 ? "bg-primary text-white py-3 px-5 lg:px-6 rounded-[2rem] rounded-tr-none shadow-md"
@@ -181,7 +182,22 @@ export default function MessageItem({ message, isLoading, onSend }: MessageItemP
         )}
 
         {/* 訊息內容 */}
-        {!isCancelled && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
+        {!isCancelled && replyAnswers.length > 0 && (
+          <div aria-label="回覆內容" className="space-y-4">
+            {replyAnswers.map(({ question, answer }, index) => (
+              <div key={index} className="space-y-2.5">
+                <blockquote aria-label="回覆的問題" className="border-l-2 border-white/30 pl-3 text-xs leading-relaxed text-white/65">
+                  <span className="mb-1 flex items-center gap-1 text-[10px] font-medium">
+                    <span aria-hidden="true"><MaterialIcon icon="reply" size={14} /></span>回覆
+                  </span>
+                  <p className="whitespace-pre-wrap break-words">{question}</p>
+                </blockquote>
+                <p className="whitespace-pre-wrap break-words font-medium leading-relaxed text-white">{answer}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        {!isCancelled && replyAnswers.length === 0 && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
           {isUser || isError ? (
             message.content
           ) : (
@@ -220,52 +236,6 @@ export default function MessageItem({ message, isLoading, onSend }: MessageItemP
             )}
           </details>
         )}
-        {!isUser && !isError && !isCancelled && message.actionButtons && message.actionButtons.length > 0 && (
-          <ActionButtons actions={message.actionButtons} isLoading={isLoading} onSend={onSend} />
-        )}
-
-        {!isUser &&
-          !isError &&
-          message.interactionMode === "clarify" &&
-          message.clarifyingQuestions &&
-          message.clarifyingQuestions.length > 0 && (
-            <section className="mt-3 rounded-lg border border-secondary/20 bg-secondary-container/20 p-4">
-              <div className="flex items-center gap-2 text-sm font-bold text-secondary">
-                <MaterialIcon icon="help" size={18} />
-                <span>AI 需要更多您的資訊</span>
-              </div>
-              <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-on-surface">
-                {message.clarifyingQuestions.map((question) => (
-                  <li key={question}>{question}</li>
-                ))}
-              </ol>
-              <div className="mt-4 flex items-end gap-2 rounded-lg border border-secondary/20 bg-white p-2 shadow-sm">
-                <textarea
-                  value={clarification}
-                  onChange={(event) => setClarification(event.target.value)}
-                  placeholder="補充您願意提供的資訊"
-                  rows={2}
-                  disabled={isLoading}
-                  className="min-h-14 flex-1 resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-on-surface/40 disabled:opacity-50"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const content = clarification.trim();
-                    if (!content || isLoading || !onSend) return;
-                    onSend(content);
-                    setClarification("");
-                  }}
-                  disabled={!clarification.trim() || isLoading || !onSend}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-white disabled:cursor-not-allowed disabled:opacity-40"
-                  aria-label="傳送補充資訊"
-                >
-                  <MaterialIcon icon="arrow_forward" size={18} />
-                </button>
-              </div>
-            </section>
-          )}
-
         {/* 底部標示列 */}
         {!isUser && !isError && (message.ragUsed?.status || message.anonymized) && (
           <div className="mt-4 space-y-3 border-t border-outline/10 pt-4">
