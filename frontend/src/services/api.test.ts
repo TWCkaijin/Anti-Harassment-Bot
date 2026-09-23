@@ -142,6 +142,51 @@ function streamResponse() {
 }
 
 describe("chat streaming transport", () => {
+  it("delivers actual progress before text and strips fields outside the progress contract", async () => {
+    const { controller } = streamResponse();
+    let notify!: () => void;
+    const ready = new Promise<void>(resolve => { notify = resolve; });
+    const onProgress = vi.fn(() => notify());
+    const onDelta = vi.fn();
+    let completed = false;
+    const request = sendChat(chatRequest, undefined, onDelta, undefined, onProgress)
+      .then(value => { completed = true; return value; });
+    controller.enqueue(encoder.encode(eventText("progress", {
+      phase: "retrieving", elapsed_ms: 1234.56, percentage: 50, message: "untrusted label",
+    })));
+    await ready;
+    expect(onProgress).toHaveBeenCalledExactlyOnceWith({ phase: "retrieving", elapsed_ms: 1234.56 });
+    expect(onDelta).not.toHaveBeenCalled();
+    expect(completed).toBe(false);
+    controller.enqueue(encoder.encode(eventText("delta", { text: "您好" }) + eventText("done", chatResponse)));
+    await expect(request).resolves.toEqual(chatResponse);
+    expect(onDelta).toHaveBeenCalledExactlyOnceWith("您好");
+  });
+
+  it.each([
+    { phase: "estimated", elapsed_ms: 1000 },
+    { phase: "generating", elapsed_ms: -1 },
+    { phase: "generating", elapsed_ms: "1000" },
+    { phase: "generating", elapsed_ms: null },
+    { phase: "generating" },
+  ])("rejects invalid progress before it reaches the UI", async progress => {
+    const { controller } = streamResponse();
+    const onProgress = vi.fn();
+    const request = sendChat(chatRequest, undefined, undefined, undefined, onProgress);
+    controller.enqueue(encoder.encode(eventText("progress", progress)));
+    await expect(request).rejects.toMatchObject({ status: 502 });
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-finite parsed elapsed value", async () => {
+    const { controller } = streamResponse();
+    const onProgress = vi.fn();
+    const request = sendChat(chatRequest, undefined, undefined, undefined, onProgress);
+    controller.enqueue(encoder.encode('event: progress\ndata: {"phase":"waiting_model","elapsed_ms":1e999}\n\n'));
+    await expect(request).rejects.toMatchObject({ status: 502 });
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
   it("delivers text before done, then returns authoritative metadata without awaiting EOF", async () => {
     const { controller, cancel, fetchMock } = streamResponse();
     let resolveDelta!: () => void;

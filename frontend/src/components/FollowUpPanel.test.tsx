@@ -314,11 +314,12 @@ describe("FollowUpPanel", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("renders resource links alongside questions but does not open for resources alone", () => {
+  it("keeps resource links out of clarification choices and does not open for resources alone", () => {
     const actions: ActionButton[] = [{ action: "tel", label: "撥打專線", phone_number: "113" }, { action: "url", label: "開啟資源", url: "https://example.org" }];
     const { rerender } = render(<FollowUpPanel {...clarificationProps} actions={[optionsAction, ...actions]} onSend={vi.fn()} />);
-    expect(screen.getByRole("link", { name: "撥打專線" })).toHaveAttribute("href", "tel:113");
-    expect(screen.getByRole("link", { name: /開啟資源/ })).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "看看資源" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "其他補充" })).toBeVisible();
     rerender(<FollowUpPanel actions={actions} onSend={vi.fn()} />);
     expect(screen.queryByRole("region")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();

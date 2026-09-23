@@ -8,7 +8,7 @@ interface TypingIndicatorProps {
   message?: string | null;
 }
 
-export default function TypingIndicator({ message = "正在回覆中" }: TypingIndicatorProps) {
+export default function TypingIndicator({ message }: TypingIndicatorProps) {
   return (
     <div className="flex gap-3 justify-start animate-fade-in-up">
       <div className="shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center mt-1 pulse-glow">
@@ -19,7 +19,7 @@ export default function TypingIndicator({ message = "正在回覆中" }: TypingI
           <span className="typing-dot" />
           <span className="typing-dot" />
           <span className="typing-dot" />
-          <span className="ml-2 text-xs text-on-surface/65">{message}</span>
+          <span role="status" className="ml-2 text-xs text-on-surface/65">{message ?? "正在等待伺服器回應"}</span>
         </div>
       </div>
     </div>

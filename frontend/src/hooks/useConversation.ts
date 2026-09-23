@@ -10,6 +10,7 @@ import {
   sendChat,
   type ActionButton,
   type ChatGuidance,
+  type ChatProgress,
   type ChatResponse,
   type DebugToolCall,
   type RagInfo,
@@ -63,14 +64,16 @@ const MAX_SESSIONS = 10;
 const MAX_MESSAGES_PER_SESSION = 100;
 const MAX_RETRYABLE_CHAT_ATTEMPTS = 2;
 const RETRY_MESSAGE = "伺服器回傳錯誤，正在重試中";
-const CHAT_PROGRESS_STAGES = [
-  "正在匿名化",
-  "正在分析",
-  "正在產生檢索資訊",
-  "正在檢索資料庫",
-  "正在生成回覆",
-] as const;
-const CHAT_PROGRESS_STAGE_DURATION_MS = 1000;
+const WAITING_MESSAGE = "正在等待伺服器回應";
+const CHAT_PROGRESS_LABELS: Record<ChatProgress["phase"], string> = {
+  anonymizing: "正在匿名化",
+  preparing: "正在準備回覆",
+  waiting_model: "正在等待 AI 回應",
+  retrieving: "正在檢索資料庫",
+  generating: "正在生成回覆",
+  guidance: "正在產生後續引導",
+  validating: "正在整理回覆",
+};
 
 // ── 輔助函式 ─────────────────────────────────────────────────────────────
 
@@ -173,6 +176,7 @@ export function useConversation(sessionId?: string) {
 
   const setSessionRetryStatus = useCallback((id: string, status: string | null) => {
     setRetryStatusBySession((previous) => {
+      if ((previous[id] ?? null) === status) return previous;
       if (status === null) {
         const next = { ...previous };
         delete next[id];
@@ -239,16 +243,10 @@ export function useConversation(sessionId?: string) {
       }
 
       setError(null);
-      setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_STAGES[0]);
+      setSessionRetryStatus(targetSessionId, WAITING_MESSAGE);
       setSessionLoading(targetSessionId, true);
       const abortController = new AbortController();
       abortControllersRef.current.set(targetSessionId, abortController);
-      const progressTimers = CHAT_PROGRESS_STAGES.slice(1).map((stage, index) =>
-        window.setTimeout(
-          () => setSessionRetryStatus(targetSessionId, stage),
-          CHAT_PROGRESS_STAGE_DURATION_MS * (index + 1)
-        )
-      );
 
       // 建立使用者訊息
       const userMsg: ConversationMessage = {
@@ -281,8 +279,6 @@ export function useConversation(sessionId?: string) {
       let partialGuidance: ChatGuidance | undefined;
       let hasVisibleGuidance = false;
       const publishStream = () => {
-        progressTimers.forEach(timer => window.clearTimeout(timer));
-        setSessionRetryStatus(targetSessionId, null);
         setStreamingBySession(previous => ({
           ...previous,
           [targetSessionId]: {
@@ -311,14 +307,21 @@ export function useConversation(sessionId?: string) {
             response = await sendChat(request, abortController.signal, text => {
               if (abortController.signal.aborted || !text) return;
               partialText += text;
+              // A received delta proves generation even with an older backend
+              // that does not yet send progress events.
+              setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS.generating);
               publishStream();
             }, guidance => {
               if (abortController.signal.aborted) return;
               partialGuidance = guidance;
+              setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS.guidance);
               hasVisibleGuidance ||= guidance.interaction_mode === "clarify"
                 ? Boolean(guidance.clarifying_questions?.some(question => question.trim()))
                 : guidance.interaction_mode === "answer" && Boolean(guidance.suggested_replies?.some(reply => reply.trim()));
               publishStream();
+            }, progress => {
+              if (abortController.signal.aborted) return;
+              setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS[progress.phase]);
             });
             break;
           } catch (err) {
@@ -329,7 +332,6 @@ export function useConversation(sessionId?: string) {
               // or a rate-limited request before its Retry-After window.
               err.status !== 429 && attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
             ) {
-              progressTimers.forEach(timer => window.clearTimeout(timer));
               partialGuidance = undefined;
               setStreamingBySession(previous => {
                 const next = { ...previous };
@@ -338,6 +340,7 @@ export function useConversation(sessionId?: string) {
               });
               setSessionRetryStatus(targetSessionId, RETRY_MESSAGE);
               await delay(500 * (attempt + 1), abortController.signal);
+              setSessionRetryStatus(targetSessionId, WAITING_MESSAGE);
               continue;
             }
             throw err;
@@ -377,7 +380,6 @@ export function useConversation(sessionId?: string) {
           ...(partialText ? { interruptionReason: `回覆中斷，以上內容尚未完成。${errorMsg}` } : {}),
         });
       } finally {
-        progressTimers.forEach(timer => window.clearTimeout(timer));
         setStreamingBySession(previous => {
           const next = { ...previous };
           delete next[targetSessionId];

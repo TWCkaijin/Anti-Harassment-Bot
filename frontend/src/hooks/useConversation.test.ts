@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, sendChat, type ChatGuidance, type ChatResponse } from "../services/api";
+import { ApiError, sendChat, type ChatGuidance, type ChatProgress, type ChatResponse } from "../services/api";
 import {
   MAX_USER_MESSAGE_CHARACTERS,
   USER_MESSAGE_TOO_LONG_ERROR,
@@ -243,15 +243,84 @@ function deferredResponse() {
   let reject!: (error: unknown) => void;
   let delta!: (text: string) => void;
   let guidance!: (value: ChatGuidance) => void;
+  let progress!: (value: ChatProgress) => void;
   const promise = new Promise<ChatResponse>((res, rej) => { resolve = res; reject = rej; });
-  vi.mocked(sendChat).mockImplementationOnce((_request, signal, onDelta, onGuidance) => {
+  vi.mocked(sendChat).mockImplementationOnce((_request, signal, onDelta, onGuidance, onProgress) => {
     delta = onDelta!;
     guidance = onGuidance!;
+    progress = onProgress!;
     signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
     return promise;
   });
-  return { resolve, reject, delta: (text: string) => delta(text), guidance: (value: ChatGuidance) => guidance(value) };
+  return {
+    resolve, reject,
+    delta: (text: string) => delta(text),
+    guidance: (value: ChatGuidance) => guidance(value),
+    progress: (value: ChatProgress) => progress(value),
+  };
 }
+
+describe("useConversation actual progress", () => {
+  it("changes phases only on observed events, without manufacturing text or advancing with time", async () => {
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("progress-session"));
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("請幫我了解"); });
+    expect(result.current.retryStatus).toBe("正在等待伺服器回應");
+    expect(result.current.messages).toHaveLength(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(result.current.retryStatus).toBe("正在等待伺服器回應");
+    act(() => pending.progress({ phase: "waiting_model", elapsed_ms: 64 }));
+    expect(result.current.retryStatus).toBe("正在等待 AI 回應");
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(result.current.retryStatus).toBe("正在等待 AI 回應");
+    expect(result.current.messages).toHaveLength(1);
+    act(() => pending.progress({ phase: "retrieving", elapsed_ms: 60_200 }));
+    expect(result.current.retryStatus).toBe("正在檢索資料庫");
+    act(() => pending.delta("我會陪您"));
+    expect(result.current.retryStatus).toBe("正在生成回覆");
+    act(() => pending.guidance({ interaction_mode: "answer", suggested_replies: ["下一步"] }));
+    expect(result.current.retryStatus).toBe("正在產生後續引導");
+    act(() => pending.progress({ phase: "validating", elapsed_ms: 62_000 }));
+    expect(result.current.retryStatus).toBe("正在整理回覆");
+    await act(async () => { pending.resolve(successfulResponse); await request; });
+    expect(result.current.retryStatus).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it("still retries after progress-only failures and resets the status for the new request", async () => {
+    vi.mocked(sendChat).mockImplementationOnce(async (_request, _signal, _delta, _guidance, onProgress) => {
+      onProgress?.({ phase: "waiting_model", elapsed_ms: 40 });
+      throw new ApiError(502, "retry", "", true);
+    });
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("progress-retry-session"));
+    let request!: Promise<void>;
+    await act(async () => { request = result.current.sendMessage("請重試"); await Promise.resolve(); });
+    expect(result.current.retryStatus).toBe("伺服器回傳錯誤，正在重試中");
+    expect(result.current.messages).toHaveLength(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(sendChat).toHaveBeenCalledTimes(2);
+    expect(result.current.retryStatus).toBe("正在等待伺服器回應");
+    act(() => pending.progress({ phase: "preparing", elapsed_ms: 10 }));
+    expect(result.current.retryStatus).toBe("正在準備回覆");
+    await act(async () => { pending.resolve(successfulResponse); await request; });
+    expect(result.current.retryStatus).toBeNull();
+  });
+
+  it("clears progress on stop and ignores late callbacks", async () => {
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("progress-stop-session"));
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("先停下"); });
+    act(() => pending.progress({ phase: "retrieving", elapsed_ms: 70 }));
+    await act(async () => { result.current.stopCurrentResponse(); await request; });
+    act(() => pending.progress({ phase: "generating", elapsed_ms: 80 }));
+    expect(result.current.retryStatus).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.messages.at(-1)?.isCancelled).toBe(true);
+  });
+});
 
 describe("useConversation streamed replies", () => {
   it("updates transient guidance snapshots before completion and only persists final validated metadata", async () => {
@@ -391,6 +460,9 @@ describe("useConversation streamed replies", () => {
     act(() => { otherId = result.current.createNewSession(); });
     expect(result.current.messages).toEqual([]);
     expect(result.current.isLoading).toBe(false);
+    expect(result.current.retryStatus).toBeNull();
+    act(() => pending.progress({ phase: "validating", elapsed_ms: 800 }));
+    expect(result.current.retryStatus).toBeNull();
     act(() => pending.delta("繼續"));
     act(() => pending.guidance({ interaction_mode: "answer", suggested_replies: ["原本的建議"] }));
     expect(result.current.messages).toEqual([]);

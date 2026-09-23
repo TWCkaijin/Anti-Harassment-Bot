@@ -44,6 +44,15 @@ USER_MESSAGE_MAX_LENGTH = 2000
 MAX_HISTORY_CHARACTERS = 30000
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 STREAM_HEARTBEAT_SECONDS = 10
+_STREAM_PROGRESS_PHASES = {
+    "anonymizing",
+    "preparing",
+    "waiting_model",
+    "retrieving",
+    "generating",
+    "guidance",
+    "validating",
+}
 _MAX_BASE64_LENGTH = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
 _SUPPORTED_IMAGE_MIME_TYPES = {"image/gif", "image/jpeg", "image/png", "image/webp"}
 _TRANSIENT_UPSTREAM_ERRORS = (
@@ -376,10 +385,26 @@ def _sse_event(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _prepare_agent_input(req_obj: ChatRequest, runtime_config) -> tuple[dict, bool]:
+    history = [{"role": msg.role, "content": msg.content} for msg in req_obj.history]
+    message = req_obj.message
+    was_anonymized = False
+    if runtime_config.enable_anonymization:
+        anon_result = anonymize(message)
+        message = anon_result.anonymized
+        was_anonymized = anon_result.was_modified
+        history = anonymize_messages(history)
+    return {
+        "user_message": message,
+        "history": history,
+        "image_base64": req_obj.image_base64 if runtime_config.enable_image_upload else None,
+        "use_rag": req_obj.use_rag,
+    }, was_anonymized
+
+
 def _stream_response(
-    run_kwargs: dict,
+    req_obj: ChatRequest,
     session_id: str,
-    was_anonymized: bool,
     runtime_config,
     *,
     request_started_at: float | None = None,
@@ -396,6 +421,7 @@ def _stream_response(
                 maxsize=1
             )
             sent_output = False
+            current_phase: str | None = None
             timings: dict[str, float] = {}
             outcome = "cancelled"
 
@@ -407,12 +433,28 @@ def _stream_response(
                 await events.put((event, payload, acknowledged))
                 await acknowledged
 
+            async def emit_progress(snapshot: dict):
+                nonlocal current_phase
+                phase = snapshot.get("phase")
+                if phase not in _STREAM_PROGRESS_PHASES or phase == current_phase:
+                    return
+                current_phase = phase
+                await emit(
+                    "progress",
+                    {
+                        "phase": phase,
+                        "elapsed_ms": round((monotonic() - started_at) * 1000, 2),
+                    },
+                )
+
             async def emit_delta(text: str):
                 nonlocal sent_output
                 if text:
                     sent_output = True
                     mark("first_reply_ready_ms")
                     await emit("delta", {"text": text})
+                    # Deliver the visible token first; status must not delay it.
+                    await emit_progress({"phase": "generating"})
 
             async def emit_guidance(snapshot: dict):
                 nonlocal sent_output
@@ -420,16 +462,24 @@ def _stream_response(
                     sent_output = True
                     mark("first_guidance_ready_ms")
                     await emit("guidance", snapshot)
+                    await emit_progress({"phase": "guidance"})
 
             async def produce():
                 try:
+                    if runtime_config.enable_anonymization:
+                        await emit_progress({"phase": "anonymizing"})
+                    run_kwargs, was_anonymized = _prepare_agent_input(req_obj, runtime_config)
                     result = await get_agent().run(
-                        **run_kwargs, on_reply_delta=emit_delta, on_guidance=emit_guidance
+                        **run_kwargs,
+                        on_reply_delta=emit_delta,
+                        on_guidance=emit_guidance,
+                        on_progress=emit_progress,
                     )
                 except Exception as exc:
                     error_response, status = _agent_error(runtime_config, exc)
                 else:
                     try:
+                        await emit_progress({"phase": "validating"})
                         payload = _response_payload(
                             result, session_id, was_anonymized, runtime_config
                         )
@@ -463,7 +513,7 @@ def _stream_response(
                             if event == "delta"
                             else "first_guidance_yield_ms"
                         )
-                    else:
+                    elif event in {"done", "error"}:
                         outcome = event
                     yield _sse_event(event, payload)
                     if acknowledged is not None and not acknowledged.done():
@@ -540,38 +590,17 @@ def chat():
             422,
         )
 
-    # 1. 匿名化當前訊息
-    if runtime_config.enable_anonymization:
-        anon_result = anonymize(req_obj.message)
-        anonymized_message = anon_result.anonymized
-        was_anonymized = anon_result.was_modified
-    else:
-        anonymized_message = req_obj.message
-        was_anonymized = False
-
-    # 2. 匿名化歷史訊息（批次處理）
-    history_dicts = [{"role": msg.role, "content": msg.content} for msg in req_obj.history]
-    anonymized_history = (
-        anonymize_messages(history_dicts) if runtime_config.enable_anonymization else history_dicts
-    )
-
-    run_kwargs = {
-        "user_message": anonymized_message,
-        "history": anonymized_history,
-        "image_base64": req_obj.image_base64 if runtime_config.enable_image_upload else None,
-        "use_rag": req_obj.use_rag,
-    }
     session_id = str(uuid.uuid4())
     if req_obj.stream:
         return _stream_response(
-            run_kwargs,
+            req_obj,
             session_id,
-            was_anonymized,
             runtime_config,
             request_started_at=request_started_at,
         )
 
     try:
+        run_kwargs, was_anonymized = _prepare_agent_input(req_obj, runtime_config)
         result = asyncio.run(get_agent().run(**run_kwargs))
     except Exception as exc:
         return _agent_error(runtime_config, exc)

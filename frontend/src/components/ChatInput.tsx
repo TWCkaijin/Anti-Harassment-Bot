@@ -13,7 +13,6 @@ import {
 import MaterialIcon from "./MaterialIcon";
 import FollowUpPanel from "./FollowUpPanel";
 import NextStepSuggestions from "./NextStepSuggestions";
-import ActionButtons from "./ActionButtons";
 import type { ConversationMessage, ReplyContext } from "../hooks/useConversation";
 import { getFollowUpData } from "./actionButtonValidation";
 import { useI18n } from "../i18n";
@@ -44,7 +43,7 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
   const interactionMode = preview ? preview.interaction_mode : replyPrompt?.interactionMode;
   const clarifyingQuestions = preview ? preview.clarifying_questions : replyPrompt?.clarifyingQuestions;
   const actions = preview ? undefined : replyPrompt?.actionButtons;
-  const { hasQuestion, optionActions, resources, suggestions } = getFollowUpData({
+  const { hasQuestion, optionActions, suggestions } = getFollowUpData({
     actions,
     suggestedReplies: panelReplies,
     clarifyingQuestions,
@@ -214,9 +213,6 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
         )}
 
         <div hidden={menuVisible} inert={menuVisible}>
-          {!hasQuestion && resources.length > 0 && (
-            <div className="mb-2"><ActionButtons actions={resources} /></div>
-          )}
           {!hasQuestion && (
             <NextStepSuggestions
               key={promptKey}
