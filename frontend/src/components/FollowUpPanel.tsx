@@ -50,7 +50,7 @@ export default function FollowUpPanel({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const submitted = useRef(false);
 
-  const { optionActions, resources, questions, suggestions, hasContent } = getFollowUpData({ actions, suggestedReplies, clarifyingQuestions });
+  const { optionActions, resources, questions, suggestions, hasQuestion } = getFollowUpData({ actions, suggestedReplies, clarifyingQuestions, interactionMode });
   const supplementalQuestions = questions.filter((question) => !optionActions.some((action) => action.title.trim() === question));
   const groups: QuestionGroup[] = optionActions.length > 0
     ? optionActions.map((action, index) => ({ key: `${index}-${action.id}`, title: action.title, context: [action.title, ...supplementalQuestions].join("\n"), options: action.options }))
@@ -73,9 +73,8 @@ export default function FollowUpPanel({
     : [...(supplementalQuestions.length > 0 ? [supplementalQuestions.join("\n")] : []), ...groups.map((group) => `${group.title}\n${getAnswer(group)}`)].join("\n\n");
   const validationError = getUserMessageValidationError(reply);
   const statusError = validationError ?? submitError;
-  const canSubmit = allAnswered && !validationError && !isLoading;
-  const heading = interactionMode === "clarify" ? "AI 需要更多您的資訊"
-    : optionActions.length === 1 ? optionActions[0].title : groups.length > 0 ? "接下來想聊什麼？" : "相關資源";
+  const canSubmit = hasQuestion && allAnswered && !validationError && !isLoading;
+  const heading = "AI 需要更多您的資訊";
   const extraQuestions = questions.filter((question) => !groups.some((group) => group.title.trim() === question));
 
   const updateAnswer = (patch: Partial<Answer>) => {
@@ -121,7 +120,7 @@ export default function FollowUpPanel({
     }
   };
 
-  if (sent || !hasContent) return null;
+  if (sent || !hasQuestion) return null;
 
   return (
     <section aria-labelledby={`${panelId}-heading`} onKeyDown={handlePanelKeyDown} className="my-3 overflow-hidden rounded-2xl border border-primary/15 bg-white/95 shadow-sm">

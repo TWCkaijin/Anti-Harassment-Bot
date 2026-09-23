@@ -186,7 +186,7 @@ describe("ChatArea follow-up integration", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("uses older suggested replies as selectable choices when no configured options exist", async () => {
+  it("sends ordinary next-step suggestions immediately without creating quoted answer metadata", async () => {
     const onSend = vi.fn();
     render(chat([assistantMessage({
       actionButtons: [], interactionMode: "answer", clarifyingQuestions: [],
@@ -194,13 +194,11 @@ describe("ChatArea follow-up integration", () => {
     })], onSend));
     await screen.findByText("已連線");
 
-    fireEvent.click(screen.getByRole("radio", { name: /我想了解申訴流程/ }));
-    expect(onSend).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: /送出|傳送回覆/ }));
+    expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeVisible();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("region", { name: "下一步建議" })).getByRole("button", { name: "我想了解申訴流程" }));
 
-    expect(onSend).toHaveBeenCalledExactlyOnceWith("我想了解申訴流程", undefined, undefined, {
-      answers: [{ question: "您想如何回覆？", answer: "我想了解申訴流程" }],
-    });
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("我想了解申訴流程");
   });
 
   it.each([

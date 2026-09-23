@@ -221,10 +221,15 @@ async def test_agent_injects_generic_skill_actions_and_passes_followup_context(m
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "prompt_sections",
-    [{}, {"output_format": "依照管理員的自訂回覆格式。"}],
+    [{}, {"output_format": "舊版設定：所有選項都用 clarify 顯示詢問選單。"}],
 )
-async def test_agent_keeps_inline_question_guidance_with_custom_prompt(
-    monkeypatch, prompt_sections
+@pytest.mark.parametrize(
+    "user_message",
+    ["請提供接下來可以選擇的討論方向。", "我不確定對方是主管還是合作對象，這會影響處理方式嗎？"],
+    ids=["next_step_suggestions", "missing_information"],
+)
+async def test_agent_keeps_answer_and_clarify_guidance_with_matched_skill(
+    monkeypatch, prompt_sections, user_message
 ):
     script = _parse_script("choose_next_step", _builtin_scenario_documents()["choose_next_step"])
     assert script is not None
@@ -241,7 +246,7 @@ async def test_agent_keeps_inline_question_guidance_with_custom_prompt(
         agent_module, "get_matching_scenario_scripts", lambda user_message, history=None: (script,)
     )
 
-    await agent.run("我不知道該如何處理。", use_rag=False)
+    await agent.run(user_message, use_rag=False)
 
     # Interaction guidance must reach the model even when an admin replaces the format section.
     interaction_instruction = next(
@@ -249,15 +254,31 @@ async def test_agent_keeps_inline_question_guidance_with_custom_prompt(
         for message in completions.calls[0]["messages"]
         if message["role"] == "system" and "回覆 JSON 必須包含 action_buttons" in message["content"]
     )
-    assert "原本的下一個問答建議位置直接呈現" in interaction_instruction
+    assert (
+        "只有存在必須由使用者回答的明確資訊缺口時，interaction_mode 才為 clarify"
+        in interaction_instruction
+    )
+    assert (
+        "一般回答、下一步建議與 Skill options 都可使用 answer，clarifying_questions 必須為空陣列"
+        in interaction_instruction
+    )
+    assert "不要為了產生選單而虛構追問或標記 clarify" in interaction_instruction
+    assert (
+        "answer 模式的 suggested_replies 與 options 是一般輸入框上方的水平建議按鈕"
+        in interaction_instruction
+    )
+    assert (
+        "點選直接送出，保留一般輸入框，不提供其他欄位、確認選單或問題引用"
+        in interaction_instruction
+    )
+    assert "只有 clarify 模式才以詢問選單取代一般輸入區" in interaction_instruction
     assert "以設定中的 title 作為問題，各組問題與選項分別對應" in interaction_instruction
     assert "再按送出才提交，點選選項不會立即送出" in interaction_instruction
-    assert "interaction_mode 必須為 clarify" in interaction_instruction
     assert "優先每輪只問一個主要問題" in interaction_instruction
     assert "suggested_replies 的每個短句都是該問題的具體可能答案" in interaction_instruction
     assert "不要同時提供無關的 choose_next_step" in interaction_instruction
     assert "不自行編造 options payload 或選單 ID" in interaction_instruction
-    assert "前端會自動提供其他文字欄位" in interaction_instruction
+    assert "只有 clarify 的前端會自動提供其他文字欄位" in interaction_instruction
     assert "不要在 suggested_replies 或 Skill 選項額外加入其他" in interaction_instruction
     suggestions_schema = completions.calls[0]["response_format"]["json_schema"]["schema"][
         "properties"
@@ -269,8 +290,22 @@ async def test_agent_keeps_inline_question_guidance_with_custom_prompt(
         in interaction_instruction
     )
     assert "不可省略或輸出空陣列" in interaction_instruction
-    assert "前端優先呈現設定選項；suggested_replies 仍須提供" in interaction_instruction
+    assert "已有適用 options 時，suggested_replies 仍須提供" in interaction_instruction
     assert "`suggested_replies` 仍須提供 2 至 4 個不重複的非空短句" in script.instruction
+    assert '`interaction_mode: "answer"` 與 `clarifying_questions: []`' in script.instruction
+    assert "點選後直接送出設定中的 `value`" in script.instruction
+    assert "只有回答目前需求存在必須由使用者補充的明確資訊缺口時" in script.instruction
+    assert "不要同時提供本 Skill 的討論方向選單" in script.instruction
+    assert "只輸出本 Skill 列出的 `action` 與 `id`" in script.instruction
+    system_messages = [
+        message["content"]
+        for message in completions.calls[0]["messages"]
+        if message["role"] == "system"
+    ]
+    assert any(script.instruction in instruction for instruction in system_messages)
+    assert system_messages[-1] == interaction_instruction
+    if prompt_sections:
+        assert prompt_sections["output_format"] in system_messages[0]
     for message in completions.calls[0]["messages"]:
         if message["role"] == "system":
             assert "可為空陣列" not in message["content"]

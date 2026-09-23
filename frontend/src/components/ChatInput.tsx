@@ -12,6 +12,8 @@ import {
 } from "react";
 import MaterialIcon from "./MaterialIcon";
 import FollowUpPanel from "./FollowUpPanel";
+import NextStepSuggestions from "./NextStepSuggestions";
+import ActionButtons from "./ActionButtons";
 import type { ConversationMessage, ReplyContext } from "../hooks/useConversation";
 import { getFollowUpData } from "./actionButtonValidation";
 import { useI18n } from "../i18n";
@@ -37,17 +39,21 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
 
   const promptKey = replyPrompt?.id ?? JSON.stringify(suggestedReplies);
   const panelReplies = replyPrompt?.suggestedReplies ?? suggestedReplies;
-  const { hasContent: hasMenu } = getFollowUpData({
+  const { hasQuestion, optionActions, resources, suggestions } = getFollowUpData({
     actions: replyPrompt?.actionButtons,
     suggestedReplies: panelReplies,
     clarifyingQuestions: replyPrompt?.clarifyingQuestions,
+    interactionMode: replyPrompt?.interactionMode,
   });
+  const nextSteps = optionActions.length > 0
+    ? optionActions.flatMap((action) => action.options)
+    : suggestions.map((suggestion) => ({ label: suggestion, value: suggestion }));
   const [menuState, setMenuState] = useState({ key: promptKey, hidden: false, sent: false });
   // Reset only the menu when the active question changes; keep the composer draft.
   if (menuState.key !== promptKey) {
     setMenuState({ key: promptKey, hidden: false, sent: false });
   }
-  const menuVisible = hasMenu && !menuState.hidden && !menuState.sent;
+  const menuVisible = hasQuestion && !menuState.hidden && !menuState.sent;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -159,7 +165,7 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
     <footer className="shrink-0 px-6 lg:px-10 pb-2 lg:pb-4 bg-transparent">
       <div className="w-full relative">
         <div ref={panelRef} hidden={!menuVisible} inert={!menuVisible}>
-          <FollowUpPanel
+          {hasQuestion && <FollowUpPanel
             key={promptKey}
             suggestedReplies={panelReplies}
             actions={replyPrompt?.actionButtons}
@@ -172,10 +178,10 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
               pendingFocus.current = "composer";
               setMenuState({ key: promptKey, hidden: true, sent: true });
             }}
-          />
+          />}
         </div>
 
-        {hasMenu && !menuVisible && !menuState.sent && (
+        {hasQuestion && !menuVisible && !menuState.sent && (
           <div className="mb-2 flex justify-end">
             <button
               type="button"
@@ -202,6 +208,17 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
         )}
 
         <div hidden={menuVisible} inert={menuVisible}>
+          {!hasQuestion && resources.length > 0 && (
+            <div className="mb-2"><ActionButtons actions={resources} /></div>
+          )}
+          {!hasQuestion && (
+            <NextStepSuggestions
+              key={promptKey}
+              suggestions={nextSteps}
+              isLoading={isLoading}
+              onSend={(message) => onSend(message)}
+            />
+          )}
 
           {previewUrl && (
             <div className="mb-3 relative inline-block">
@@ -280,7 +297,7 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
             role={messageValidationError ? "alert" : undefined}
           >
             {messageValidationError ?? `${messageLength.toLocaleString("en-US")} / ${MAX_USER_MESSAGE_CHARACTERS.toLocaleString("en-US")}`}
-        </p>
+          </p>
         </div>
 
         {/* 底部免責聲明 */}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "../i18n";
@@ -14,6 +14,8 @@ const replyPrompt: ConversationMessage = {
   role: "assistant",
   content: "我會陪您一起了解接下來的選擇。",
   timestamp: 1,
+  interactionMode: "clarify",
+  clarifyingQuestions: ["您想先了解哪一項？"],
   actionButtons: [{
     action: "options", id: "choose_next", label: "選擇下一步", title: "您想先了解哪一項？",
     options: [{ label: "了解資源", value: "我想先了解可使用的資源" }, { label: "繼續說明", value: "我想繼續說明" }],
@@ -96,6 +98,7 @@ describe("ChatInput", () => {
     expect(composer).toHaveValue("一般輸入框尚未送出的草稿");
     expect(screen.getByAltText("Preview")).toBeVisible();
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "下一步建議" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "顯示選單" }));
 
     expect(screen.getByRole("button", { name: "隱藏" })).toHaveFocus();
@@ -161,5 +164,96 @@ describe("ChatInput", () => {
     expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeVisible();
     expect(screen.queryByRole("button", { name: "顯示選單" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "隱藏" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      name: "answer with suggestions",
+      data: { interactionMode: "answer", actionButtons: [], clarifyingQuestions: [], suggestedReplies: ["了解申訴流程", "查看求助資源"] },
+      label: "了解申訴流程",
+    },
+    {
+      name: "answer with configured options",
+      data: { interactionMode: "answer", actionButtons: replyPrompt.actionButtons, clarifyingQuestions: [], suggestedReplies: ["不應優先顯示的建議"] },
+      label: "了解資源",
+    },
+    {
+      name: "clarify without valid questions",
+      data: { interactionMode: "clarify", actionButtons: [], clarifyingQuestions: [" "], suggestedReplies: ["了解申訴流程", "查看求助資源"] },
+      label: "了解申訴流程",
+    },
+    {
+      name: "answer with leftover question metadata",
+      data: { interactionMode: "answer", actionButtons: [], clarifyingQuestions: ["不該顯示的追問？"], suggestedReplies: ["了解申訴流程", "查看求助資源"] },
+      label: "了解申訴流程",
+    },
+  ] satisfies { name: string; data: Partial<ConversationMessage>; label: string }[])(
+    "keeps the composer and horizontal next-step chips for $name",
+    ({ data, label }) => {
+      render(<I18nProvider><ChatInput onSend={vi.fn()} replyPrompt={{ ...replyPrompt, ...data }} /></I18nProvider>);
+      const composer = screen.getByPlaceholderText("請描述您的狀況或提出問題…");
+      const chips = screen.getByRole("region", { name: "下一步建議" });
+      expect(composer).toBeVisible();
+      expect(chips).toBeVisible();
+      expect(chips.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(chips.firstElementChild).toHaveClass("flex-nowrap", "overflow-x-auto");
+      expect(within(chips).getByRole("button", { name: label })).toHaveClass("whitespace-nowrap", "shrink-0");
+      expect(screen.getByRole("button", { name: "上傳圖片" })).toBeVisible();
+      expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+      expect(screen.queryByRole("textbox", { name: "其他補充" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "隱藏" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "顯示選單" })).not.toBeInTheDocument();
+      expect(screen.queryByText("不該顯示的追問？")).not.toBeInTheDocument();
+    },
+  );
+
+  it("sends a configured next-step value directly without reply context and prevents repeated clicks", () => {
+    const onSend = vi.fn();
+    const prompt = { ...replyPrompt, interactionMode: "answer" as const, suggestedReplies: ["不應優先顯示的建議"] };
+    const { rerender } = render(<I18nProvider><ChatInput onSend={onSend} replyPrompt={prompt} /></I18nProvider>);
+    expect(screen.queryByRole("button", { name: "不應優先顯示的建議" })).not.toBeInTheDocument();
+    const suggestion = screen.getByRole("button", { name: "了解資源" });
+    fireEvent.click(suggestion);
+    fireEvent.click(suggestion);
+    fireEvent.click(screen.getByRole("button", { name: "繼續說明" }));
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("我想先了解可使用的資源");
+    expect(suggestion).toBeDisabled();
+
+    rerender(<I18nProvider><ChatInput onSend={onSend} replyPrompt={{ ...prompt, id: "assistant-2" }} /></I18nProvider>);
+    expect(screen.getByRole("button", { name: "了解資源" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "繼續說明" }));
+    expect(onSend).toHaveBeenLastCalledWith("我想繼續說明");
+    expect(onSend).toHaveBeenCalledTimes(2);
+  });
+
+  it("disables next-step submission during loading and retains the ordinary stop control", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const { rerender } = render(<I18nProvider><ChatInput onSend={onSend} onStop={onStop} suggestedReplies={["查看資源"]} isLoading /></I18nProvider>);
+    const suggestion = screen.getByRole("button", { name: "查看資源" });
+    expect(suggestion).toBeDisabled();
+    fireEvent.click(suggestion);
+    fireEvent.click(screen.getByRole("button", { name: "停止回覆" }));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onStop).toHaveBeenCalledOnce();
+
+    rerender(<I18nProvider><ChatInput onSend={onSend} onStop={onStop} suggestedReplies={["查看資源"]} /></I18nProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "查看資源" }));
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("查看資源");
+  });
+
+  it("places ordinary resource links above the available composer without creating questions", () => {
+    const prompt: ConversationMessage = {
+      ...replyPrompt, interactionMode: "answer", clarifyingQuestions: [], suggestedReplies: ["查看其他資源"],
+      actionButtons: [{ action: "tel", label: "撥打諮詢專線", phone_number: "113" }, { action: "url", label: "官方網站", url: "https://example.org/" }],
+    };
+    render(<I18nProvider><ChatInput onSend={vi.fn()} replyPrompt={prompt} /></I18nProvider>);
+    const composer = screen.getByPlaceholderText("請描述您的狀況或提出問題…");
+    const phone = screen.getByRole("link", { name: "撥打諮詢專線" });
+    expect(phone).toHaveAttribute("href", "tel:113");
+    expect(phone.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("link", { name: "官方網站（另開新分頁）" })).toHaveAttribute("href", "https://example.org/");
+    expect(composer).toBeVisible();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
   });
 });

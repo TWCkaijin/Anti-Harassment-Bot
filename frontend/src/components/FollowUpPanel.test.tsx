@@ -20,11 +20,43 @@ const nextAction: OptionsActionButton = {
   options: [{ label: "電話", value: "電話聯絡" }, { label: "線上", value: "線上聯絡" }],
 };
 
+const clarificationProps = {
+  interactionMode: "clarify" as const,
+  clarifyingQuestions: [optionsAction.title],
+};
+const multipleQuestionProps = {
+  ...clarificationProps,
+  clarifyingQuestions: [optionsAction.title, nextAction.title],
+};
+
 describe("FollowUpPanel", () => {
+  it.each(["answer", undefined] as const)("does not open in %s mode even when actions and questions are present", (interactionMode) => {
+    const { container } = render(<FollowUpPanel
+      interactionMode={interactionMode}
+      clarifyingQuestions={[optionsAction.title]}
+      actions={[optionsAction, { action: "url", label: "相關資源", url: "https://example.org" }]}
+      suggestedReplies={["想先了解資源"]}
+      onSend={vi.fn()}
+      onHide={vi.fn()}
+    />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it.each([undefined, [], ["", "  "], ["x".repeat(2001)]])("does not open in clarify mode without a valid explicit question: %j", (clarifyingQuestions) => {
+    const { container } = render(<FollowUpPanel
+      interactionMode="clarify"
+      clarifyingQuestions={clarifyingQuestions}
+      actions={[optionsAction]}
+      suggestedReplies={["繼續聊聊"]}
+      onSend={vi.fn()}
+    />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("shows inline choices with Other and only sends after explicit submission", () => {
     const onSend = vi.fn();
     const onSent = vi.fn(() => expect(onSend).toHaveBeenCalledTimes(1));
-    render(<FollowUpPanel actions={[optionsAction]} suggestedReplies={["不重複的建議"]} onSend={onSend} onSent={onSent} />);
+    render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} suggestedReplies={["不重複的建議"]} onSend={onSend} onSent={onSent} />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByText("不重複的建議")).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "其他" })).toBeInTheDocument();
@@ -61,7 +93,7 @@ describe("FollowUpPanel", () => {
   it("keeps the selected answer and allows retry when the sender throws", () => {
     const onSend = vi.fn().mockImplementationOnce(() => { throw new Error("sender unavailable"); });
     const onSent = vi.fn();
-    render(<FollowUpPanel actions={[optionsAction]} onSend={onSend} onSent={onSent} />);
+    render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={onSend} onSent={onSent} />);
     fireEvent.click(screen.getByRole("radio", { name: "看看資源" }));
     fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
     expect(screen.getByRole("alert")).toHaveTextContent("回覆未能送出，請再試一次。");
@@ -78,7 +110,7 @@ describe("FollowUpPanel", () => {
 
   it("keeps Other drafts when switching to a configured option", () => {
     const onSend = vi.fn();
-    render(<FollowUpPanel actions={[optionsAction]} onSend={onSend} />);
+    render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={onSend} />);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "草稿" } });
     fireEvent.click(screen.getByRole("radio", { name: "繼續說明" }));
     expect(screen.getByRole("textbox")).toHaveValue("草稿");
@@ -89,14 +121,14 @@ describe("FollowUpPanel", () => {
   });
 
   it("does not steal input focus when the panel appears", () => {
-    render(<><textarea aria-label="主輸入欄" autoFocus /><FollowUpPanel actions={[optionsAction]} onSend={vi.fn()} /></>);
+    render(<><textarea aria-label="主輸入欄" autoFocus /><FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={vi.fn()} /></>);
     expect(screen.getByRole("textbox", { name: "主輸入欄" })).toHaveFocus();
   });
 
   it("only renders a hide control when the parent supports hiding", () => {
-    const { rerender } = render(<FollowUpPanel actions={[optionsAction]} onSend={vi.fn()} />);
+    const { rerender } = render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={vi.fn()} />);
     expect(screen.queryByRole("button", { name: "隱藏" })).not.toBeInTheDocument();
-    rerender(<FollowUpPanel actions={[optionsAction]} onSend={vi.fn()} onHide={vi.fn()} />);
+    rerender(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={vi.fn()} onHide={vi.fn()} />);
     expect(screen.getByRole("button", { name: "隱藏" })).toBeInTheDocument();
   });
 
@@ -104,7 +136,7 @@ describe("FollowUpPanel", () => {
     const onHide = vi.fn();
     const onSend = vi.fn();
     const onSent = vi.fn();
-    render(<FollowUpPanel actions={[optionsAction, nextAction]} onSend={onSend} onHide={onHide} onSent={onSent} />);
+    render(<FollowUpPanel {...multipleQuestionProps} actions={[optionsAction, nextAction]} onSend={onSend} onHide={onHide} onSent={onSent} />);
     fireEvent.click(screen.getByRole("radio", { name: "看看資源" }));
     fireEvent.click(screen.getByRole("button", { name: "下一題" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "稍後再完成的草稿" } });
@@ -121,7 +153,7 @@ describe("FollowUpPanel", () => {
   it("hides on Escape from the Other field but preserves IME composition", () => {
     const onHide = vi.fn();
     const onSend = vi.fn();
-    render(<FollowUpPanel actions={[optionsAction]} onSend={onSend} onHide={onHide} />);
+    render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={onSend} onHide={onHide} />);
     const other = screen.getByRole("textbox");
     fireEvent.change(other, { target: { value: "尚未送出的回答" } });
     fireEvent.keyDown(other, { key: "Escape", isComposing: true });
@@ -133,15 +165,15 @@ describe("FollowUpPanel", () => {
     expect(other).toHaveValue("尚未送出的回答");
   });
 
-  it("allows hiding resource-only panels while loading", () => {
+  it("allows hiding a clarification panel with resources while loading", () => {
     const onHide = vi.fn();
-    render(<FollowUpPanel actions={[{ action: "url", label: "相關資訊", url: "https://example.org" }]} onSend={vi.fn()} onHide={onHide} isLoading />);
+    render(<FollowUpPanel {...clarificationProps} actions={[{ action: "url", label: "相關資訊", url: "https://example.org" }]} onSend={vi.fn()} onHide={onHide} isLoading />);
     fireEvent.click(screen.getByRole("button", { name: "隱藏" }));
     expect(onHide).toHaveBeenCalledTimes(1);
   });
 
   it("only puts the Other field in the keyboard tab order when Other is selected", () => {
-    render(<FollowUpPanel actions={[optionsAction]} onSend={vi.fn()} />);
+    render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={vi.fn()} />);
     fireEvent.click(screen.getByRole("radio", { name: "看看資源" }));
     expect(screen.getByRole("textbox")).toHaveAttribute("tabindex", "-1");
     fireEvent.click(screen.getByRole("radio", { name: "其他" }));
@@ -152,7 +184,7 @@ describe("FollowUpPanel", () => {
 
   it("preserves IME composition and Shift+Enter, and submits on plain Enter", () => {
     const onSend = vi.fn();
-    render(<FollowUpPanel suggestedReplies={["建議"]} onSend={onSend} />);
+    render(<FollowUpPanel {...clarificationProps} suggestedReplies={["建議"]} onSend={onSend} />);
     const other = screen.getByRole("textbox");
     fireEvent.change(other, { target: { value: "我的說明" } });
     fireEvent.keyDown(other, { key: "Enter", isComposing: true });
@@ -160,20 +192,20 @@ describe("FollowUpPanel", () => {
     fireEvent.keyDown(other, { key: "Enter", shiftKey: true });
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(other, { key: "Enter" });
-    expect(onSend).toHaveBeenCalledExactlyOnceWith("我的說明", {
-      answers: [{ question: "您想如何回覆？", answer: "我的說明" }],
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(`${optionsAction.title}\n我的說明`, {
+      answers: [{ question: optionsAction.title, answer: "我的說明" }],
     });
   });
 
   it("uses legacy suggested replies as choices, requiring confirmation", () => {
     const onSend = vi.fn();
-    render(<FollowUpPanel suggestedReplies={["可以先說明", "再想一下"]} onSend={onSend} />);
-    expect(screen.getByRole("region", { name: "接下來想聊什麼？" })).toBeInTheDocument();
+    render(<FollowUpPanel {...clarificationProps} suggestedReplies={["可以先說明", "再想一下"]} onSend={onSend} />);
+    expect(screen.getByRole("region", { name: "AI 需要更多您的資訊" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "再想一下" }));
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
-    expect(onSend).toHaveBeenCalledExactlyOnceWith("再想一下", {
-      answers: [{ question: "您想如何回覆？", answer: "再想一下" }],
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(`${optionsAction.title}\n再想一下`, {
+      answers: [{ question: optionsAction.title, answer: "再想一下" }],
     });
   });
 
@@ -210,7 +242,7 @@ describe("FollowUpPanel", () => {
 
   it("blocks whitespace-only Other and messages exceeding the shared total limit", () => {
     const onSend = vi.fn();
-    render(<FollowUpPanel actions={[optionsAction]} onSend={onSend} />);
+    render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={onSend} />);
     const other = screen.getByRole("textbox");
     fireEvent.change(other, { target: { value: " \n " } });
     expect(screen.getByRole("button", { name: "送出回覆" })).toBeDisabled();
@@ -223,7 +255,7 @@ describe("FollowUpPanel", () => {
 
   it("allows the exact user message boundary after including the question context", () => {
     const onSend = vi.fn();
-    render(<FollowUpPanel actions={[optionsAction]} onSend={onSend} />);
+    render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={onSend} />);
     const answer = "字".repeat(2000 - optionsAction.title.length - 1);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: answer } });
     fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
@@ -234,9 +266,9 @@ describe("FollowUpPanel", () => {
 
   it("disables editing and submission if a request begins with a selection present", () => {
     const onSend = vi.fn();
-    const { rerender } = render(<FollowUpPanel actions={[optionsAction]} onSend={onSend} />);
+    const { rerender } = render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={onSend} />);
     fireEvent.click(screen.getByRole("radio", { name: "看看資源" }));
-    rerender(<FollowUpPanel actions={[optionsAction]} onSend={onSend} isLoading />);
+    rerender(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={onSend} isLoading />);
     expect(screen.getByRole("radio", { name: "看看資源" })).toBeDisabled();
     expect(screen.getByRole("textbox")).toBeDisabled();
     expect(screen.getByRole("button", { name: "送出回覆" })).toBeDisabled();
@@ -247,7 +279,7 @@ describe("FollowUpPanel", () => {
 
   it("associates answers with each question and preserves them while navigating", () => {
     const onSend = vi.fn();
-    render(<FollowUpPanel actions={[optionsAction, nextAction]} onSend={onSend} />);
+    render(<FollowUpPanel {...multipleQuestionProps} actions={[optionsAction, nextAction]} onSend={onSend} />);
     expect(screen.getByText("1 / 2 題")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "上一題" })).toBeDisabled();
     fireEvent.click(screen.getByRole("radio", { name: "看看資源" }));
@@ -273,7 +305,7 @@ describe("FollowUpPanel", () => {
 
   it("validates the combined multi-question payload instead of each answer alone", () => {
     const onSend = vi.fn();
-    render(<FollowUpPanel actions={[optionsAction, nextAction]} onSend={onSend} />);
+    render(<FollowUpPanel {...multipleQuestionProps} actions={[optionsAction, nextAction]} onSend={onSend} />);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "甲".repeat(1000) } });
     fireEvent.click(screen.getByRole("button", { name: "下一題" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "乙".repeat(1000) } });
@@ -282,20 +314,20 @@ describe("FollowUpPanel", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("renders safe resource links alongside questions or on their own", () => {
+  it("renders resource links alongside questions but does not open for resources alone", () => {
     const actions: ActionButton[] = [{ action: "tel", label: "撥打專線", phone_number: "113" }, { action: "url", label: "開啟資源", url: "https://example.org" }];
-    const { rerender } = render(<FollowUpPanel actions={[optionsAction, ...actions]} onSend={vi.fn()} />);
+    const { rerender } = render(<FollowUpPanel {...clarificationProps} actions={[optionsAction, ...actions]} onSend={vi.fn()} />);
     expect(screen.getByRole("link", { name: "撥打專線" })).toHaveAttribute("href", "tel:113");
     expect(screen.getByRole("link", { name: /開啟資源/ })).toHaveAttribute("rel", "noopener noreferrer");
     rerender(<FollowUpPanel actions={actions} onSend={vi.fn()} />);
-    expect(screen.getByRole("region", { name: "相關資源" })).toBeInTheDocument();
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
   it("ignores malformed choices and falls back to valid legacy suggestions", () => {
     const actions = [null, {}, { ...optionsAction, options: [null, {}] }, { ...optionsAction, options: [optionsAction.options[0]] }] as unknown as ActionButton[];
-    render(<FollowUpPanel actions={actions} suggestedReplies={["可用建議"]} onSend={vi.fn()} />);
+    render(<FollowUpPanel {...clarificationProps} actions={actions} suggestedReplies={["可用建議"]} onSend={vi.fn()} />);
     expect(screen.getByRole("radio", { name: "可用建議" })).toBeInTheDocument();
   });
 
@@ -308,14 +340,15 @@ describe("FollowUpPanel", () => {
       { ...optionsAction, options: [{ label: "超長內容", value: "😀".repeat(501) }, optionsAction.options[1]] },
       { ...optionsAction, options: [optionsAction.options[0], { ...optionsAction.options[0], value: ` ${optionsAction.options[0].value} ` }] },
     ];
-    const { container } = render(<FollowUpPanel actions={malformed} onSend={vi.fn()} />);
-    expect(container).toBeEmptyDOMElement();
+    render(<FollowUpPanel {...clarificationProps} actions={malformed} onSend={vi.fn()} />);
+    expect(screen.getAllByRole("radio")).toHaveLength(1);
+    expect(screen.getByRole("radio", { name: "其他" })).toBeInTheDocument();
   });
 
   it("accepts the 500-code-point option boundary and sends its exact configured value", () => {
     const onSend = vi.fn();
     const value = "😀".repeat(500);
-    render(<FollowUpPanel actions={[{ ...optionsAction, options: [{ label: "邊界", value }, optionsAction.options[1]] }]} onSend={onSend} />);
+    render(<FollowUpPanel {...clarificationProps} actions={[{ ...optionsAction, options: [{ label: "邊界", value }, optionsAction.options[1]] }]} onSend={onSend} />);
     fireEvent.click(screen.getByRole("radio", { name: "邊界" }));
     fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
     expect(onSend).toHaveBeenCalledExactlyOnceWith(value, {
