@@ -1,9 +1,12 @@
 import json
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from textwrap import dedent
 from typing import Any
 
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessage
 
 from backend.app.core.chat_response import OPENROUTER_RESPONSE_FORMAT
 from backend.app.core.config import get_settings
@@ -13,6 +16,11 @@ from backend.app.core.scenario_scripts import (
     available_actions,
     format_scenario_instruction,
     get_matching_scenario_scripts,
+)
+from backend.app.core.streaming_reply import (
+    MAX_STREAM_RESPONSE_LENGTH,
+    ReplyJSONDecoder,
+    StreamReplyError,
 )
 from backend.app.rag.base import RAGUnavailableError
 from backend.app.rag.firestore_vector import FirestoreVectorRAG
@@ -91,9 +99,9 @@ _DEFAULT_SYSTEM_SECTIONS: tuple[tuple[str, str, str], ...] = (
             你必須一律輸出合法的 JSON 格式字串，不要加上 Markdown code block (例如 ```json )，直接輸出 JSON 即可。
             格式如下：
             {
+              "reply": "你原本準備要回應使用者的完整內容",
               "emotion": "使用者的當前情緒標籤，例如：焦慮、憤怒、恐懼、冷靜、悲傷、未知",
               "emotion_color": "請從以下預定義顏色中選擇：'red' (恐懼/憤怒), 'yellow' (焦慮/緊張), 'green' (冷靜/放鬆), 'blue' (悲傷/低落), 'gray' (未知/一般)",
-              "reply": "你原本準備要回應使用者的完整內容",
               "suggested_replies": ["提供 2 到 4 個使用者可回覆的繁體中文短句：answer 模式是接續討論的建議，clarify 模式是當前問題的可能答案"],
               "action_buttons": [],
               "interaction_mode": "answer",
@@ -341,6 +349,31 @@ class OpenRouterAgent:
         history: list[dict[str, str]] | None = None,
         image_base64: str | None = None,
         use_rag: bool = True,
+        on_reply_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> AgentResult:
+        # WSGI owns a separate event loop per request. A fresh streaming transport
+        # prevents pooled sockets from outliving their loop, including cancellation.
+        if on_reply_delta is not None and isinstance(self.client, AsyncOpenAI):
+            async with AsyncOpenAI(
+                base_url=settings.openrouter_base_url,
+                api_key=settings.openrouter_api_key,
+                timeout=settings.openrouter_request_timeout_seconds,
+            ) as client:
+                return await self._run(
+                    user_message, history, image_base64, use_rag, on_reply_delta, client
+                )
+        return await self._run(
+            user_message, history, image_base64, use_rag, on_reply_delta, self.client
+        )
+
+    async def _run(
+        self,
+        user_message: str,
+        history: list[dict[str, str]] | None,
+        image_base64: str | None,
+        use_rag: bool,
+        on_reply_delta: Callable[[str], Awaitable[None]] | None,
+        client: AsyncOpenAI,
     ) -> AgentResult:
         """
         執行 Agent 迴圈：
@@ -364,6 +397,9 @@ class OpenRouterAgent:
             {
                 "role": "system",
                 "content": (
+                    "最終 JSON 請先輸出 reply 欄位，接著輸出情緒、互動模式、問題與動作等其他欄位；"
+                    "reply 會即時顯示，其他欄位會在完整回覆通過驗證後顯示。"
+                    "需要呼叫檢索工具時，該輪只產生 tool_calls，不要先輸出 reply 或其他回覆內容。"
                     "回覆 JSON 必須包含 action_buttons；沒有適合的動作時輸出空陣列。"
                     "依目前 Skill 的情境指令，從可用 action_buttons 選擇最多三個相關動作，"
                     "完整複製其選取格式：tel 使用 phone_number，url 使用 url，options 使用 id。"
@@ -456,9 +492,7 @@ class OpenRouterAgent:
                 create_kwargs["tools"] = [_RAG_TOOL]
                 create_kwargs["tool_choice"] = "required" if requires_grounded_retrieval else "auto"
 
-            response = await self.client.chat.completions.create(**create_kwargs)
-
-            response_message = response.choices[0].message
+            response_message = await self._create_message(client, create_kwargs, on_reply_delta)
             tool_calls = response_message.tool_calls
             rag_used = False
             sources: list[dict[str, Any]] = []
@@ -470,6 +504,8 @@ class OpenRouterAgent:
                 messages.append(response_message)  # 把 assistant 的 tool call 訊息加回歷史
 
                 for tool_call in tool_calls:
+                    if tool_call.function.name != "retrieve_harassment_knowledge":
+                        raise AgentContractError("OpenRouter returned an unsupported tool call")
                     if tool_call.function.name == "retrieve_harassment_knowledge":
                         try:
                             args = json.loads(tool_call.function.arguments)
@@ -562,10 +598,16 @@ class OpenRouterAgent:
                             "exclude": True,
                         }
                     }
-                second_response = await self.client.chat.completions.create(**second_create_kwargs)
-                final_text = second_response.choices[0].message.content
+                final_message = await self._create_message(
+                    client, second_create_kwargs, on_reply_delta
+                )
+                if final_message.tool_calls:
+                    raise AgentContractError("OpenRouter returned tools in the final response")
+                final_text = final_message.content
             else:
                 # 若無 Tool Call，直接回傳
+                if tool_calls:
+                    raise AgentContractError("OpenRouter returned tools when tools are disabled")
                 final_text = response_message.content
 
             return AgentResult(
@@ -582,3 +624,127 @@ class OpenRouterAgent:
         except Exception:
             logger.exception("OpenRouter API Error")
             raise
+
+    async def _create_message(
+        self,
+        client: AsyncOpenAI,
+        create_kwargs: dict[str, Any],
+        on_reply_delta: Callable[[str], Awaitable[None]] | None,
+    ):
+        if on_reply_delta is None:
+            response = await client.chat.completions.create(**create_kwargs)
+            return response.choices[0].message
+
+        stream = await client.chat.completions.create(**create_kwargs, stream=True)
+        content: list[str] = []
+        content_length = 0
+        tool_parts: dict[int, dict[str, Any]] = {}
+        tool_length = 0
+        decoder: ReplyJSONDecoder | None = None
+        emitted = False
+        finish_reason = None
+        text_allowed = create_kwargs.get("tool_choice") != "required"
+        try:
+            async for chunk in stream:
+                if getattr(chunk, "error", None):
+                    raise AgentContractError("OpenRouter reported a streaming error")
+                for choice in chunk.choices:
+                    if choice.index != 0:
+                        raise AgentContractError("OpenRouter returned an unexpected stream choice")
+                    delta = choice.delta
+                    if getattr(delta, "refusal", None):
+                        raise AgentContractError("OpenRouter refused the streamed response")
+                    text_delta = getattr(delta, "content", None)
+                    calls_delta = getattr(delta, "tool_calls", None) or []
+                    if finish_reason is not None and (text_delta or calls_delta):
+                        raise AgentContractError(
+                            "OpenRouter returned data after the stream finished"
+                        )
+                    for call in calls_delta:
+                        if emitted:
+                            raise AgentContractError(
+                                "OpenRouter mixed streamed reply and tool calls"
+                            )
+                        if not isinstance(call.index, int) or not 0 <= call.index < 8:
+                            raise AgentContractError("OpenRouter returned an invalid tool index")
+                        part = tool_parts.setdefault(
+                            call.index,
+                            {
+                                "id": "",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            },
+                        )
+                        if call.type not in {None, "function"}:
+                            raise AgentContractError("OpenRouter returned an unsupported tool type")
+                        fragments = [(part, "id", call.id)]
+                        if call.function:
+                            fragments.extend(
+                                [
+                                    (part["function"], "name", call.function.name),
+                                    (part["function"], "arguments", call.function.arguments),
+                                ]
+                            )
+                        for target, key, fragment in fragments:
+                            if fragment:
+                                target[key] += fragment
+                                tool_length += len(fragment)
+                                if tool_length > MAX_STREAM_RESPONSE_LENGTH:
+                                    raise AgentContractError(
+                                        "Streamed tool calls exceed the size limit"
+                                    )
+                    if text_delta:
+                        content.append(text_delta)
+                        content_length += len(text_delta)
+                        if content_length > MAX_STREAM_RESPONSE_LENGTH:
+                            raise AgentContractError("Streamed response exceeds the size limit")
+                        if text_allowed and not tool_parts:
+                            if decoder is None:
+                                pending = "".join(content)
+                                # Some tool providers emit a preamble. Hold it until
+                                # tools arrive; only structured final replies stream.
+                                if pending.lstrip().startswith("{"):
+                                    decoder = ReplyJSONDecoder()
+                                    reply_delta = decoder.feed(pending)
+                                else:
+                                    reply_delta = ""
+                            else:
+                                reply_delta = decoder.feed(text_delta)
+                            if reply_delta:
+                                emitted = True
+                                await on_reply_delta(reply_delta)
+                    if choice.finish_reason is not None:
+                        finish_reason = choice.finish_reason
+                        if finish_reason not in {"stop", "tool_calls"}:
+                            raise AgentContractError(
+                                f"OpenRouter stream ended with {finish_reason}"
+                            )
+
+            text = "".join(content)
+            if tool_parts:
+                if finish_reason != "tool_calls":
+                    raise AgentContractError("OpenRouter returned incomplete streamed tool calls")
+                calls = [tool_parts[index] for index in sorted(tool_parts)]
+                if any(not call["id"] or not call["function"]["name"] for call in calls):
+                    raise AgentContractError("OpenRouter returned incomplete streamed tool calls")
+                if len({call["id"] for call in calls}) != len(calls):
+                    raise AgentContractError("OpenRouter returned duplicate tool call IDs")
+                return ChatCompletionMessage(
+                    role="assistant", content=text or None, tool_calls=calls
+                )
+            if finish_reason != "stop":
+                raise AgentContractError("OpenRouter stream ended before a complete response")
+            if not text_allowed:
+                raise AgentContractError("OpenRouter omitted required retrieval tool calls")
+            if decoder is None:
+                decoder = ReplyJSONDecoder()
+                reply_delta = decoder.feed(text)
+                if reply_delta:
+                    await on_reply_delta(reply_delta)
+            decoder.finish()
+            return ChatCompletionMessage(role="assistant", content=text)
+        except StreamReplyError as exc:
+            raise AgentContractError(str(exc)) from exc
+        finally:
+            with suppress(Exception):
+                await stream.close()

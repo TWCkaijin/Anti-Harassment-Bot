@@ -35,3 +35,23 @@ describe("MessageItem quoted replies", () => {
     expect(screen.getByText(/事情發生在哪裡？/)).toHaveTextContent("事情發生在哪裡？ 在學校");
   });
 });
+
+describe("MessageItem streaming state", () => {
+  it("shows partial text with a progress label while streaming", () => {
+    renderMessage({ ...base, role: "assistant", content: "我會陪您", isStreaming: true });
+    expect(screen.getByText("我會陪您")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("正在回覆");
+  });
+
+  it("preserves stopped text and clearly marks it incomplete", () => {
+    renderMessage({ ...base, role: "assistant", content: "未完成的說明", isCancelled: true });
+    expect(screen.getByText("未完成的說明")).toBeInTheDocument();
+    expect(screen.getByText("使用者已終止回覆，以上內容尚未完成")).toBeInTheDocument();
+  });
+
+  it("shows the error below partial text without replacing or duplicating it", () => {
+    renderMessage({ ...base, role: "assistant", content: "部分回覆", isError: true, interruptionReason: "回覆中斷，以上內容尚未完成" });
+    expect(screen.getAllByText("部分回覆")).toHaveLength(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("回覆中斷，以上內容尚未完成");
+  });
+});

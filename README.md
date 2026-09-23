@@ -101,6 +101,29 @@ pnpm run dev
 VITE_API_BASE_URL=http://127.0.0.1:5000
 ```
 
+### 串流聊天 API
+
+前端送出 `POST /v1/chat/` 時加入 `"stream": true`，使用 `fetch` 讀取 `text/event-stream`（SSE），AI 回覆文字會隨模型輸出逐段顯示。情緒、來源、建議回覆、Actions 與釐清問題等 metadata 統一放在最後：完整回覆通過結構驗證、Actions 由已核准的 Skills 解析後，才顯示情緒標籤與可操作選單。一般下一步建議與 AI 明確追問仍維持各自的呈現方式。
+
+```bash
+curl --no-buffer http://127.0.0.1:5000/v1/chat/ \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
+  -d '{"message":"我想了解處理流程","history":[],"stream":true}'
+```
+
+每個 SSE event 的 `data` 是 JSON，空行分隔事件；`:` 開頭的連線／keep-alive 註解可忽略。
+
+| Event | `data` 內容 | 前端行為 |
+| --- | --- | --- |
+| `delta` | `{"text":"新增的回覆文字"}` | 將文字附加到同一則 AI 訊息 |
+| `done` | 完整聊天回覆：`reply`、`session_id`、`anonymized`、`rag_used`、`emotion`、`emotion_color`、`suggested_replies`、`action_buttons`、`interaction_mode`、`clarifying_questions`；開發模式可另含 `debug_tool_calls` | 以驗證後的 `reply` 定稿，套用 metadata，結束串流 |
+| `error` | `code`、`detail`、`retryable`、`status`；依錯誤可另含 `error_id`，非 production 的開發模式可另含 `debug_message` | 顯示錯誤並結束串流，不顯示未完成的選單 |
+
+開始串流前的驗證、維護模式及存取限制錯誤仍回傳原本的 HTTP 狀態碼與 JSON。開始串流後 HTTP headers 已送出，錯誤以 `error` event 的 `status` 表達，並保留伺服器的 ERROR 日誌。已顯示部分文字時不自動重試，避免混入另一輪生成內容；未收到 `done` 的回覆視為未完成。不傳 `stream` 或設為 `false` 時，仍回傳相容的完整 JSON 回覆。
+
+部署 workflow 已將 `VITE_API_BASE_URL` 指向各環境的 `cloudfunctions.net/api` 或 `api_preview`，串流請求直接送到 Functions，不經 Hosting 的 `/api/**` rewrite。Firebase wrapper 保留 WSGI 串流及關閉回呼，避免一次讀完回覆；關閉連線會清理上游生成工作。平台支援可參考 [Cloud Run HTTP/SSE streaming](https://cloud.google.com/blog/products/serverless/cloud-run-now-supports-http-grpc-server-streaming) 與 [Firebase Functions streaming response limits](https://firebase.google.com/docs/functions/quotas)。部署後可對上表的 API URL 執行同一個 `curl --no-buffer` 請求，確認首段 `delta` 在 `done` 之前抵達；本地測試無法代替部署環境的串流驗證。
+
 ## 測試與檢查
 
 ```bash
@@ -166,7 +189,7 @@ jsonPayload.message:*
 
 展開 `jsonPayload.message`、`error_message`（若有）及 `exception` 查看原因；`http_error_response` 是回應摘要，`chat_request_failed`／`admin_operation_failed` 是操作例外。收到有效的 `X-Cloud-Trace-Context` 且執行環境提供 project ID 時，日誌會帶同一個 `trace`，可與平台請求紀錄對應。日誌修正僅影響重新部署後的新請求，無法補回過去未寫出的內容。GCP 欄位及關聯規則見 [Cloud Run logging](https://docs.cloud.google.com/run/docs/logging)。
 
-聊天回覆採用 OpenRouter Structured Outputs 的 JSON Schema 契約，必須包含情緒、回覆文字與 2 至 4 個建議回覆。若模型或供應端無法符合契約，前端會顯示「伺服器回傳錯誤，正在重試中」並自動重試兩次；請選用支援 Structured Outputs 的 OpenRouter 模型。
+聊天回覆採用 OpenRouter Structured Outputs 的 JSON Schema 契約，必須包含情緒、回覆文字與 2 至 4 個建議回覆。若模型或供應端無法符合契約，前端會顯示錯誤；可重試且尚未顯示回覆文字時，會顯示「伺服器回傳錯誤，正在重試中」並自動重試兩次。已顯示部分文字的串流回覆不會自動重試。請選用支援 Structured Outputs 的 OpenRouter 模型。
 
 設定優先順序固定為：
 

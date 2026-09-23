@@ -197,7 +197,7 @@ export default function MessageItem({ message }: MessageItemProps) {
             ))}
           </div>
         )}
-        {!isCancelled && replyAnswers.length === 0 && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
+        {replyAnswers.length === 0 && message.content && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
           {isUser || isError ? (
             message.content
           ) : (
@@ -216,7 +216,9 @@ export default function MessageItem({ message }: MessageItemProps) {
           )}
         </div>}
 
-        {isCancelled && <p className="text-sm font-medium text-on-surface/55">使用者已終止回覆</p>}
+        {message.isStreaming && <p role="status" className="text-xs text-on-surface/50 animate-pulse">正在回覆…</p>}
+        {isCancelled && <p className="text-sm font-medium text-on-surface/55">{message.content ? "使用者已終止回覆，以上內容尚未完成" : "使用者已終止回覆"}</p>}
+        {message.interruptionReason && <p role="alert" className="text-sm font-medium">{message.interruptionReason}</p>}
         {!isUser && !isError && !isCancelled && message.debugToolCalls !== undefined && (
           <details className="mt-3 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-xs text-amber-950">
             <summary className="flex cursor-pointer items-center gap-1.5 font-semibold">
