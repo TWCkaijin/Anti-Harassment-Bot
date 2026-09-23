@@ -221,3 +221,19 @@ describe("ChatArea follow-up integration", () => {
     expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeInTheDocument();
   });
 });
+
+describe("ChatArea streaming presentation", () => {
+  it("replaces the initial typing indicator with the growing reply and waits for final metadata", async () => {
+    const { rerender, container } = render(chat([{ id: "user-stream", role: "user", content: "請說明", timestamp: 1 }], vi.fn(), true));
+    expect(container.querySelectorAll(".typing-dot")).toHaveLength(3);
+    const stream = assistantMessage({ content: "正在逐步顯示的回答", isStreaming: true });
+    rerender(chat([stream], vi.fn(), true));
+    expect(screen.getByText("正在逐步顯示的回答")).toBeInTheDocument();
+    expect(container.querySelectorAll(".typing-dot")).toHaveLength(0);
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "停止回覆" })).toBeInTheDocument();
+    rerender(chat([{ ...stream, isStreaming: false }], vi.fn(), false));
+    expect(screen.getByRole("radio", { name: /看看資源/ })).toBeInTheDocument();
+    await screen.findByText("已連線");
+  });
+});

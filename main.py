@@ -3,7 +3,6 @@ import logging
 
 from firebase_functions import https_fn, options
 from flask import Response as FlaskResponse
-from werkzeug.wrappers import Response as WerkzeugResponse
 
 from backend.app.core.config import get_settings
 from backend.app.core.logger import get_request_log_context
@@ -17,12 +16,9 @@ settings = get_settings()
 def handle_request(req: https_fn.Request) -> https_fn.Response:
     try:
         # Flask-CORS owns both preflight and normal response headers.
-        w_res = WerkzeugResponse.from_app(app, req.environ)
-        return FlaskResponse(
-            response=w_res.get_data(),
-            status=w_res.status_code,
-            headers=list(w_res.headers),
-        )
+        # Keep the WSGI iterable lazy so SSE reaches the client as it is yielded.
+        # from_app also preserves close(), including client disconnect cleanup.
+        return FlaskResponse.from_app(app, req.environ, buffered=False)
     except Exception:
         error_id = new_error_id()
         logger.exception(

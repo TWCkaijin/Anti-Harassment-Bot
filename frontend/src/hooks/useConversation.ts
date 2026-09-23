@@ -34,6 +34,8 @@ export interface ConversationMessage {
   ragUsed?: RagInfo;
   isError?: boolean;
   isCancelled?: boolean;
+  isStreaming?: boolean;
+  interruptionReason?: string;
   emotion?: string; // 加入的情緒標籤
   emotionColor?: string; // 情緒對應的顏色
   suggestedReplies?: string[];
@@ -74,8 +76,19 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const abort = () => {
+      window.clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function loadSessions(): ConversationSession[] {
@@ -83,7 +96,9 @@ function loadSessions(): ConversationSession[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? (JSON.parse(raw) as ConversationSession[]) : [];
     // 過濾掉沒有訊息的空對話，避免重新載入時留下一堆空對話
-    return parsed.filter(s => s.messages.length > 0);
+    return parsed
+      .map(s => ({ ...s, messages: s.messages.filter(message => !message.isStreaming) }))
+      .filter(s => s.messages.length > 0);
   } catch {
     return [];
   }
@@ -118,6 +133,9 @@ export function useConversation(sessionId?: string) {
   const [sessions, setSessions] = useState<ConversationSession[]>(initialState.sessions);
   const [currentSessionId, setCurrentSessionId] = useState<string>(initialState.currentSessionId);
   const [loadingSessionIds, setLoadingSessionIds] = useState<Set<string>>(() => new Set());
+  // Token updates are intentionally transient: persist only completed or explicitly
+  // interrupted messages, so a page reload cannot promote partial text to a reply.
+  const [streamingBySession, setStreamingBySession] = useState<Record<string, ConversationMessage>>({});
   const [error, setError] = useState<string | null>(null);
   const [retryStatusBySession, setRetryStatusBySession] = useState<Record<string, string>>({});
 
@@ -132,6 +150,13 @@ export function useConversation(sessionId?: string) {
   useEffect(() => {
     saveSessions(sessions);
   }, [sessions]);
+
+  useEffect(() => {
+    const controllers = abortControllersRef.current;
+    return () => {
+      controllers.forEach(controller => controller.abort());
+    };
+  }, []);
 
   const setSessionLoading = useCallback((id: string, isLoading: boolean) => {
     const next = new Set(loadingSessionIdsRef.current);
@@ -158,9 +183,10 @@ export function useConversation(sessionId?: string) {
   // ── 取得當前 Session ───────────────────────────────────────────────────
 
   const currentSession = sessions.find((s) => s.id === currentSessionId);
+  const streamMessage = streamingBySession[currentSessionId];
   const messages = useMemo(
-    () => currentSession?.messages ?? [],
-    [currentSession?.messages]
+    () => streamMessage ? [...(currentSession?.messages ?? []), streamMessage] : currentSession?.messages ?? [],
+    [currentSession?.messages, streamMessage]
   );
   const isLoading = loadingSessionIds.has(currentSessionId);
   const retryStatus = retryStatusBySession[currentSessionId] ?? null;
@@ -215,7 +241,6 @@ export function useConversation(sessionId?: string) {
       setSessionLoading(targetSessionId, true);
       const abortController = new AbortController();
       abortControllersRef.current.set(targetSessionId, abortController);
-      const progressStartedAt = Date.now();
       const progressTimers = CHAT_PROGRESS_STAGES.slice(1).map((stage, index) =>
         window.setTimeout(
           () => setSessionRetryStatus(targetSessionId, stage),
@@ -248,59 +273,63 @@ export function useConversation(sessionId?: string) {
       // 取得 API-safe 歷史（不含剛加入的使用者訊息）
       const request = createChatRequest(messages, normalizedUserInput, imageBase64);
 
+      const assistantId = generateId();
+      const assistantTimestamp = Date.now();
+      let partialText = "";
+      const commitAssistant = (assistant: ConversationMessage, response?: ChatResponse) => {
+        setSessions(prev => prev.map(session => {
+          // Clearing/deleting a conversation must not resurrect an in-flight turn.
+          if (session.id !== targetSessionId || !session.messages.some(message => message.id === userMsg.id)) return session;
+          const updated = session.messages.map(message => message.id === userMsg.id && response?.emotion
+            ? { ...message, emotion: response.emotion, emotionColor: response.emotion_color }
+            : message);
+          return { ...session, messages: [...updated, assistant].slice(-MAX_MESSAGES_PER_SESSION) };
+        }));
+      };
+
       try {
         let response: ChatResponse | undefined;
         for (let attempt = 0; attempt <= MAX_RETRYABLE_CHAT_ATTEMPTS; attempt += 1) {
           try {
-            response = await sendChat(request, abortController.signal);
+            abortController.signal.throwIfAborted();
+            response = await sendChat(request, abortController.signal, text => {
+              if (abortController.signal.aborted || !text) return;
+              partialText += text;
+              progressTimers.forEach(timer => window.clearTimeout(timer));
+              setSessionRetryStatus(targetSessionId, null);
+              setStreamingBySession(previous => ({
+                ...previous,
+                [targetSessionId]: {
+                  id: assistantId, role: "assistant", content: partialText,
+                  timestamp: assistantTimestamp, isStreaming: true,
+                },
+              }));
+            });
             break;
           } catch (err) {
             if (
-              err instanceof ApiError &&
-              err.retryable &&
-              // A rate-limit response must not be retried before its Retry-After
-              // window. The client does not hold requests that long, so surface the
-              // error and let the person retry intentionally instead of consuming
-              // the remaining quota with fixed 0.5/1 second retries.
-              err.status !== 429 &&
-              attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
+              !abortController.signal.aborted && !partialText &&
+              err instanceof ApiError && err.retryable &&
+              // Never automatically replay a response after any text was shown,
+              // or a rate-limited request before its Retry-After window.
+              err.status !== 429 && attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
             ) {
-              progressTimers.forEach((timer) => window.clearTimeout(timer));
+              progressTimers.forEach(timer => window.clearTimeout(timer));
               setSessionRetryStatus(targetSessionId, RETRY_MESSAGE);
-              await delay(500 * (attempt + 1));
+              await delay(500 * (attempt + 1), abortController.signal);
               continue;
             }
             throw err;
           }
         }
 
-        if (!response) {
-          throw new Error("Chat response is missing after retry attempts");
-        }
-
-        const minimumProgressDuration =
-          CHAT_PROGRESS_STAGES.length * CHAT_PROGRESS_STAGE_DURATION_MS;
-        const remainingProgressTime = Math.max(
-          0,
-          minimumProgressDuration - (Date.now() - progressStartedAt)
-        );
-        if (remainingProgressTime > 0) {
-          await delay(remainingProgressTime);
-        }
-
-        if (abortController.signal.aborted) {
-          setSessions((prev) => prev.map((session) => session.id === targetSessionId ? {
-            ...session,
-            messages: [...session.messages, { id: generateId(), role: "assistant", content: "", timestamp: Date.now(), isCancelled: true }],
-          } : session));
-          return;
-        }
-
-        const assistantMsg: ConversationMessage = {
-          id: generateId(),
+        abortController.signal.throwIfAborted();
+        if (!response) throw new Error("Chat response is missing after retry attempts");
+        commitAssistant({
+          id: assistantId,
           role: "assistant",
           content: response.reply,
-          timestamp: Date.now(),
+          timestamp: assistantTimestamp,
           anonymized: response.anonymized,
           ragUsed: response.rag_used,
           suggestedReplies: response.suggested_replies,
@@ -308,61 +337,31 @@ export function useConversation(sessionId?: string) {
           interactionMode: response.interaction_mode,
           clarifyingQuestions: response.clarifying_questions,
           debugToolCalls: response.debug_tool_calls,
-        };
-
-        setSessions((prev) =>
-          prev.map((s) => {
-            if (s.id !== targetSessionId) return s;
-
-            // 更新使用者的訊息：加入 emotion 標籤
-            const newMessages = [...s.messages];
-            const lastUserMsgIdx = newMessages.findLastIndex(m => m.role === "user");
-            if (lastUserMsgIdx !== -1 && response.emotion) {
-              newMessages[lastUserMsgIdx] = {
-                ...newMessages[lastUserMsgIdx],
-                emotion: response.emotion,
-                emotionColor: response.emotion_color,
-              };
-            }
-
-            return {
-              ...s,
-              messages: [...newMessages, assistantMsg].slice(-MAX_MESSAGES_PER_SESSION),
-            };
-          })
-        );
+        }, response);
       } catch (err) {
         if (abortController.signal.aborted) {
-          setSessions((prev) => prev.map((session) => session.id === targetSessionId ? {
-            ...session,
-            messages: [...session.messages, { id: generateId(), role: "assistant", content: "", timestamp: Date.now(), isCancelled: true }],
-          } : session));
+          commitAssistant({
+            id: assistantId, role: "assistant", content: partialText,
+            timestamp: assistantTimestamp, isCancelled: true,
+          });
           return;
         }
-        const errorMsg =
-          err instanceof ApiError
-            ? `服務暫時無法使用：${err.debugMessage ?? err.detail ?? err.message}`
-            : "網路連線失敗，請稍後再試";
-
+        const errorMsg = err instanceof ApiError
+          ? `服務暫時無法使用：${err.debugMessage ?? err.detail ?? err.message}`
+          : "網路連線失敗，請稍後再試";
         setError(errorMsg);
-
-        // 加入錯誤提示訊息
-        const errorBubble: ConversationMessage = {
-          id: generateId(),
-          role: "assistant",
-          content: errorMsg,
-          timestamp: Date.now(),
-          isError: true,
-        };
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === targetSessionId
-              ? { ...s, messages: [...s.messages, errorBubble] }
-              : s
-          )
-        );
+        commitAssistant({
+          id: assistantId, role: "assistant", content: partialText || errorMsg,
+          timestamp: assistantTimestamp, isError: true,
+          ...(partialText ? { interruptionReason: `回覆中斷，以上內容尚未完成。${errorMsg}` } : {}),
+        });
       } finally {
-        progressTimers.forEach((timer) => window.clearTimeout(timer));
+        progressTimers.forEach(timer => window.clearTimeout(timer));
+        setStreamingBySession(previous => {
+          const next = { ...previous };
+          delete next[targetSessionId];
+          return next;
+        });
         setSessionRetryStatus(targetSessionId, null);
         setSessionLoading(targetSessionId, false);
         abortControllersRef.current.delete(targetSessionId);
@@ -378,6 +377,7 @@ export function useConversation(sessionId?: string) {
   // ── 清除當前 Session ──────────────────────────────────────────────────
 
   const clearCurrentSession = useCallback(() => {
+    abortControllersRef.current.get(currentSessionId)?.abort();
     setSessions((prev) =>
       prev.map((s) =>
         s.id === currentSessionId ? { ...s, messages: [] } : s
@@ -389,6 +389,7 @@ export function useConversation(sessionId?: string) {
 
   const deleteSession = useCallback(
     (id: string) => {
+      abortControllersRef.current.get(id)?.abort();
       setSessions((prev) => prev.filter((s) => s.id !== id));
       setSessionLoading(id, false);
       setSessionRetryStatus(id, null);
@@ -412,6 +413,8 @@ export function useConversation(sessionId?: string) {
   // ── 清除所有 Session ───────────────────────────────────────────────────
 
   const clearAllSessions = useCallback(() => {
+    abortControllersRef.current.forEach(controller => controller.abort());
+    setStreamingBySession({});
     setSessions([]);
     const newId = generateId();
     const newSession: ConversationSession = {

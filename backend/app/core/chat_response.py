@@ -186,6 +186,12 @@ OPENROUTER_RESPONSE_FORMAT = {
         "schema": {
             "type": "object",
             "properties": {
+                "reply": {
+                    "type": "string",
+                    "description": "優先輸出的完整繁體中文回覆，會逐段顯示給使用者。",
+                    "minLength": 1,
+                    "maxLength": ASSISTANT_REPLY_MAX_LENGTH,
+                },
                 "emotion": {
                     "type": "string",
                     "description": "使用者當前情緒的繁體中文短標籤。",
@@ -194,12 +200,6 @@ OPENROUTER_RESPONSE_FORMAT = {
                     "type": "string",
                     "enum": ["red", "yellow", "green", "blue", "gray"],
                     "description": "對應情緒標籤的預定義顏色。",
-                },
-                "reply": {
-                    "type": "string",
-                    "description": "給使用者的完整繁體中文回覆。",
-                    "minLength": 1,
-                    "maxLength": ASSISTANT_REPLY_MAX_LENGTH,
                 },
                 "suggested_replies": {
                     "type": "array",
@@ -253,9 +253,9 @@ OPENROUTER_RESPONSE_FORMAT = {
                 },
             },
             "required": [
+                "reply",
                 "emotion",
                 "emotion_color",
-                "reply",
                 "suggested_replies",
                 "action_buttons",
                 "interaction_mode",

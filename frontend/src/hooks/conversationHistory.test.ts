@@ -16,7 +16,8 @@ describe("buildChatHistory", () => {
     const history = buildChatHistory([
       { role: "user", content: "  可保留的問題  " },
       { role: "assistant", content: "API failed", isError: true },
-      { role: "assistant", content: "", isCancelled: true },
+      { role: "assistant", content: "已停止的部分回覆", isCancelled: true },
+      { role: "assistant", content: "尚在串流的文字", isStreaming: true },
       { role: "assistant", content: "   " },
       { role: "assistant", content: "可保留的回答" },
     ]);

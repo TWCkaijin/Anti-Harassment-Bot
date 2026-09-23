@@ -12,6 +12,7 @@ interface HistoryCandidate {
   content: string;
   isError?: boolean;
   isCancelled?: boolean;
+  isStreaming?: boolean;
   imageUrl?: string;
 }
 
@@ -52,6 +53,7 @@ function buildSerializableTurns(messages: readonly HistoryCandidate[]): HistoryT
             const content = candidate.content.trim();
             return !candidate.isError &&
               !candidate.isCancelled &&
+              !candidate.isStreaming &&
               Boolean(content) &&
               content.length <= MAX_ASSISTANT_HISTORY_CHARACTERS;
           });

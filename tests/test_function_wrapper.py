@@ -41,6 +41,91 @@ def test_wrapper_does_not_reflect_disallowed_origin():
     assert "Access-Control-Allow-Origin" not in response.headers
 
 
+def test_wrapper_keeps_json_response_and_headers(monkeypatch):
+    def json_app(_environ, start_response):
+        start_response(
+            "201 Created",
+            [("Content-Type", "application/json"), ("X-Request-Id", "json-request")],
+        )
+        return [b'{"response":"ok"}']
+
+    monkeypatch.setattr(function_main, "app", json_app)
+
+    response = function_main.handle_request(Request.from_values("/v1/chat/"))
+
+    assert response.status_code == 201
+    assert response.get_json() == {"response": "ok"}
+    assert response.headers["X-Request-Id"] == "json-request"
+    response.close()
+
+
+def test_wrapper_does_not_wait_for_later_stream_chunks(monkeypatch):
+    state = {"next_chunk_ready": False, "closed": False}
+
+    def stream_app(_environ, start_response):
+        start_response(
+            "200 OK",
+            [
+                ("Content-Type", "text/event-stream; charset=utf-8"),
+                ("Cache-Control", "no-cache, no-transform"),
+                ("Access-Control-Allow-Origin", "https://example.com"),
+            ],
+        )
+
+        def chunks():
+            try:
+                yield b'event: delta\ndata: {"text":"first"}\n\n'
+                # Simulate a producer whose next chunk is not available yet.
+                assert state["next_chunk_ready"], "wrapper consumed the stream eagerly"
+                yield b'event: done\ndata: {"response":"first"}\n\n'
+            finally:
+                state["closed"] = True
+
+        return chunks()
+
+    monkeypatch.setattr(function_main, "app", stream_app)
+
+    response = function_main.handle_request(Request.from_values("/v1/chat/"))
+
+    assert response.status_code == 200
+    assert response.is_streamed
+    assert response.mimetype == "text/event-stream"
+    assert response.headers["Cache-Control"] == "no-cache, no-transform"
+    assert response.headers["Access-Control-Allow-Origin"] == "https://example.com"
+    assert "Content-Length" not in response.headers
+    assert not state["closed"]
+    chunks = iter(response.response)
+    assert next(chunks) == b'event: delta\ndata: {"text":"first"}\n\n'
+    state["next_chunk_ready"] = True
+    assert next(chunks) == b'event: done\ndata: {"response":"first"}\n\n'
+    response.close()
+    assert state["closed"]
+
+
+def test_wrapper_closes_upstream_when_client_stops_reading(monkeypatch):
+    events = []
+
+    def stream_app(_environ, start_response):
+        start_response("200 OK", [("Content-Type", "text/event-stream")])
+
+        def chunks():
+            try:
+                yield b": connected\n\n"
+                events.append("read later chunk")
+                yield b"event: done\ndata: {}\n\n"
+            finally:
+                events.append("closed")
+
+        return chunks()
+
+    monkeypatch.setattr(function_main, "app", stream_app)
+    response = function_main.handle_request(Request.from_values("/v1/chat/"))
+
+    response.close()
+
+    assert events == ["closed"]
+
+
 def test_wrapper_500_returns_only_generic_detail_and_logged_error_id(monkeypatch, caplog):
     def exploding_app(_environ, _start_response):
         raise RuntimeError("sensitive wrapper detail")

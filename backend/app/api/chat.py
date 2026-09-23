@@ -10,7 +10,7 @@ import json
 import uuid
 from typing import Literal
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 from openai import (
     APIConnectionError,
     APITimeoutError,
@@ -24,7 +24,7 @@ from openai import (
 )
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from backend.app.agents.openrouter_agent import AgentContractError, OpenRouterAgent
+from backend.app.agents.openrouter_agent import AgentContractError, AgentResult, OpenRouterAgent
 from backend.app.core.anonymizer import anonymize, anonymize_messages
 from backend.app.core.chat_response import (
     ASSISTANT_REPLY_MAX_LENGTH,
@@ -42,6 +42,7 @@ chat_bp = Blueprint("chat", __name__, url_prefix="/chat")
 USER_MESSAGE_MAX_LENGTH = 2000
 MAX_HISTORY_CHARACTERS = 30000
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+STREAM_HEARTBEAT_SECONDS = 10
 _MAX_BASE64_LENGTH = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
 _SUPPORTED_IMAGE_MIME_TYPES = {"image/gif", "image/jpeg", "image/png", "image/webp"}
 _TRANSIENT_UPSTREAM_ERRORS = (
@@ -280,6 +281,7 @@ class ChatRequest(BaseModel):
         description="對話歷史（最多 50 輪，由前端 localStorage 傳入）",
     )
     use_rag: bool = Field(default=True, description="是否啟用 RAG 檢索增強")
+    stream: bool = Field(default=False, description="以 SSE 串流回覆文字，完成後傳回完整資料")
     image_base64: str | None = Field(default=None, description="使用者上傳的圖片 (base64 data URL)")
 
     @field_validator("image_base64")
@@ -297,6 +299,147 @@ class ChatRequest(BaseModel):
                 f"history content must be at most {MAX_HISTORY_CHARACTERS} characters in total"
             )
         return self
+
+
+def _agent_error(runtime_config, exc: Exception):
+    """Use the same diagnostic codes for JSON and streaming requests."""
+    if isinstance(exc, RAGUnavailableError):
+        return _service_error(
+            runtime_config,
+            exc,
+            code="rag_unavailable",
+            detail="檢索服務暫時無法使用，請稍後再試",
+            retryable=True,
+            status_code=503,
+        )
+    if isinstance(exc, _RETRYABLE_AGENT_ERRORS):
+        return _retryable_error(runtime_config, exc)
+    if isinstance(exc, _PERMANENT_UPSTREAM_ERRORS):
+        return _service_error(
+            runtime_config,
+            exc,
+            code="upstream_request_rejected",
+            detail="AI 服務目前無法處理此請求",
+            retryable=False,
+            status_code=502,
+        )
+    return _service_error(
+        runtime_config,
+        exc,
+        code="internal_error",
+        detail="伺服器無法完成請求",
+        retryable=False,
+        status_code=500,
+        error_id=uuid.uuid4().hex,
+    )
+
+
+def _response_payload(result: AgentResult, session_id: str, was_anonymized: bool, runtime_config):
+    """Only publish metadata after the complete response passes the existing contract."""
+    data = parse_agent_json_response(result.reply)
+    if not isinstance(data, dict):
+        raise ValueError("OpenRouter response must be a JSON object")
+    structured_response = AssistantChatResponse.model_validate(data)
+    approved_actions = {}
+    for action in result.available_actions:
+        key = action_key(action)
+        if key is not None:
+            approved_actions.setdefault(key, action)
+    action_buttons = []
+    selected_keys = set()
+    for action in structured_response.action_buttons:
+        key = action_key(action)
+        if key in approved_actions and key not in selected_keys:
+            # Labels, URLs and option values still come only from trusted Skills.
+            action_buttons.append(approved_actions[key])
+            selected_keys.add(key)
+    payload = {
+        "reply": structured_response.reply,
+        "session_id": session_id,
+        "anonymized": was_anonymized,
+        "rag_used": {"status": result.rag_used, "sources": result.sources or []},
+        "emotion": structured_response.emotion,
+        "emotion_color": structured_response.emotion_color,
+        "suggested_replies": structured_response.suggested_replies,
+        "action_buttons": action_buttons,
+        "interaction_mode": structured_response.interaction_mode,
+        "clarifying_questions": structured_response.clarifying_questions,
+    }
+    if runtime_config.development_mode:
+        payload["debug_tool_calls"] = result.tool_calls
+    return payload
+
+
+def _sse_event(event: str, payload: dict) -> str:
+    # JSON escaping keeps newlines in reply text inside one SSE data line.
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _stream_response(run_kwargs: dict, session_id: str, was_anonymized: bool, runtime_config):
+    @stream_with_context
+    def generate():
+        # Run the async SDK on this WSGI request's thread. The bounded queue
+        # applies backpressure, and closing the response cancels upstream work.
+        with asyncio.Runner() as runner:
+            events: asyncio.Queue[tuple[str, dict]] = asyncio.Queue(maxsize=16)
+            sent_text = False
+
+            async def emit_delta(text: str):
+                nonlocal sent_text
+                if text:
+                    sent_text = True
+                    await events.put(("delta", {"text": text}))
+
+            async def produce():
+                try:
+                    result = await get_agent().run(**run_kwargs, on_reply_delta=emit_delta)
+                except Exception as exc:
+                    error_response, status = _agent_error(runtime_config, exc)
+                else:
+                    try:
+                        payload = _response_payload(
+                            result, session_id, was_anonymized, runtime_config
+                        )
+                    except Exception as exc:
+                        error_response, status = _retryable_error(runtime_config, exc)
+                    else:
+                        await events.put(("done", payload))
+                        return
+                payload = error_response.get_json()
+                payload["status"] = status
+                if sent_text:
+                    # Restarting an answer after showing it would mix attempts.
+                    payload["retryable"] = False
+                    payload["detail"] = "回覆途中發生錯誤，內容尚未完成，請重新提問"
+                await events.put(("error", payload))
+
+            task = runner.get_loop().create_task(produce())
+            try:
+                yield ": connected\n\n"
+                while True:
+                    try:
+                        event, payload = runner.run(
+                            asyncio.wait_for(events.get(), timeout=STREAM_HEARTBEAT_SECONDS)
+                        )
+                    except TimeoutError:
+                        yield ": keep-alive\n\n"
+                        continue
+                    yield _sse_event(event, payload)
+                    if event in {"done", "error"}:
+                        break
+            finally:
+                task.cancel()
+
+                async def finish():
+                    await asyncio.gather(task, return_exceptions=True)
+
+                runner.run(finish())
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-store, no-transform", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
@@ -341,7 +484,6 @@ def chat():
             ),
             422,
         )
-    agent = get_agent()
 
     # 1. 匿名化當前訊息
     if runtime_config.enable_anonymization:
@@ -358,98 +500,22 @@ def chat():
         anonymize_messages(history_dicts) if runtime_config.enable_anonymization else history_dicts
     )
 
-    async def _run_chat_logic():
-        # 3. 呼叫 OpenRouter Agent (內部已實作 Agentic RAG)
-        session_id = str(uuid.uuid4())
-        # Exceptions are recorded with their final status/code by _service_error.
-        reply = await agent.run(
-            user_message=anonymized_message,
-            history=anonymized_history,
-            image_base64=req_obj.image_base64 if runtime_config.enable_image_upload else None,
-            use_rag=req_obj.use_rag,
-        )
-        return (
-            reply.reply,
-            session_id,
-            reply.rag_used,
-            reply.sources or [],
-            reply.available_actions,
-            reply.tool_calls,
-        )
-
-    # 執行 Async 邏輯並驗證 OpenRouter 的 structured response。
-    try:
-        reply, session_id, rag_used_status, rag_sources, permitted_actions, tool_calls = (
-            asyncio.run(_run_chat_logic())
-        )
-    except RAGUnavailableError as exc:
-        return _service_error(
-            runtime_config,
-            exc,
-            code="rag_unavailable",
-            detail="檢索服務暫時無法使用，請稍後再試",
-            retryable=True,
-            status_code=503,
-        )
-    except _RETRYABLE_AGENT_ERRORS as exc:
-        return _retryable_error(runtime_config, exc)
-    except _PERMANENT_UPSTREAM_ERRORS as exc:
-        return _service_error(
-            runtime_config,
-            exc,
-            code="upstream_request_rejected",
-            detail="AI 服務目前無法處理此請求",
-            retryable=False,
-            status_code=502,
-        )
-    except Exception as exc:
-        error_id = uuid.uuid4().hex
-        return _service_error(
-            runtime_config,
-            exc,
-            code="internal_error",
-            detail="伺服器無法完成請求",
-            retryable=False,
-            status_code=500,
-            error_id=error_id,
-        )
-
-    # 4. 解析並驗證 JSON 回應；不完整或不符 schema 的回答由前端自動重試。
-    try:
-        data = parse_agent_json_response(reply)
-        if not isinstance(data, dict):
-            raise ValueError("OpenRouter response must be a JSON object")
-        structured_response = AssistantChatResponse.model_validate(data)
-    except Exception as exc:
-        return _retryable_error(runtime_config, exc)
-
-    approved_actions = {}
-    for action in permitted_actions:
-        key = action_key(action)
-        if key is not None:
-            # Keep the same priority order used in the Skill instructions.
-            approved_actions.setdefault(key, action)
-    action_buttons = []
-    selected_keys = set()
-    for action in structured_response.action_buttons:
-        key = action_key(action)
-        if key in approved_actions and key not in selected_keys:
-            # Only server-owned labels, URLs and option values reach the UI.
-            action_buttons.append(approved_actions[key])
-            selected_keys.add(key)
-
-    response_payload = {
-        "reply": structured_response.reply,
-        "session_id": session_id,
-        "anonymized": was_anonymized,
-        "rag_used": {"status": rag_used_status, "sources": rag_sources},
-        "emotion": structured_response.emotion,
-        "emotion_color": structured_response.emotion_color,
-        "suggested_replies": structured_response.suggested_replies,
-        "action_buttons": action_buttons,
-        "interaction_mode": structured_response.interaction_mode,
-        "clarifying_questions": structured_response.clarifying_questions,
+    run_kwargs = {
+        "user_message": anonymized_message,
+        "history": anonymized_history,
+        "image_base64": req_obj.image_base64 if runtime_config.enable_image_upload else None,
+        "use_rag": req_obj.use_rag,
     }
-    if runtime_config.development_mode:
-        response_payload["debug_tool_calls"] = tool_calls
-    return jsonify(response_payload)
+    session_id = str(uuid.uuid4())
+    if req_obj.stream:
+        return _stream_response(run_kwargs, session_id, was_anonymized, runtime_config)
+
+    try:
+        result = asyncio.run(get_agent().run(**run_kwargs))
+    except Exception as exc:
+        return _agent_error(runtime_config, exc)
+    try:
+        payload = _response_payload(result, session_id, was_anonymized, runtime_config)
+    except Exception as exc:
+        return _retryable_error(runtime_config, exc)
+    return jsonify(payload)

@@ -224,37 +224,125 @@ async function apiFetch<T>(
     },
   });
 
-  if (!response.ok) {
-    let detail: string | undefined;
-    let retryable = false;
-    let debugMessage: string | undefined;
-    try {
-      const errorData: unknown = await response.json();
-      if (isRecord(errorData)) {
-        const summary = normalizeApiErrorDetail(errorData.detail);
-        const validationErrors = normalizeApiErrorDetail(errorData.errors);
-        detail = validationErrors
-          ? [summary, validationErrors].filter(Boolean).join(": ")
-          : summary;
-        retryable = errorData.retryable === true;
-        debugMessage = typeof errorData.debug_message === "string"
-          ? errorData.debug_message
-          : undefined;
-      }
-    } catch {
-      // 非 JSON 回應
-    }
-    throw new ApiError(
-      response.status,
-      `API 請求失敗 (${response.status})`,
-      detail,
-      retryable,
-      debugMessage
-    );
-  }
+  if (!response.ok) await throwResponseError(response);
 
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+async function throwResponseError(response: Response): Promise<never> {
+  let detail: string | undefined;
+  let retryable = false;
+  let debugMessage: string | undefined;
+  try {
+    const errorData: unknown = await response.json();
+    if (isRecord(errorData)) {
+      const summary = normalizeApiErrorDetail(errorData.detail);
+      const validationErrors = normalizeApiErrorDetail(errorData.errors);
+      detail = validationErrors
+        ? [summary, validationErrors].filter(Boolean).join(": ")
+        : summary;
+      retryable = errorData.retryable === true;
+      debugMessage = typeof errorData.debug_message === "string"
+        ? errorData.debug_message
+        : undefined;
+    }
+  } catch {
+    // 非 JSON 回應
+  }
+  throw new ApiError(
+    response.status,
+    `API 請求失敗 (${response.status})`,
+    detail,
+    retryable,
+    debugMessage
+  );
+}
+
+function invalidStream(): ApiError {
+  return new ApiError(502, "回覆串流中斷", "回覆未完整接收，請重新送出訊息", true);
+}
+
+/** Consume complete SSE events, preserving split UTF-8 characters and line endings. */
+async function readChatStream(
+  response: Response,
+  signal?: AbortSignal,
+  onDelta?: (text: string) => void,
+): Promise<ChatResponse> {
+  if (!response.body) throw invalidStream();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let event = "";
+  let data: string[] = [];
+  let result: ChatResponse | undefined;
+  const abort = () => { void reader.cancel().catch(() => undefined); };
+  signal?.addEventListener("abort", abort, { once: true });
+
+  function consumeLine(line: string) {
+    if (line === "") {
+      const eventName = event;
+      const eventData = data.join("\n");
+      event = "";
+      data = [];
+      if (!eventData || !["delta", "done", "error"].includes(eventName)) return;
+      let payload: unknown;
+      try { payload = JSON.parse(eventData); } catch { throw invalidStream(); }
+      if (!isRecord(payload)) throw invalidStream();
+      if (eventName === "delta") {
+        if (typeof payload.text !== "string") throw invalidStream();
+        if (payload.text) onDelta?.(payload.text);
+      } else if (eventName === "done") {
+        if (typeof payload.reply !== "string" || !Array.isArray(payload.suggested_replies)
+          || !Array.isArray(payload.action_buttons) || !Array.isArray(payload.clarifying_questions)
+          || !isRecord(payload.rag_used)
+          || !["answer", "clarify"].includes(String(payload.interaction_mode))) throw invalidStream();
+        result = payload as unknown as ChatResponse;
+      } else {
+        throw new ApiError(
+          typeof payload.status === "number" ? payload.status : 502,
+          "回覆產生失敗",
+          normalizeApiErrorDetail(payload.detail),
+          payload.retryable === true,
+          typeof payload.debug_message === "string" ? payload.debug_message : undefined,
+        );
+      }
+      return;
+    }
+    if (line.startsWith(":")) return;
+    const separator = line.indexOf(":");
+    const field = separator === -1 ? line : line.slice(0, separator);
+    let value = separator === -1 ? "" : line.slice(separator + 1);
+    if (value.startsWith(" ")) value = value.slice(1);
+    if (field === "event") event = value;
+    if (field === "data") data.push(value);
+  }
+
+  try {
+    while (!result) {
+      signal?.throwIfAborted();
+      const { value, done } = await reader.read();
+      signal?.throwIfAborted();
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      // Hold a trailing CR until the next read so a split CRLF is one newline.
+      while (true) {
+        const match = /[\r\n]/.exec(buffer);
+        if (!match || (buffer[match.index] === "\r" && match.index === buffer.length - 1 && !done)) break;
+        const line = buffer.slice(0, match.index);
+        const length = buffer.slice(match.index, match.index + 2) === "\r\n" ? 2 : 1;
+        buffer = buffer.slice(match.index + length);
+        consumeLine(line);
+        if (result) return result;
+      }
+      // A transport close without an explicit terminal event is never success.
+      if (done) throw invalidStream();
+    }
+    return result;
+  } finally {
+    signal?.removeEventListener("abort", abort);
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
 }
 
 // ── 公開 API 函式 ────────────────────────────────────────────────────────
@@ -262,12 +350,23 @@ async function apiFetch<T>(
 /**
  * 傳送對話訊息給 AI，並取得回覆。
  */
-export async function sendChat(request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> {
-  return apiFetch<ChatResponse>("/v1/chat/", {
+export async function sendChat(
+  request: ChatRequest,
+  signal?: AbortSignal,
+  onDelta?: (text: string) => void,
+): Promise<ChatResponse> {
+  const response = await fetch(`${API_BASE_URL}/v1/chat/`, {
     method: "POST",
-    body: JSON.stringify(request),
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify({ ...request, stream: true }),
     signal,
   });
+  if (!response.ok) await throwResponseError(response);
+  // Allow the new client to work during a rolling backend deployment.
+  if (!response.headers.get("content-type")?.includes("text/event-stream")) {
+    return response.json() as Promise<ChatResponse>;
+  }
+  return readChatStream(response, signal, onDelta);
 }
 
 /**

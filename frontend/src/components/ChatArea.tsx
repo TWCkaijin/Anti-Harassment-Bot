@@ -57,7 +57,7 @@ export default function ChatArea({
   const hasMessages = messages.length > 0;
   const latestMessage = messages.at(-1);
   const replyPrompt =
-    latestMessage?.role === "assistant" && !latestMessage.isError && !latestMessage.isCancelled
+    latestMessage?.role === "assistant" && !latestMessage.isError && !latestMessage.isCancelled && !latestMessage.isStreaming
       ? latestMessage
       : undefined;
 
@@ -131,7 +131,7 @@ export default function ChatArea({
             {messages.map((msg) => (
               <MessageItem key={msg.id} message={msg} />
             ))}
-            {isLoading && <TypingIndicator message={retryStatus} />}
+            {isLoading && !latestMessage?.isStreaming && <TypingIndicator message={retryStatus} />}
             <div ref={messagesEndRef} className="h-4" />
           </div>
         ) : (

@@ -237,3 +237,135 @@ describe("useConversation message limits", () => {
     });
   });
 });
+
+function deferredResponse() {
+  let resolve!: (response: ChatResponse) => void;
+  let reject!: (error: unknown) => void;
+  let delta!: (text: string) => void;
+  const promise = new Promise<ChatResponse>((res, rej) => { resolve = res; reject = rej; });
+  vi.mocked(sendChat).mockImplementationOnce((_request, signal, onDelta) => {
+    delta = onDelta!;
+    signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    return promise;
+  });
+  return { resolve, reject, delta: (text: string) => delta(text) };
+}
+
+describe("useConversation streamed replies", () => {
+  it("updates one transient bubble, persists only done, and applies metadata afterward", async () => {
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("stream-session"));
+    const storageWrite = vi.spyOn(localStorage, "setItem");
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("我需要幫忙"); });
+    storageWrite.mockClear();
+    act(() => pending.delta("我會"));
+    const bubbleId = result.current.messages.at(-1)?.id;
+    expect(result.current.messages.at(-1)).toMatchObject({ content: "我會", isStreaming: true });
+    expect(result.current.messages.at(-1)).not.toHaveProperty("suggestedReplies");
+    expect(result.current.messages[0]).not.toHaveProperty("emotion");
+    expect(result.current.isLoading).toBe(true);
+    act(() => pending.delta("陪您"));
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages.at(-1)).toMatchObject({ id: bubbleId, content: "我會陪您" });
+    expect(storageWrite).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem("harass_bot_conversations")!)[0].messages).toHaveLength(1);
+    await act(async () => {
+      pending.resolve({ ...successfulResponse, emotion: "擔心", emotion_color: "blue" });
+      await request;
+    });
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      id: bubbleId, content: successfulResponse.reply, suggestedReplies: successfulResponse.suggested_replies,
+    });
+    expect(result.current.messages.at(-1)).not.toHaveProperty("isStreaming");
+    expect(result.current.messages[0]).toMatchObject({ emotion: "擔心", emotionColor: "blue" });
+    expect(storageWrite).toHaveBeenCalledOnce();
+    storageWrite.mockRestore();
+  });
+
+  it("never retries after visible text and excludes incomplete content after reload", async () => {
+    const pending = deferredResponse();
+    const { result, unmount } = renderHook(() => useConversation("interrupted-session"));
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("第一個問題"); });
+    act(() => pending.delta("只收到一半"));
+    await act(async () => {
+      pending.reject(new ApiError(503, "upstream failed", "請稍後再試", true));
+      await request;
+    });
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      content: "只收到一半", isError: true,
+      interruptionReason: expect.stringContaining("回覆中斷"),
+    });
+    unmount();
+    const restored = renderHook(() => useConversation("interrupted-session"));
+    expect(restored.result.current.messages.at(-1)?.isError).toBe(true);
+    vi.mocked(sendChat).mockResolvedValueOnce(successfulResponse);
+    await act(async () => { await restored.result.current.sendMessage("下一個問題"); });
+    expect(vi.mocked(sendChat).mock.calls[1][0].history).toEqual([{ role: "user", content: "第一個問題" }]);
+  });
+
+  it("keeps partial text when stopped and does not add a duplicate assistant bubble", async () => {
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("cancel-stream-session"));
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("請說明"); });
+    act(() => pending.delta("這是已經收到的文字"));
+    const id = result.current.messages.at(-1)?.id;
+    await act(async () => {
+      result.current.stopCurrentResponse();
+      await request;
+    });
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages.at(-1)).toMatchObject({ id, content: "這是已經收到的文字", isCancelled: true });
+    expect(result.current.isLoading).toBe(false);
+    expect(sendChat).toHaveBeenCalledOnce();
+  });
+
+  it("does not resume a retry after the user stops during its delay", async () => {
+    vi.mocked(sendChat).mockRejectedValueOnce(new ApiError(502, "retry", "", true));
+    const { result } = renderHook(() => useConversation("retry-stop-session"));
+    let request!: Promise<void>;
+    await act(async () => { request = result.current.sendMessage("第一個問題"); await Promise.resolve(); });
+    expect(result.current.retryStatus).toBe("伺服器回傳錯誤，正在重試中");
+    await act(async () => { result.current.stopCurrentResponse(); await request; });
+    await act(async () => { await vi.runAllTimersAsync(); });
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(result.current.messages.at(-1)?.isCancelled).toBe(true);
+  });
+
+  it("keeps in-flight text and metadata in their original session when switching", async () => {
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("original-session"));
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("原本的問題"); });
+    act(() => pending.delta("原本的回覆"));
+    let otherId!: string;
+    act(() => { otherId = result.current.createNewSession(); });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.isLoading).toBe(false);
+    act(() => pending.delta("繼續"));
+    expect(result.current.messages).toEqual([]);
+    await act(async () => { pending.resolve(successfulResponse); await request; });
+    expect(result.current.currentSessionId).toBe(otherId);
+    expect(result.current.messages).toEqual([]);
+    act(() => result.current.setCurrentSessionId("original-session"));
+    expect(result.current.messages.at(-1)?.content).toBe(successfulResponse.reply);
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it("does not restore a cleared turn when its stream is interrupted", async () => {
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("clear-stream-session"));
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("請清除我"); });
+    act(() => pending.delta("部分內容"));
+    await act(async () => { result.current.clearCurrentSession(); await request; });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.isLoading).toBe(false);
+  });
+});
