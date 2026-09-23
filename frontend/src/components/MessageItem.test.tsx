@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../hooks/useConversation";
@@ -53,5 +53,42 @@ describe("MessageItem streaming state", () => {
     renderMessage({ ...base, role: "assistant", content: "部分回覆", isError: true, interruptionReason: "回覆中斷，以上內容尚未完成" });
     expect(screen.getAllByText("部分回覆")).toHaveLength(1);
     expect(screen.getByRole("alert")).toHaveTextContent("回覆中斷，以上內容尚未完成");
+  });
+});
+
+
+const resourceActions: ConversationMessage["actionButtons"] = [
+  { action: "tel", label: "撥打 113 保護專線", phone_number: "113" },
+  { action: "url", label: "前往官方網站", url: "https://example.org/" },
+];
+
+describe("MessageItem resource action placement", () => {
+  it("keeps clickable resource actions directly below source badges and above expanded citations", () => {
+    renderMessage({ ...base, role: "assistant", content: "可以使用以下求助資源。", actionButtons: resourceActions,
+      ragUsed: { status: true, sources: [{ type: "remedy", label: "求助資源來源" }] },
+    });
+    const remedy = screen.getByRole("button", { name: /救濟管道/ });
+    const actions = screen.getByRole("group", { name: "相關資源" });
+    const phone = within(actions).getByRole("link", { name: "撥打 113 保護專線" });
+    expect(phone).toBeVisible();
+    expect(phone).toHaveAttribute("href", "tel:113");
+    expect(remedy.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(remedy);
+    const citation = screen.getByText("求助資源來源");
+    expect(actions.compareDocumentPosition(citation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actions).not.toContainElement(citation);
+    expect(phone).toBeVisible();
+    fireEvent.click(remedy);
+    expect(phone).toBeVisible();
+  });
+
+  it("also shows generic resource buttons without retrieval metadata, and hides unfinished actions", () => {
+    const message: ConversationMessage = { ...base, role: "assistant", content: "這裡有協助管道。", actionButtons: resourceActions };
+    const { rerender } = renderMessage(message);
+    expect(screen.getByRole("link", { name: "前往官方網站（另開新分頁）" })).toHaveAttribute("href", "https://example.org/");
+    rerender(<I18nProvider><MessageItem message={{ ...message, isStreaming: true }} /></I18nProvider>);
+    expect(screen.queryByRole("group", { name: "相關資源" })).not.toBeInTheDocument();
+    rerender(<I18nProvider><MessageItem message={{ ...message, isCancelled: true }} /></I18nProvider>);
+    expect(screen.queryByRole("group", { name: "相關資源" })).not.toBeInTheDocument();
   });
 });

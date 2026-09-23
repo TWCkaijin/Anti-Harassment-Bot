@@ -3,7 +3,6 @@ import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { getUserMessageValidationError } from "../hooks/conversationHistory";
 import type { ReplyContext } from "../hooks/useConversation";
 import type { ActionButton, ActionOption } from "../services/api";
-import ActionButtons from "./ActionButtons";
 import { getFollowUpData } from "./actionButtonValidation";
 import MaterialIcon from "./MaterialIcon";
 
@@ -52,7 +51,7 @@ export default function FollowUpPanel({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const submitted = useRef(false);
 
-  const { optionActions, resources, questions, suggestions, hasQuestion } = getFollowUpData({ actions, suggestedReplies, clarifyingQuestions, interactionMode });
+  const { optionActions, questions, suggestions, hasQuestion } = getFollowUpData({ actions, suggestedReplies, clarifyingQuestions, interactionMode });
   const supplementalQuestions = questions.filter((question) => !optionActions.some((action) => action.title.trim() === question));
   const groups: QuestionGroup[] = optionActions.length > 0
     ? optionActions.map((action, index) => ({ key: `${index}-${action.id}`, title: action.title, context: [action.title, ...supplementalQuestions].join("\n"), options: action.options }))
@@ -187,7 +186,6 @@ export default function FollowUpPanel({
             </div>
           </fieldset>
         )}
-        {resources.length > 0 && <div className={currentGroup ? "mt-3 border-t border-primary/10 pt-3" : ""}><ActionButtons actions={resources} /></div>}
       </div>
       {currentGroup && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-primary/10 px-4 py-2">

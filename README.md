@@ -116,10 +116,13 @@ curl --no-buffer http://127.0.0.1:5000/v1/chat/ \
 
 | Event | `data` 內容 | 前端行為 |
 | --- | --- | --- |
+| `progress` | `phase` 與 `elapsed_ms`；後者是伺服器從收到請求到該階段的實測毫秒數 | 依後端實際執行階段更新提示，不以固定秒數切換、不推估完成百分比 |
 | `delta` | `{"text":"新增的回覆文字"}` | 將文字附加到同一則 AI 訊息 |
 | `guidance` | 累積快照，可含 `interaction_mode`、`clarifying_questions`、`suggested_replies`；陣列最後一項可能尚未生成完畢 | 以整份快照更新問題與選項預覽，不附加重複文字；等 `done` 後才可點選 |
 | `done` | 完整聊天回覆：`reply`、`session_id`、`anonymized`、`rag_used`、`emotion`、`emotion_color`、`suggested_replies`、`action_buttons`、`interaction_mode`、`clarifying_questions`；開發模式可另含 `debug_tool_calls` | 以驗證後的 `reply` 定稿，套用 metadata，結束串流 |
 | `error` | `code`、`detail`、`retryable`、`status`；依錯誤可另含 `error_id`，非 production 的開發模式可另含 `debug_message` | 顯示錯誤並結束串流，不顯示未完成的選單 |
+
+`progress.phase` 包含 `anonymizing`（啟用匿名化時）、`preparing`（準備模型輸入）、`waiting_model`（送出模型請求）、`retrieving`（實際呼叫資料檢索）、`generating`（已收到回覆文字）、`guidance`（已收到引導資料）、`validating`（檢查完整回覆）。只有實際執行的階段才會出現；沒有檢索就不顯示檢索提示，未收到新事件就維持目前狀態。首段回覆或引導內容優先送出，接著才補上對應狀態，不為進度提示延遲首字。`elapsed_ms` 是階段發生時間，並非完成比例或剩餘時間；不包含瀏覽器到伺服器的網路時間。
 
 開始串流前的驗證、維護模式及存取限制錯誤仍回傳原本的 HTTP 狀態碼與 JSON。開始串流後 HTTP headers 已送出，錯誤以 `error` event 的 `status` 表達，並保留伺服器的 ERROR 日誌。已顯示回覆或引導文字時不自動重試，避免混入另一輪生成內容；發生錯誤或取消時移除尚未定稿的選單，未收到 `done` 的回覆視為未完成。不傳 `stream` 或設為 `false` 時，仍回傳相容的完整 JSON 回覆。
 
@@ -226,7 +229,7 @@ Action button 是共用元件與資料契約，機關名稱及不同情境的使
 
 互動分成兩種模式。一般回答、下一步與延伸討論建議使用 `interaction_mode: "answer"` 與 `clarifying_questions: []`：`suggested_replies` 和 Skill `options` 在一般輸入框上方呈現水平建議按鈕，點選直接送出，保留一般輸入區，不顯示「其他」或問題引用。
 
-只有回答目前需求存在必須由使用者補充的明確資訊缺口時，才使用 `interaction_mode: "clarify"` 與具體的 `clarifying_questions`，顯示「AI 需要更多您的資訊」詢問選單並取代一般輸入區。使用者選擇選項或填寫「其他」後，按「送出回覆」確認；可從右上角隱藏選單，再透過「顯示選單」入口重開，切換時保留選項、「其他」與一般輸入草稿。多組問題可切換並一併送出；沒有適用的 Skill 選項時，使用 `suggested_replies` 作為答案選項。一般「想先聊哪個方向？」不構成必要資訊缺口，agent 不應為了產生選單而標記 clarify。只有最新且有效的 AI 訊息可提供可操作的建議或詢問選單；網址與電話 Actions 保留直接開啟網站或撥號的行為。
+只有回答目前需求存在必須由使用者補充的明確資訊缺口時，才使用 `interaction_mode: "clarify"` 與具體的 `clarifying_questions`，顯示「AI 需要更多您的資訊」詢問選單並取代一般輸入區。使用者選擇選項或填寫「其他」後，按「送出回覆」確認；可從右上角隱藏選單，再透過「顯示選單」入口重開，切換時保留選項、「其他」與一般輸入草稿。多組問題可切換並一併送出；沒有適用的 Skill 選項時，使用 `suggested_replies` 作為答案選項。一般「想先聊哪個方向？」不構成必要資訊缺口，agent 不應為了產生選單而標記 clarify。只有最新且有效的 AI 訊息可提供可操作的建議或詢問選單；網址與電話 Actions 則留在所屬 AI 回覆內，於來源標籤（例如「救濟管道」）下方另列醒目的按鈕，可直接開啟網站或撥號，不會隨詢問選單隱藏或移到後續回覆。
 
 clarify 送出的使用者訊息會將問題以淡色顯示在泡泡上方，答案顯示在下方。問題與答案的顯示 metadata 僅保存在本機 UI；聊天 API 仍收到保留完整問答脈絡的文字。answer 的建議按鈕送出一般文字訊息，不新增問題引用。
 

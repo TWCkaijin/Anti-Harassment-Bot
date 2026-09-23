@@ -50,13 +50,25 @@ def post_stream():
     )
 
 
-def events(body):
+def events(body, *, include_progress=False):
     parsed = []
     for frame in body.decode().split("\n\n"):
         if frame.startswith("event: "):
             event, data = frame.split("\n", 1)
             parsed.append((event.removeprefix("event: "), json.loads(data.removeprefix("data: "))))
-    return parsed
+    return (
+        parsed
+        if include_progress
+        else [(event, data) for event, data in parsed if event != "progress"]
+    )
+
+
+def next_content_frame(iterator):
+    """Ignore status frames when testing text delivery and its backpressure."""
+    for frame in iterator:
+        if events(frame):
+            return frame
+    raise AssertionError("Stream ended before the next content event")
 
 
 def test_delivers_delta_while_model_is_still_generating_and_metadata_only_at_done(monkeypatch):
@@ -79,7 +91,7 @@ def test_delivers_delta_while_model_is_still_generating_and_metadata_only_at_don
     assert "Content-Length" not in response.headers
     iterator = iter(response.response)
     assert next(iterator) == b": connected\n\n"
-    assert events(next(iterator)) == [("delta", {"text": "先陪您整理。\n"})]
+    assert events(next_content_frame(iterator)) == [("delta", {"text": "先陪您整理。\n"})]
     assert "finished" not in state
     state["continue"].set()
     remaining = events(b"".join(iterator))
@@ -105,7 +117,7 @@ def test_disconnect_cancels_producer_and_closes_its_upstream_work(monkeypatch):
     response = post_stream()
     iterator = iter(response.response)
     next(iterator)
-    assert events(next(iterator))[0][0] == "delta"
+    assert events(next_content_frame(iterator))[0][0] == "delta"
     response.close()
     assert state["closed"] is True
 
@@ -297,7 +309,7 @@ def test_real_chat_stream_passes_through_function_wrapper_without_buffering(monk
     )
     iterator = iter(response.response)
     assert next(iterator) == b": connected\n\n"
-    assert events(next(iterator)) == [("delta", {"text": "先陪您整理。\n"})]
+    assert events(next_content_frame(iterator)) == [("delta", {"text": "先陪您整理。\n"})]
     state["continue"].set()
     assert events(b"".join(iterator))[-1][0] == "done"
     response.close()
@@ -320,7 +332,7 @@ def test_first_character_is_yielded_before_producer_can_continue(monkeypatch):
     iterator = iter(response.response)
     assert next(iterator) == b": connected\n\n"
     try:
-        assert events(next(iterator)) == [("delta", {"text": "第"})]
+        assert events(next_content_frame(iterator)) == [("delta", {"text": "第"})]
         assert "producer_continued" not in state
     finally:
         response.close()
@@ -351,8 +363,8 @@ def test_guidance_streams_before_done_and_preserves_partial_question_text(monkey
     response = post_stream()
     iterator = iter(response.response)
     next(iterator)
-    assert events(next(iterator))[0][0] == "delta"
-    assert events(next(iterator)) == [
+    assert events(next_content_frame(iterator))[0][0] == "delta"
+    assert events(next_content_frame(iterator)) == [
         ("guidance", {"interaction_mode": "clarify", "clarifying_questions": ["在哪"]})
     ]
     assert "continued" not in state
@@ -424,10 +436,131 @@ def test_openrouter_first_content_reaches_http_before_next_ready_sdk_chunk(monke
     iterator = iter(response.response)
     next(iterator)
     try:
-        assert events(next(iterator)) == [("delta", {"text": "你"})]
+        assert events(next_content_frame(iterator)) == [("delta", {"text": "你"})]
         assert state == [0]
         assert completions.calls[0]["stream"] is True
         assert not stream.completed
     finally:
         response.close()
     assert stream.closed
+
+
+def test_progress_reports_measured_time_and_only_actual_operations(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(chat_module, "monotonic", lambda: now[0])
+
+    class Agent:
+        async def run(self, on_progress, on_reply_delta, on_guidance, **kwargs):
+            await on_progress({"phase": "preparing", "private": "must not leak"})
+            now[0] = 102.5
+            await on_progress({"phase": "waiting_model"})
+            await on_progress({"phase": "waiting_model"})
+            await on_progress({"phase": "unknown"})
+            await on_reply_delta("回覆")
+            await on_guidance({"interaction_mode": "answer", "suggested_replies": ["我想"]})
+            return result(reply="回覆")
+
+    monkeypatch.setattr(chat_module, "get_agent", Agent)
+    response = post_stream()
+    frames = events(response.get_data(), include_progress=True)
+    assert [name for name, _ in frames] == [
+        "progress",
+        "progress",
+        "delta",
+        "progress",
+        "guidance",
+        "progress",
+        "progress",
+        "done",
+    ]
+    assert [data for name, data in frames if name == "progress"] == [
+        {"phase": "preparing", "elapsed_ms": 0.0},
+        {"phase": "waiting_model", "elapsed_ms": 2500.0},
+        {"phase": "generating", "elapsed_ms": 2500.0},
+        {"phase": "guidance", "elapsed_ms": 2500.0},
+        {"phase": "validating", "elapsed_ms": 2500.0},
+    ]
+    response.close()
+
+
+def test_anonymization_progress_precedes_work_and_private_input_is_still_redacted(
+    monkeypatch,
+    runtime,
+):
+    state = {}
+    monkeypatch.setattr(
+        chat_module, "get_runtime_config", lambda: replace(runtime, enable_anonymization=True)
+    )
+    original_anonymize = chat_module.anonymize
+
+    def tracked_anonymize(message):
+        state["anonymized"] = True
+        return original_anonymize(message)
+
+    class Agent:
+        async def run(self, **kwargs):
+            assert "0912-345-678" not in kwargs["user_message"]
+            assert "victim@example.com" not in str(kwargs["history"])
+            return result()
+
+    monkeypatch.setattr(chat_module, "anonymize", tracked_anonymize)
+    monkeypatch.setattr(chat_module, "get_agent", Agent)
+    response = app.test_client().post(
+        "/api/v1/chat/",
+        json={
+            "message": "我的電話是 0912-345-678",
+            "history": [{"role": "user", "content": "我的信箱是 victim@example.com"}],
+            "stream": True,
+        },
+        buffered=False,
+    )
+    iterator = iter(response.response)
+    assert next(iterator) == b": connected\n\n"
+    frame = events(next(iterator), include_progress=True)[0]
+    assert frame[0] == "progress"
+    assert frame[1]["phase"] == "anonymizing"
+    assert "anonymized" not in state
+    remaining = events(b"".join(iterator))
+    assert state["anonymized"] is True
+    assert remaining[-1][1]["anonymized"] is True
+    response.close()
+
+
+def test_progress_only_failure_remains_retryable(monkeypatch):
+    class Agent:
+        async def run(self, on_progress, **kwargs):
+            await on_progress({"phase": "waiting_model"})
+            raise TimeoutError("upstream timed out before content")
+
+    monkeypatch.setattr(chat_module, "get_agent", Agent)
+    response = post_stream()
+    frames = events(response.get_data(), include_progress=True)
+    assert [name for name, _ in frames] == ["progress", "error"]
+    assert frames[-1][1]["retryable"] is True
+    response.close()
+
+
+def test_keep_alive_does_not_advance_progress_and_disconnect_stays_cancelled(monkeypatch, caplog):
+    state = {}
+
+    class Agent:
+        async def run(self, on_progress, **kwargs):
+            try:
+                await on_progress({"phase": "waiting_model"})
+                await asyncio.Event().wait()
+            finally:
+                state["closed"] = True
+
+    monkeypatch.setattr(chat_module, "get_agent", Agent)
+    monkeypatch.setattr(chat_module, "STREAM_HEARTBEAT_SECONDS", 0.001)
+    with caplog.at_level("INFO"):
+        response = post_stream()
+        iterator = iter(response.response)
+        next(iterator)
+        assert events(next(iterator), include_progress=True)[0][1]["phase"] == "waiting_model"
+        assert next(iterator) == b": keep-alive\n\n"
+        assert next(iterator) == b": keep-alive\n\n"
+        response.close()
+    assert state["closed"] is True
+    record = next(r for r in caplog.records if getattr(r, "event", None) == "chat_stream_timing")
+    assert record.outcome == "cancelled"

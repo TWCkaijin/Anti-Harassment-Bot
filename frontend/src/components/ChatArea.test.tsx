@@ -36,13 +36,14 @@ function assistantMessage(overrides: Partial<ConversationMessage> = {}): Convers
   };
 }
 
-function chat(messages: ConversationMessage[], onSend = vi.fn(), isLoading = false) {
+function chat(messages: ConversationMessage[], onSend = vi.fn(), isLoading = false, retryStatus?: string) {
   return (
     <I18nProvider>
       <ChatArea
         messages={messages}
         onSend={onSend}
         isLoading={isLoading}
+        retryStatus={retryStatus}
         onOpenSidebar={vi.fn()}
         onStop={vi.fn()}
       />
@@ -75,7 +76,7 @@ beforeEach(() => {
 });
 
 describe("ChatArea follow-up integration", () => {
-  it("replaces the footer composer with the latest questions, choices and resource actions", async () => {
+  it("keeps resource actions in the reply while the latest questions replace the footer composer", async () => {
     const message = assistantMessage();
     const { container } = render(chat([message]));
     await screen.findByText("已連線");
@@ -86,9 +87,7 @@ describe("ChatArea follow-up integration", () => {
     expect(controls.getByText(nextStep.title)).toBeInTheDocument();
     expect(controls.getByRole("radio", { name: /看看資源/ })).toBeInTheDocument();
     expect(controls.getByRole("radio", { name: /繼續說明/ })).toBeInTheDocument();
-    expect(controls.getByRole("link", { name: "撥打諮詢專線" })).toHaveAttribute("href", "tel:113");
-    expect(controls.getByRole("link", { name: "查看官方網站（另開新分頁）" }))
-      .toHaveAttribute("href", "https://www.pthg.gov.tw/");
+    expect(controls.queryByRole("link")).not.toBeInTheDocument();
     const composer = controls.getByPlaceholderText("請描述您的狀況或提出問題…");
     expect(composer).not.toBeVisible();
     expect(controls.queryByRole("button", { name: "傳送訊息" })).not.toBeInTheDocument();
@@ -97,12 +96,23 @@ describe("ChatArea follow-up integration", () => {
     const messageArea = screen.getByText(message.content).closest("section");
     expect(messageArea).not.toBeNull();
     expect(within(messageArea!).queryByRole("radio")).not.toBeInTheDocument();
-    expect(within(messageArea!).queryByRole("link")).not.toBeInTheDocument();
+    const phone = within(messageArea!).getByRole("link", { name: "撥打諮詢專線" });
+    expect(phone).toHaveAttribute("href", "tel:113");
+    expect(within(messageArea!).getByRole("link", { name: "查看官方網站（另開新分頁）" }))
+      .toHaveAttribute("href", "https://www.pthg.gov.tw/");
     expect(within(messageArea!).queryByText(nextStep.title)).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(controls.getByRole("button", { name: "隱藏" }));
+    expect(phone).toBeVisible();
+    expect(controls.queryByRole("link")).not.toBeInTheDocument();
+    expect(composer).toBeVisible();
+    fireEvent.click(controls.getByRole("button", { name: "顯示選單" }));
+    expect(phone).toBeVisible();
+    expect(screen.getAllByRole("link", { name: "撥打諮詢專線" })).toHaveLength(1);
   });
 
-  it("keeps earlier assistant messages readable without showing their old questions or actions", async () => {
+  it("preserves earlier resource actions with their replies without showing their old questions", async () => {
     const earlier = assistantMessage({
       id: "assistant-old",
       content: "先前的回覆仍會保留。",
@@ -114,7 +124,7 @@ describe("ChatArea follow-up integration", () => {
 
     expect(screen.getByText(earlier.content)).toBeInTheDocument();
     expect(screen.queryByText("這是先前的問題？")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "舊的聯絡方式" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "舊的聯絡方式" })).toHaveAttribute("href", "tel:110");
     expect(screen.getAllByRole("radio", { name: /看看資源/ })).toHaveLength(1);
   });
 
@@ -201,6 +211,24 @@ describe("ChatArea follow-up integration", () => {
     expect(onSend).toHaveBeenCalledExactlyOnceWith("我想了解申訴流程");
   });
 
+  it("keeps answer-mode resources with the reply and next-step choices above the composer", async () => {
+    const message = assistantMessage({
+      interactionMode: "answer", clarifyingQuestions: [],
+    });
+    const { container } = render(chat([message]));
+    await screen.findByText("已連線");
+
+    const footer = within(container.querySelector("footer")!);
+    const messageArea = within(screen.getByText(message.content).closest("section")!);
+    expect(footer.queryByRole("link")).not.toBeInTheDocument();
+    expect(footer.getByRole("button", { name: "看看資源" })).toBeVisible();
+    expect(footer.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeVisible();
+    expect(messageArea.getByRole("link", { name: "撥打諮詢專線" })).toHaveAttribute("href", "tel:113");
+    expect(messageArea.getByRole("link", { name: "查看官方網站（另開新分頁）" }))
+      .toHaveAttribute("href", "https://www.pthg.gov.tw/");
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  });
+
   it.each([
     { kind: "user", role: "user" as const, isError: false, isCancelled: false },
     { kind: "error", role: "assistant" as const, isError: true, isCancelled: false },
@@ -217,7 +245,7 @@ describe("ChatArea follow-up integration", () => {
 
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(screen.queryByText(nextStep.title)).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "撥打諮詢專線" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "撥打諮詢專線" })).toHaveLength(1);
     expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeInTheDocument();
   });
 });
@@ -331,6 +359,22 @@ describe("ChatArea streaming presentation", () => {
     expect(screen.getByRole("button", { name: "停止回覆" })).toBeInTheDocument();
     rerender(chat([{ ...stream, isStreaming: false }], vi.fn(), false));
     expect(screen.getByRole("radio", { name: /看看資源/ })).toBeInTheDocument();
+    await screen.findByText("已連線");
+  });
+
+  it("keeps the actual phase visible in a single status indicator throughout streaming", async () => {
+    const user: ConversationMessage = { id: "progress-user", role: "user", content: "請說明", timestamp: 1 };
+    const { rerender, container } = render(chat([user], vi.fn(), true, "正在檢索資料庫"));
+    expect(screen.getByRole("status")).toHaveTextContent("正在檢索資料庫");
+    const stream = assistantMessage({ content: "已收到的回答", isStreaming: true });
+    rerender(chat([user, stream], vi.fn(), true, "正在生成回覆"));
+    expect(screen.getByRole("status")).toHaveTextContent("正在生成回覆");
+    expect(container.querySelectorAll(".typing-dot")).toHaveLength(0);
+    rerender(chat([user, stream], vi.fn(), true, "正在整理回覆"));
+    expect(screen.getByRole("status")).toHaveTextContent("正在整理回覆");
+    expect(screen.getByText("已收到的回答")).toBeVisible();
+    rerender(chat([user, { ...stream, isStreaming: false }], vi.fn(), false));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     await screen.findByText("已連線");
   });
 });

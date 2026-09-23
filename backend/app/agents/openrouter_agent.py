@@ -354,6 +354,7 @@ class OpenRouterAgent:
         use_rag: bool = True,
         on_reply_delta: Callable[[str], Awaitable[None]] | None = None,
         on_guidance: Callable[[dict], Awaitable[None]] | None = None,
+        on_progress: Callable[[dict], Awaitable[None]] | None = None,
     ) -> AgentResult:
         # WSGI owns a separate event loop per request. A fresh streaming transport
         # prevents pooled sockets from outliving their loop, including cancellation.
@@ -373,9 +374,17 @@ class OpenRouterAgent:
                     on_reply_delta,
                     on_guidance,
                     client,
+                    on_progress,
                 )
         return await self._run(
-            user_message, history, image_base64, use_rag, on_reply_delta, on_guidance, self.client
+            user_message,
+            history,
+            image_base64,
+            use_rag,
+            on_reply_delta,
+            on_guidance,
+            self.client,
+            on_progress,
         )
 
     async def _run(
@@ -387,6 +396,7 @@ class OpenRouterAgent:
         on_reply_delta: Callable[[str], Awaitable[None]] | None,
         on_guidance: Callable[[dict], Awaitable[None]] | None,
         client: AsyncOpenAI,
+        on_progress: Callable[[dict], Awaitable[None]] | None = None,
     ) -> AgentResult:
         """
         執行 Agent 迴圈：
@@ -394,6 +404,8 @@ class OpenRouterAgent:
         2. 若有 Tool Call，執行 Firestore 查詢，將結果返回給模型
         3. 回傳最終的 JSON 字串與實際 RAG 使用狀態
         """
+        if on_progress is not None:
+            await on_progress({"phase": "preparing"})
         runtime_config = get_runtime_config()
         model = runtime_config.openrouter_model
         messages = [{"role": "system", "content": _get_system_instruction(runtime_config)}]
@@ -507,6 +519,8 @@ class OpenRouterAgent:
                 create_kwargs["tools"] = [_RAG_TOOL]
                 create_kwargs["tool_choice"] = "required" if requires_grounded_retrieval else "auto"
 
+            if on_progress is not None:
+                await on_progress({"phase": "waiting_model"})
             response_message = await self._create_message(
                 client, create_kwargs, on_reply_delta, on_guidance
             )
@@ -551,6 +565,8 @@ class OpenRouterAgent:
                             data_type,
                         )
 
+                        if on_progress is not None:
+                            await on_progress({"phase": "retrieving"})
                         docs = await self.rag.retrieve(
                             query,
                             top_k=runtime_config.rag_retrieval_top_k,
@@ -615,6 +631,8 @@ class OpenRouterAgent:
                             "exclude": True,
                         }
                     }
+                if on_progress is not None:
+                    await on_progress({"phase": "waiting_model"})
                 final_message = await self._create_message(
                     client, second_create_kwargs, on_reply_delta, on_guidance
                 )

@@ -129,7 +129,7 @@ export default function ChatArea({
         {hasMessages ? (
           <div className="w-full px-6 lg:px-10 py-8 space-y-10">
             {messages.map((msg) => (
-              <MessageItem key={msg.id} message={msg} />
+              <MessageItem key={msg.id} message={msg} streamingStatus={msg.isStreaming ? retryStatus : undefined} />
             ))}
             {isLoading && !latestMessage?.isStreaming && <TypingIndicator message={retryStatus} />}
             <div ref={messagesEndRef} className="h-4" />

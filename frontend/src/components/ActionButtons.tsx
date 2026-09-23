@@ -6,15 +6,15 @@ interface ActionButtonsProps {
   actions: ActionButton[];
 }
 
-const buttonClassName = "inline-flex min-h-10 max-w-full items-center gap-2 rounded-lg border border-secondary/20 bg-white px-3 py-2 text-sm font-medium text-secondary transition-colors hover:bg-secondary-container/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-secondary";
+const buttonClassName = "inline-flex min-h-11 max-w-full items-center justify-center gap-2 rounded-xl border border-orange-700 bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:border-orange-800 hover:bg-orange-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
-/** Resource actions share the follow-up panel; choice actions render inline there. */
+/** Trusted resource actions sit in a visible row beside the reply's source information. */
 export default function ActionButtons({ actions }: ActionButtonsProps) {
   const resourceActions = getSafeResourceActions(actions);
   if (resourceActions.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap gap-2" aria-label="相關資源">
+    <div role="group" className="flex flex-wrap gap-2" aria-label="相關資源">
       {resourceActions.map((action, index) => (
         <a
           key={`${action.action}-${index}`}

@@ -14,7 +14,15 @@ from backend.app.core.streaming_reply import (
     ReplyJSONDecoder,
     StreamReplyError,
 )
-from tests.test_agent import FakeCompletions, fake_runtime_config, make_agent
+from backend.app.rag.base import RAGUnavailableError
+from tests.test_agent import (
+    FakeCompletions,
+    FakeMessage,
+    FakeResponse,
+    FakeToolCall,
+    fake_runtime_config,
+    make_agent,
+)
 
 
 def chunk(content=None, *, finish=None, tools=None, refusal=None):
@@ -145,6 +153,53 @@ def test_decoder_bounds_raw_input_and_nesting():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream_reply", [False, True])
+@pytest.mark.parametrize("use_rag", [False, True])
+async def test_direct_answer_progress_reports_only_actual_operations(
+    monkeypatch, stream_reply, use_rag
+):
+    progress = []
+    raw = json.dumps(response())
+    upstream = (
+        FakeStream([chunk(raw), chunk(finish="stop")])
+        if stream_reply
+        else FakeResponse(FakeMessage(content=raw))
+    )
+
+    def runtime_config():
+        assert progress == [{"phase": "preparing"}]
+        return fake_runtime_config()
+
+    class CheckedCompletions(FakeCompletions):
+        async def create(self, **kwargs):
+            assert progress == [{"phase": "preparing"}, {"phase": "waiting_model"}]
+            return await super().create(**kwargs)
+
+    monkeypatch.setattr(agent_module, "get_runtime_config", runtime_config)
+    completions = CheckedCompletions([upstream])
+    agent = make_agent(completions)
+
+    async def on_progress(value):
+        assert not completions.calls
+        progress.append(value)
+
+    async def on_delta(text):
+        assert progress[-1] == {"phase": "waiting_model"}
+
+    await agent.run(
+        "我很害怕",
+        use_rag=use_rag,
+        on_reply_delta=on_delta if stream_reply else None,
+        on_progress=on_progress,
+    )
+
+    assert progress == [{"phase": "preparing"}, {"phase": "waiting_model"}]
+    assert not agent.rag.calls
+    # Progress by itself must not change the provider response format to a stream.
+    assert completions.calls[0].get("stream", False) is stream_reply
+
+
+@pytest.mark.asyncio
 async def test_stream_emits_decoded_reply_before_upstream_completion():
     received = []
 
@@ -200,6 +255,7 @@ async def test_stream_never_exposes_reasoning_or_usage_chunks():
 @pytest.mark.asyncio
 async def test_stream_accumulates_tool_fragments_then_streams_only_final_reply():
     received = []
+    progress = []
     first = FakeStream(
         [
             chunk(
@@ -220,6 +276,12 @@ async def test_stream_accumulates_tool_fragments_then_streams_only_final_reply()
             assert received == []
             assert first.closed
             assert agent.rag.calls[0]["query"] == "申訴期限"
+            assert progress == [
+                {"phase": "preparing"},
+                {"phase": "waiting_model"},
+                {"phase": "retrieving"},
+                {"phase": "waiting_model"},
+            ]
 
     final = FakeStream([chunk(char) for char in raw] + [chunk(finish="stop")], before_final)
     completions = FakeCompletions([first, final])
@@ -228,7 +290,15 @@ async def test_stream_accumulates_tool_fragments_then_streams_only_final_reply()
     async def on_delta(text):
         received.append(text)
 
-    result = await agent.run("我想了解申訴期限", on_reply_delta=on_delta)
+    async def on_progress(value):
+        if value["phase"] == "retrieving":
+            assert not agent.rag.calls
+            assert first.closed
+        if value["phase"] == "waiting_model":
+            assert len(completions.calls) == len(agent.rag.calls)
+        progress.append(value)
+
+    result = await agent.run("我想了解申訴期限", on_reply_delta=on_delta, on_progress=on_progress)
 
     assert "".join(received) == "可以一起了解申訴期限。"
     assert result.rag_used
@@ -255,13 +325,47 @@ async def test_stream_accumulates_tool_fragments_then_streams_only_final_reply()
 )
 async def test_stream_failures_propagate_and_close_transport(chunks, error):
     stream = FakeStream(chunks)
+    progress = []
 
     async def on_delta(text):
         pass
 
+    async def on_progress(value):
+        progress.append(value)
+
     with pytest.raises((AgentContractError, RuntimeError), match=error):
-        await make_agent(FakeCompletions([stream])).run("我很害怕", on_reply_delta=on_delta)
+        await make_agent(FakeCompletions([stream])).run(
+            "我很害怕", on_reply_delta=on_delta, on_progress=on_progress
+        )
+    assert progress == [{"phase": "preparing"}, {"phase": "waiting_model"}]
     assert stream.closed
+
+
+@pytest.mark.asyncio
+async def test_retrieval_failure_does_not_report_another_model_request():
+    progress = []
+    completions = FakeCompletions(
+        [FakeResponse(FakeMessage(tool_calls=[FakeToolCall("申訴期限")]))]
+    )
+    agent = make_agent(completions)
+
+    async def fail_retrieval(*args, **kwargs):
+        assert progress[-1] == {"phase": "retrieving"}
+        raise RAGUnavailableError("retrieval failed")
+
+    async def on_progress(value):
+        progress.append(value)
+
+    agent.rag.retrieve = fail_retrieval
+    with pytest.raises(RAGUnavailableError, match="retrieval failed"):
+        await agent.run("我想了解申訴期限", on_progress=on_progress)
+
+    assert progress == [
+        {"phase": "preparing"},
+        {"phase": "waiting_model"},
+        {"phase": "retrieving"},
+    ]
+    assert len(completions.calls) == 1
 
 
 @pytest.mark.asyncio

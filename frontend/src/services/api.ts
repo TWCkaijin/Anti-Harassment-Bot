@@ -62,6 +62,16 @@ export interface ChatGuidance {
   suggested_replies?: string[];
 }
 
+const CHAT_PROGRESS_PHASES = [
+  "anonymizing", "preparing", "waiting_model", "retrieving", "generating", "guidance", "validating",
+] as const;
+
+/** Server-observed phase and elapsed time; never an estimated completion percentage. */
+export interface ChatProgress {
+  phase: typeof CHAT_PROGRESS_PHASES[number];
+  elapsed_ms: number;
+}
+
 export interface TelActionButton {
   action: "tel";
   phone_number: string;
@@ -276,6 +286,7 @@ async function readChatStream(
   signal?: AbortSignal,
   onDelta?: (text: string) => void,
   onGuidance?: (guidance: ChatGuidance) => void,
+  onProgress?: (progress: ChatProgress) => void,
 ): Promise<ChatResponse> {
   if (!response.body) throw invalidStream();
   const reader = response.body.getReader();
@@ -293,11 +304,16 @@ async function readChatStream(
       const eventData = data.join("\n");
       event = "";
       data = [];
-      if (!eventData || !["delta", "guidance", "done", "error"].includes(eventName)) return;
+      if (!eventData || !["delta", "guidance", "progress", "done", "error"].includes(eventName)) return;
       let payload: unknown;
       try { payload = JSON.parse(eventData); } catch { throw invalidStream(); }
       if (!isRecord(payload)) throw invalidStream();
-      if (eventName === "delta") {
+      if (eventName === "progress") {
+        if (!CHAT_PROGRESS_PHASES.some(phase => phase === payload.phase)
+          || typeof payload.elapsed_ms !== "number" || !Number.isFinite(payload.elapsed_ms)
+          || payload.elapsed_ms < 0) throw invalidStream();
+        onProgress?.({ phase: payload.phase as ChatProgress["phase"], elapsed_ms: payload.elapsed_ms });
+      } else if (eventName === "delta") {
         if (typeof payload.text !== "string") throw invalidStream();
         if (payload.text) onDelta?.(payload.text);
       } else if (eventName === "guidance") {
@@ -377,6 +393,7 @@ export async function sendChat(
   signal?: AbortSignal,
   onDelta?: (text: string) => void,
   onGuidance?: (guidance: ChatGuidance) => void,
+  onProgress?: (progress: ChatProgress) => void,
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/v1/chat/`, {
     method: "POST",
@@ -389,7 +406,7 @@ export async function sendChat(
   if (!response.headers.get("content-type")?.includes("text/event-stream")) {
     return response.json() as Promise<ChatResponse>;
   }
-  return readChatStream(response, signal, onDelta, onGuidance);
+  return readChatStream(response, signal, onDelta, onGuidance, onProgress);
 }
 
 /**

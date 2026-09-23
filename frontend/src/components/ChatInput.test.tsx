@@ -242,17 +242,15 @@ describe("ChatInput", () => {
     expect(onSend).toHaveBeenCalledExactlyOnceWith("查看資源");
   });
 
-  it("places ordinary resource links above the available composer without creating questions", () => {
+  it("leaves resource links to the message while preserving ordinary next-step suggestions", () => {
     const prompt: ConversationMessage = {
       ...replyPrompt, interactionMode: "answer", clarifyingQuestions: [], suggestedReplies: ["查看其他資源"],
       actionButtons: [{ action: "tel", label: "撥打諮詢專線", phone_number: "113" }, { action: "url", label: "官方網站", url: "https://example.org/" }],
     };
     render(<I18nProvider><ChatInput onSend={vi.fn()} replyPrompt={prompt} /></I18nProvider>);
     const composer = screen.getByPlaceholderText("請描述您的狀況或提出問題…");
-    const phone = screen.getByRole("link", { name: "撥打諮詢專線" });
-    expect(phone).toHaveAttribute("href", "tel:113");
-    expect(phone.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("link", { name: "官方網站（另開新分頁）" })).toHaveAttribute("href", "https://example.org/");
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看其他資源" })).toBeVisible();
     expect(composer).toBeVisible();
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
   });
