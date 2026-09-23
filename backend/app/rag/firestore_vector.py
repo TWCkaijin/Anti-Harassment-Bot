@@ -1,3 +1,4 @@
+import asyncio
 from math import isfinite
 
 from firebase_admin import firestore
@@ -69,17 +70,22 @@ class FirestoreVectorRAG(BaseRAG):
             logger.warning("Unknown RAG data_type=%s; falling back to law collection.", data_type)
             collection_names = collections_by_data_type["law"]
 
-        results_by_collection: list[list[RAGDocument]] = []
         per_collection_limit = top_k if len(collection_names) == 1 else max(top_k, 1)
-        for target_collection in collection_names:
-            results_by_collection.append(
-                self._retrieve_from_collection(
+        # Firestore's synchronous client must not block SSE heartbeats. These
+        # independent reads share the same embedding and can run concurrently;
+        # gather preserves collection order for stable ranking tie-breaks.
+        results_by_collection = await asyncio.gather(
+            *(
+                asyncio.to_thread(
+                    self._retrieve_from_collection,
                     collection_name=target_collection,
                     query_vector=query_vector,
                     limit=per_collection_limit,
                     distance_threshold=distance_threshold,
                 )
+                for target_collection in collection_names
             )
+        )
         if len(results_by_collection) == 1:
             return results_by_collection[0][:top_k]
 

@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, sendChat, type ChatResponse } from "../services/api";
+import { ApiError, sendChat, type ChatGuidance, type ChatResponse } from "../services/api";
 import {
   MAX_USER_MESSAGE_CHARACTERS,
   USER_MESSAGE_TOO_LONG_ERROR,
@@ -242,16 +242,56 @@ function deferredResponse() {
   let resolve!: (response: ChatResponse) => void;
   let reject!: (error: unknown) => void;
   let delta!: (text: string) => void;
+  let guidance!: (value: ChatGuidance) => void;
   const promise = new Promise<ChatResponse>((res, rej) => { resolve = res; reject = rej; });
-  vi.mocked(sendChat).mockImplementationOnce((_request, signal, onDelta) => {
+  vi.mocked(sendChat).mockImplementationOnce((_request, signal, onDelta, onGuidance) => {
     delta = onDelta!;
+    guidance = onGuidance!;
     signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
     return promise;
   });
-  return { resolve, reject, delta: (text: string) => delta(text) };
+  return { resolve, reject, delta: (text: string) => delta(text), guidance: (value: ChatGuidance) => guidance(value) };
 }
 
 describe("useConversation streamed replies", () => {
+  it("updates transient guidance snapshots before completion and only persists final validated metadata", async () => {
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("guidance-session"));
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("我需要幫忙"); });
+    act(() => pending.delta("我"));
+    expect(result.current.messages.at(-1)?.content).toBe("我");
+    const first: ChatGuidance = { interaction_mode: "clarify", clarifying_questions: ["事情"] };
+    act(() => pending.guidance(first));
+    expect(result.current.messages.at(-1)?.streamingGuidance).toEqual(first);
+    const next: ChatGuidance = { ...first, clarifying_questions: ["事情發生在哪裡？"], suggested_replies: ["在學"] };
+    act(() => pending.guidance(next));
+    act(() => pending.delta("會陪您"));
+    expect(result.current.messages.at(-1)).toMatchObject({ content: "我會陪您", streamingGuidance: next, isStreaming: true });
+    expect(result.current.messages.at(-1)).not.toHaveProperty("suggestedReplies");
+    expect(localStorage.getItem("harass_bot_conversations")).not.toContain("streamingGuidance");
+    await act(async () => { pending.resolve(successfulResponse); await request; });
+    expect(result.current.messages.at(-1)).not.toHaveProperty("streamingGuidance");
+    expect(result.current.messages.at(-1)?.suggestedReplies).toEqual(successfulResponse.suggested_replies);
+    expect(localStorage.getItem("harass_bot_conversations")).not.toContain("streamingGuidance");
+  });
+
+  it("discards guidance and never retries after visible guidance even without reply text", async () => {
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("guidance-error-session"));
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("我需要幫忙"); });
+    act(() => pending.guidance({ interaction_mode: "answer", suggested_replies: ["了解"] }));
+    expect(result.current.messages.at(-1)?.streamingGuidance?.suggested_replies).toEqual(["了解"]);
+    await act(async () => {
+      pending.reject(new ApiError(503, "upstream failed", "請稍後再試", true));
+      await request;
+    });
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(result.current.messages.at(-1)?.isError).toBe(true);
+    expect(result.current.messages.at(-1)).not.toHaveProperty("streamingGuidance");
+  });
+
   it("updates one transient bubble, persists only done, and applies metadata afterward", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("stream-session"));
@@ -315,6 +355,7 @@ describe("useConversation streamed replies", () => {
     let request!: Promise<void>;
     act(() => { request = result.current.sendMessage("請說明"); });
     act(() => pending.delta("這是已經收到的文字"));
+    act(() => pending.guidance({ interaction_mode: "clarify", clarifying_questions: ["事情發生在"] }));
     const id = result.current.messages.at(-1)?.id;
     await act(async () => {
       result.current.stopCurrentResponse();
@@ -322,6 +363,7 @@ describe("useConversation streamed replies", () => {
     });
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages.at(-1)).toMatchObject({ id, content: "這是已經收到的文字", isCancelled: true });
+    expect(result.current.messages.at(-1)).not.toHaveProperty("streamingGuidance");
     expect(result.current.isLoading).toBe(false);
     expect(sendChat).toHaveBeenCalledOnce();
   });
@@ -344,17 +386,20 @@ describe("useConversation streamed replies", () => {
     let request!: Promise<void>;
     act(() => { request = result.current.sendMessage("原本的問題"); });
     act(() => pending.delta("原本的回覆"));
+    act(() => pending.guidance({ interaction_mode: "answer", suggested_replies: ["原本"] }));
     let otherId!: string;
     act(() => { otherId = result.current.createNewSession(); });
     expect(result.current.messages).toEqual([]);
     expect(result.current.isLoading).toBe(false);
     act(() => pending.delta("繼續"));
+    act(() => pending.guidance({ interaction_mode: "answer", suggested_replies: ["原本的建議"] }));
     expect(result.current.messages).toEqual([]);
     await act(async () => { pending.resolve(successfulResponse); await request; });
     expect(result.current.currentSessionId).toBe(otherId);
     expect(result.current.messages).toEqual([]);
     act(() => result.current.setCurrentSessionId("original-session"));
     expect(result.current.messages.at(-1)?.content).toBe(successfulResponse.reply);
+    expect(result.current.messages.at(-1)).not.toHaveProperty("streamingGuidance");
     expect(result.current.isLoading).toBe(false);
   });
 

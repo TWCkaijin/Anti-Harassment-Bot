@@ -175,6 +175,45 @@ describe("chat streaming transport", () => {
     expect(onDelta.mock.calls.map(([text]) => text).join("")).toBe("您好🙂\n第二行再來");
   });
 
+  it("delivers cumulative guidance before done and accepts only preview fields", async () => {
+    const { controller } = streamResponse();
+    let notify!: () => void;
+    let ready = new Promise<void>(resolve => { notify = resolve; });
+    const onGuidance = vi.fn(() => notify());
+    let completed = false;
+    const request = sendChat(chatRequest, undefined, undefined, onGuidance)
+      .then(value => { completed = true; return value; });
+    const first = { interaction_mode: "clarify", clarifying_questions: ["事"] };
+    controller.enqueue(encoder.encode(eventText("guidance", {
+      ...first, action_buttons: [{ action: "url", url: "https://unvalidated.example" }], emotion: "擔心",
+    })));
+    await ready;
+    expect(onGuidance).toHaveBeenLastCalledWith(first);
+    expect(completed).toBe(false);
+    ready = new Promise<void>(resolve => { notify = resolve; });
+    const next = { interaction_mode: "clarify", clarifying_questions: ["事情發生在哪裡？"], suggested_replies: ["在學"] };
+    for (const byte of encoder.encode(eventText("guidance", next))) controller.enqueue(new Uint8Array([byte]));
+    await ready;
+    expect(onGuidance).toHaveBeenLastCalledWith(next);
+    expect(completed).toBe(false);
+    controller.enqueue(encoder.encode(eventText("done", chatResponse)));
+    await expect(request).resolves.toEqual(chatResponse);
+    expect(onGuidance).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { interaction_mode: "clar" },
+    { suggested_replies: ["合法文字", { label: "非字串" }] },
+    { clarifying_questions: "非陣列" },
+  ])("rejects invalid guidance shapes before they reach the UI", async guidance => {
+    const { controller } = streamResponse();
+    const onGuidance = vi.fn();
+    const request = sendChat(chatRequest, undefined, undefined, onGuidance);
+    controller.enqueue(encoder.encode(eventText("guidance", guidance)));
+    await expect(request).rejects.toMatchObject({ status: 502 });
+    expect(onGuidance).not.toHaveBeenCalled();
+  });
+
   it("exposes a terminal error and closes the reader without waiting for EOF", async () => {
     const { controller, cancel } = streamResponse();
     const onDelta = vi.fn();

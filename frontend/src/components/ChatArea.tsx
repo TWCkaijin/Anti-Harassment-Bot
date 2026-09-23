@@ -145,6 +145,8 @@ export default function ChatArea({
           onSend={onSend}
           isLoading={isLoading}
           replyPrompt={replyPrompt}
+          streamingPrompt={latestMessage?.role === "assistant" && latestMessage.isStreaming
+            && !latestMessage.isError && !latestMessage.isCancelled ? latestMessage : undefined}
           onStop={onStop}
         />
       )}
