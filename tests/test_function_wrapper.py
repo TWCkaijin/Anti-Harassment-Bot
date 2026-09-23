@@ -3,10 +3,49 @@
 import json
 from uuid import UUID
 
-from flask import Request
+import pytest
+from flask import Flask, Request, Response, current_app, request, stream_with_context
 
 import main as function_main
 from backend.app.core.logger import GCPJsonFormatter
+
+
+@pytest.mark.parametrize("disconnect_early", [False, True])
+def test_wrapper_stream_context_isolated_from_functions_framework(monkeypatch, disconnect_early):
+    outer = Flask("functions-framework")
+    origin = "https://anti-harassment-bot--dev-preview-w28ypvc3.web.app"
+    inner = Flask("backend-stream")
+    closed = []
+
+    @inner.route("/stream")
+    def stream():
+        @stream_with_context
+        def chunks():
+            try:
+                yield ": connected\n\n"
+                assert current_app._get_current_object() is inner
+                assert request.path == "/stream"
+                yield "event: done\ndata: {}\n\n"
+            finally:
+                closed.append(current_app.name)
+
+        return Response(chunks(), headers={"Access-Control-Allow-Origin": origin})
+
+    monkeypatch.setattr(function_main, "app", inner)
+
+    @outer.route("/stream")
+    def invoke():
+        response = function_main.handle_request(request)
+        assert current_app._get_current_object() is outer
+        return response
+
+    response = outer.test_client().get("/stream", buffered=False)
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == origin
+    if not disconnect_early:
+        assert b"event: done" in response.get_data()
+    response.close()
+    assert closed == ["backend-stream"]
 
 
 def test_wrapper_delegates_preflight_to_allowlisted_flask_cors():
