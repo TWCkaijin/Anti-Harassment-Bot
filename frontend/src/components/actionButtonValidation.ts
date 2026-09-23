@@ -48,10 +48,11 @@ export function isValidOptionsAction(action: unknown): action is OptionsActionBu
 }
 
 /** Share the panel's validated content with the composer that it replaces. */
-export function getFollowUpData({ actions, suggestedReplies, clarifyingQuestions }: {
+export function getFollowUpData({ actions, suggestedReplies, clarifyingQuestions, interactionMode }: {
   actions?: unknown;
   suggestedReplies?: unknown;
   clarifyingQuestions?: unknown;
+  interactionMode?: unknown;
 }) {
   const optionActions = Array.isArray(actions) ? actions.filter(isValidOptionsAction) : [];
   const resources = getSafeResourceActions(actions);
@@ -67,6 +68,7 @@ export function getFollowUpData({ actions, suggestedReplies, clarifyingQuestions
     resources,
     questions,
     suggestions,
+    hasQuestion: interactionMode === "clarify" && questions.length > 0,
     hasContent: optionActions.length + resources.length + questions.length + suggestions.length > 0,
   };
 }

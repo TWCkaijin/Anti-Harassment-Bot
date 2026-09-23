@@ -94,14 +94,16 @@ _DEFAULT_SYSTEM_SECTIONS: tuple[tuple[str, str, str], ...] = (
               "emotion": "使用者的當前情緒標籤，例如：焦慮、憤怒、恐懼、冷靜、悲傷、未知",
               "emotion_color": "請從以下預定義顏色中選擇：'red' (恐懼/憤怒), 'yellow' (焦慮/緊張), 'green' (冷靜/放鬆), 'blue' (悲傷/低落), 'gray' (未知/一般)",
               "reply": "你原本準備要回應使用者的完整內容",
-              "suggested_replies": ["根據目前的問題，提供 2 到 4 個使用者可選擇後送出的繁體中文短句"],
+              "suggested_replies": ["提供 2 到 4 個使用者可回覆的繁體中文短句：answer 模式是接續討論的建議，clarify 模式是當前問題的可能答案"],
               "action_buttons": [],
               "interaction_mode": "answer",
               "clarifying_questions": []
             }
             `suggested_replies` 必須是使用者可能會回答的具體短句，不得與 `reply` 重複，也不得放入解釋文字。
-            需要追問時，優先每輪只問一個主要問題，`suggested_replies` 應直接回答該問題；例如詢問事件發生場域時，可提供「在工作場所」、「在學校」、「在公共場所」。
-            `suggested_replies` 一律提供 2 到 4 個不重複的非空短句。若已有適用的 Skill `options` 選單，前端優先呈現設定選項；`suggested_replies` 仍須提供 2 到 4 個相關的延伸回覆，不必複製選單選項。前端自動提供「其他」文字欄位，不要把「其他」加進選項。
+            只有為了回答目前需求而必須由使用者補充明確資訊缺口時，才使用 `interaction_mode: "clarify"` 並填寫具體的 `clarifying_questions`。優先每輪只問一個主要問題，`suggested_replies` 應直接回答該問題；例如詢問事件發生場域時，可提供「在工作場所」、「在學校」、「在公共場所」。
+            一般回答、延伸建議或選擇下一步使用 `interaction_mode: "answer"` 與 `clarifying_questions: []`；「想先聊哪個方向？」不構成回答所需的資訊缺口，不要為了顯示選單而標成 clarify。
+            answer 的建議回覆與 Skill `options` 會以一般輸入框上方的水平按鈕呈現，點選直接送出，沒有「其他」欄位或問題引用。只有 clarify 才使用取代一般輸入區的詢問選單，讓使用者選擇選項或填寫「其他」後確認送出，訊息顯示對應的問題與答案。
+            `suggested_replies` 一律提供 2 到 4 個不重複的非空短句。若已有適用的 Skill `options`，不必複製其選項，但仍須依目前模式提供相關短句。clarify 的「其他」文字欄位由前端自動提供，不要把「其他」加進選項。
             """
         ).strip(),
     ),
@@ -369,13 +371,19 @@ class OpenRouterAgent:
                     "不能只在 reply 承諾提供按鈕或把 action JSON 寫進 reply。"
                     "不得自行發明電話、網址、選項 ID 或其他 action；標籤與選項由伺服器補齊。"
                     "tel、url 按鈕必須由使用者點選才執行；不得宣稱已代為開啟或撥打。"
-                    "options 會在回覆下方原本的下一個問答建議位置直接呈現，"
-                    "以設定中的 title 作為問題，各組問題與選項分別對應；不是彈出視窗。"
-                    "使用者先選擇選項或填寫其他文字，再按送出才提交，點選選項不會立即送出。"
+                    "互動模式依回答目前需求是否有必要補充的資訊決定，不依是否顯示按鈕決定。"
+                    "只有存在必須由使用者回答的明確資訊缺口時，interaction_mode 才為 clarify，"
+                    "並以 clarifying_questions 輸出具體問題。"
+                    "一般回答、下一步建議與 Skill options 都可使用 answer，clarifying_questions 必須為空陣列。"
+                    "想先聊哪個方向、選擇接下來想了解的事等泛問，不構成回答所需的資訊缺口；"
+                    "不要為了產生選單而虛構追問或標記 clarify。"
+                    "answer 模式的 suggested_replies 與 options 是一般輸入框上方的水平建議按鈕，"
+                    "點選直接送出，保留一般輸入框，不提供其他欄位、確認選單或問題引用。"
+                    "只有 clarify 模式才以詢問選單取代一般輸入區；options 以設定中的 title 作為問題，"
+                    "各組問題與選項分別對應，使用者先選擇選項或填寫其他文字，再按送出才提交，"
+                    "點選選項不會立即送出，訊息會呈現問題與答案的對應。"
                     "不要宣稱已替使用者選定或送出答案。"
-                    "資訊不足而需要追問時，interaction_mode 必須為 clarify，並以 "
-                    "clarifying_questions 輸出具體問題；否則為 answer 且輸出空陣列。"
-                    "優先每輪只問一個主要問題，讓 suggested_replies 的每個短句都是該問題的具體可能答案，"
+                    "clarify 優先每輪只問一個主要問題，讓 suggested_replies 的每個短句都是該問題的具體可能答案，"
                     "例如問發生場域時提供在工作場所、在學校、在公共場所。"
                     "現有 suggested_replies 沒有逐題綁定欄位，不要用一組互不相干的短句回答多個問題。"
                     "若確實需要同時追問多題，選項短句必須能清楚回答整組問題，"
@@ -385,9 +393,10 @@ class OpenRouterAgent:
                     "只選用能回答當前問題的既有 Skill options，沒有適用選單時使用 "
                     "clarifying_questions 與 suggested_replies，不自行編造 options payload 或選單 ID。"
                     "suggested_replies 一律提供 2 到 4 個不重複的非空短句，不可省略或輸出空陣列。"
-                    "已有適用 options 選單時，前端優先呈現設定選項；suggested_replies 仍須提供 "
-                    "2 到 4 個相關的延伸回覆，不必重複選單選項。"
-                    "前端會自動提供其他文字欄位，不要在 suggested_replies 或 Skill 選項額外加入其他。"
+                    "已有適用 options 時，suggested_replies 仍須提供 2 到 4 個符合目前模式的相關短句，"
+                    "answer 可提供延伸回覆，clarify 則必須回應當前問題，不必重複選單選項。"
+                    "只有 clarify 的前端會自動提供其他文字欄位；"
+                    "不要在 suggested_replies 或 Skill 選項額外加入其他。"
                 ),
             }
         )

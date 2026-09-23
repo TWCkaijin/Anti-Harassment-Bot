@@ -85,7 +85,7 @@ describe("AdminPanel Skills actions", () => {
 
     fireEvent.change(screen.getByLabelText("新增按鈕類型"), { target: { value: "options" } });
     fireEvent.click(screen.getByRole("button", { name: "新增按鈕" }));
-    const options = within(screen.getByRole("group", { name: "按鈕 3 · 選項問答" }));
+    const options = within(screen.getByRole("group", { name: "按鈕 3 · 選項按鈕" }));
     fireEvent.change(options.getByLabelText("按鈕文字"), { target: { value: "選擇需求" } });
     fireEvent.change(options.getByLabelText(/^選項 ID/), { target: { value: "support_choice" } });
     fireEvent.change(options.getByLabelText("問題標題"), { target: { value: "你希望得到哪種協助？" } });
