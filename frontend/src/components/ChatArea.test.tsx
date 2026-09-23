@@ -223,6 +223,103 @@ describe("ChatArea follow-up integration", () => {
 });
 
 describe("ChatArea streaming presentation", () => {
+  it("renders the first reply character and grows horizontal suggestions before done", async () => {
+    const onSend = vi.fn();
+    const stream = assistantMessage({
+      content: "我", isStreaming: true,
+      streamingGuidance: { interaction_mode: "answer", suggested_replies: ["了"] },
+    });
+    const { rerender } = render(chat([stream], onSend, true));
+    expect(screen.getByText("我")).toBeVisible();
+    const suggestions = screen.getByRole("region", { name: "下一步建議" });
+    const first = within(suggestions).getByRole("button", { name: "了" });
+    expect(first).toBeDisabled();
+    expect(first.parentElement).toHaveClass("flex-nowrap", "overflow-x-auto");
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeVisible();
+    expect(screen.getByRole("button", { name: "停止回覆" })).toBeEnabled();
+    fireEvent.click(first);
+    expect(onSend).not.toHaveBeenCalled();
+
+    rerender(chat([{ ...stream, content: "我會陪您整理", streamingGuidance: {
+      interaction_mode: "answer", suggested_replies: ["了解申訴流程", "整理"],
+    } }], onSend, true));
+    expect(screen.getByText("我會陪您整理")).toBeVisible();
+    expect(screen.getByRole("button", { name: "了解申訴流程" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "整理" })).toBeDisabled();
+    expect(screen.queryByText("AI 需要更多您的資訊")).not.toBeInTheDocument();
+
+    rerender(chat([assistantMessage({
+      ...stream, isStreaming: false, streamingGuidance: undefined, actionButtons: [],
+      interactionMode: "answer", clarifyingQuestions: [], suggestedReplies: ["了解申訴流程", "整理事件"],
+    })], onSend));
+    fireEvent.click(screen.getByRole("button", { name: "整理事件" }));
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("整理事件");
+    await screen.findByText("已連線");
+  });
+
+  it("streams a clarification only after its mode and question arrive, then enables the final choices", async () => {
+    const onSend = vi.fn();
+    const stream = assistantMessage({ content: "我想先確認。", isStreaming: true, streamingGuidance: {
+      interaction_mode: "clarify", suggested_replies: ["在學"],
+    } });
+    const { rerender } = render(chat([stream], onSend, true));
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "下一步建議" })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeVisible();
+
+    rerender(chat([{ ...stream, streamingGuidance: {
+      interaction_mode: "clarify", clarifying_questions: ["事"],
+    } }], onSend, true));
+    expect(screen.getByText("事")).toBeVisible();
+    expect(screen.getByRole("region", { name: "AI 需要更多您的資訊" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).not.toBeVisible();
+    expect(screen.getByRole("button", { name: "停止回覆" })).toBeEnabled();
+
+    rerender(chat([{ ...stream, streamingGuidance: {
+      interaction_mode: "clarify", clarifying_questions: ["事情發生在哪裡？"], suggested_replies: ["在學校", "在工作"],
+    } }], onSend, true));
+    expect(screen.getByText("事情發生在哪裡？")).toBeVisible();
+    expect(screen.getByRole("radio", { name: "在工作" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "在學校" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "其他補充" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "送出回覆" })).toBeDisabled();
+    expect(screen.getByText("正在產生問題與選項…")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "隱藏" }));
+    expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeVisible();
+    expect(screen.getByRole("button", { name: "停止回覆" })).toBeEnabled();
+    expect(screen.queryByRole("region", { name: "下一步建議" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "顯示選單" }));
+
+    rerender(chat([assistantMessage({
+      ...stream, isStreaming: false, streamingGuidance: undefined, actionButtons: [],
+      interactionMode: "clarify", clarifyingQuestions: ["事情發生在哪裡？"], suggestedReplies: ["在學校", "在工作場所"],
+    })], onSend));
+    const choice = screen.getByRole("radio", { name: "在工作場所" });
+    expect(choice).toBeEnabled();
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
+    expect(onSend).toHaveBeenCalledExactlyOnceWith("事情發生在哪裡？\n在工作場所", undefined, undefined, {
+      answers: [{ question: "事情發生在哪裡？", answer: "在工作場所" }],
+    });
+    await screen.findByText("已連線");
+  });
+
+  it.each(["error", "cancelled", "different-session"])("removes the streaming preview after %s", async kind => {
+    const stream = assistantMessage({ content: "部分回覆", isStreaming: true, streamingGuidance: {
+      interaction_mode: "clarify", clarifying_questions: ["事情發生在"], suggested_replies: ["在學"],
+    } });
+    const { rerender } = render(chat([stream], vi.fn(), true));
+    expect(screen.getByText("事情發生在")).toBeVisible();
+    rerender(chat([kind === "different-session"
+      ? { id: "other-session-user", role: "user", timestamp: 1, content: "另一個對話" }
+      : { ...stream, isStreaming: false, isError: kind === "error", isCancelled: kind === "cancelled" }]));
+    expect(screen.queryByText("事情發生在")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeVisible();
+    await screen.findByText("已連線");
+  });
+
   it("replaces the initial typing indicator with the growing reply and waits for final metadata", async () => {
     const { rerender, container } = render(chat([{ id: "user-stream", role: "user", content: "請說明", timestamp: 1 }], vi.fn(), true));
     expect(container.querySelectorAll(".typing-dot")).toHaveLength(3);

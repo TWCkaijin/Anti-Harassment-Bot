@@ -27,25 +27,30 @@ interface ChatInputProps {
   isLoading?: boolean;
   suggestedReplies?: string[];
   replyPrompt?: ConversationMessage;
+  streamingPrompt?: Pick<ConversationMessage, "id" | "streamingGuidance">;
   onStop?: () => void;
 }
 
-export default function ChatInput({ onSend, isLoading, suggestedReplies = [], replyPrompt, onStop }: ChatInputProps) {
+export default function ChatInput({ onSend, isLoading, suggestedReplies = [], replyPrompt, streamingPrompt, onStop }: ChatInputProps) {
   const { t } = useI18n();
   const [value, setValue] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
 
-  const promptKey = replyPrompt?.id ?? JSON.stringify(suggestedReplies);
-  const panelReplies = replyPrompt?.suggestedReplies ?? suggestedReplies;
+  const preview = isLoading ? streamingPrompt?.streamingGuidance : undefined;
+  const promptKey = streamingPrompt?.id ?? replyPrompt?.id ?? JSON.stringify(suggestedReplies);
+  const panelReplies = preview ? preview.suggested_replies ?? [] : replyPrompt?.suggestedReplies ?? suggestedReplies;
+  const interactionMode = preview ? preview.interaction_mode : replyPrompt?.interactionMode;
+  const clarifyingQuestions = preview ? preview.clarifying_questions : replyPrompt?.clarifyingQuestions;
+  const actions = preview ? undefined : replyPrompt?.actionButtons;
   const { hasQuestion, optionActions, resources, suggestions } = getFollowUpData({
-    actions: replyPrompt?.actionButtons,
+    actions,
     suggestedReplies: panelReplies,
-    clarifyingQuestions: replyPrompt?.clarifyingQuestions,
-    interactionMode: replyPrompt?.interactionMode,
+    clarifyingQuestions,
+    interactionMode,
   });
-  const nextSteps = optionActions.length > 0
+  const nextSteps = preview && interactionMode !== "answer" ? [] : optionActions.length > 0
     ? optionActions.flatMap((action) => action.options)
     : suggestions.map((suggestion) => ({ label: suggestion, value: suggestion }));
   const [menuState, setMenuState] = useState({ key: promptKey, hidden: false, sent: false });
@@ -168,10 +173,11 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
           {hasQuestion && <FollowUpPanel
             key={promptKey}
             suggestedReplies={panelReplies}
-            actions={replyPrompt?.actionButtons}
-            interactionMode={replyPrompt?.interactionMode}
-            clarifyingQuestions={replyPrompt?.clarifyingQuestions}
+            actions={actions}
+            interactionMode={interactionMode}
+            clarifyingQuestions={clarifyingQuestions}
             isLoading={isLoading}
+            isStreaming={Boolean(preview)}
             onSend={(message, replyContext) => onSend(message, undefined, undefined, replyContext)}
             onHide={hideMenu}
             onSent={() => {

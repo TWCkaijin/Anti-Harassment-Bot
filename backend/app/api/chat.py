@@ -8,6 +8,7 @@ import base64
 import binascii
 import json
 import uuid
+from time import monotonic
 from typing import Literal
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
@@ -375,24 +376,56 @@ def _sse_event(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _stream_response(run_kwargs: dict, session_id: str, was_anonymized: bool, runtime_config):
+def _stream_response(
+    run_kwargs: dict,
+    session_id: str,
+    was_anonymized: bool,
+    runtime_config,
+    *,
+    request_started_at: float | None = None,
+):
+    started_at = request_started_at if request_started_at is not None else monotonic()
+
     @stream_with_context
     def generate():
-        # Run the async SDK on this WSGI request's thread. The bounded queue
-        # applies backpressure, and closing the response cancels upstream work.
+        # Acknowledge each callback only after WSGI takes its bytes. Merely
+        # queueing data doesn't yield: buffered SDK chunks or synchronous work
+        # could otherwise run ahead and delay the first visible character.
         with asyncio.Runner() as runner:
-            events: asyncio.Queue[tuple[str, dict]] = asyncio.Queue(maxsize=16)
-            sent_text = False
+            events: asyncio.Queue[tuple[str, dict, asyncio.Future | None]] = asyncio.Queue(
+                maxsize=1
+            )
+            sent_output = False
+            timings: dict[str, float] = {}
+            outcome = "cancelled"
+
+            def mark(name: str):
+                timings.setdefault(name, round((monotonic() - started_at) * 1000, 2))
+
+            async def emit(event: str, payload: dict):
+                acknowledged = runner.get_loop().create_future()
+                await events.put((event, payload, acknowledged))
+                await acknowledged
 
             async def emit_delta(text: str):
-                nonlocal sent_text
+                nonlocal sent_output
                 if text:
-                    sent_text = True
-                    await events.put(("delta", {"text": text}))
+                    sent_output = True
+                    mark("first_reply_ready_ms")
+                    await emit("delta", {"text": text})
+
+            async def emit_guidance(snapshot: dict):
+                nonlocal sent_output
+                if snapshot:
+                    sent_output = True
+                    mark("first_guidance_ready_ms")
+                    await emit("guidance", snapshot)
 
             async def produce():
                 try:
-                    result = await get_agent().run(**run_kwargs, on_reply_delta=emit_delta)
+                    result = await get_agent().run(
+                        **run_kwargs, on_reply_delta=emit_delta, on_guidance=emit_guidance
+                    )
                 except Exception as exc:
                     error_response, status = _agent_error(runtime_config, exc)
                 else:
@@ -403,28 +436,38 @@ def _stream_response(run_kwargs: dict, session_id: str, was_anonymized: bool, ru
                     except Exception as exc:
                         error_response, status = _retryable_error(runtime_config, exc)
                     else:
-                        await events.put(("done", payload))
+                        await events.put(("done", payload, None))
                         return
                 payload = error_response.get_json()
                 payload["status"] = status
-                if sent_text:
+                if sent_output:
                     # Restarting an answer after showing it would mix attempts.
                     payload["retryable"] = False
                     payload["detail"] = "回覆途中發生錯誤，內容尚未完成，請重新提問"
-                await events.put(("error", payload))
+                await events.put(("error", payload, None))
 
             task = runner.get_loop().create_task(produce())
             try:
                 yield ": connected\n\n"
                 while True:
                     try:
-                        event, payload = runner.run(
+                        event, payload, acknowledged = runner.run(
                             asyncio.wait_for(events.get(), timeout=STREAM_HEARTBEAT_SECONDS)
                         )
                     except TimeoutError:
                         yield ": keep-alive\n\n"
                         continue
+                    if event in {"delta", "guidance"}:
+                        mark(
+                            "first_reply_yield_ms"
+                            if event == "delta"
+                            else "first_guidance_yield_ms"
+                        )
+                    else:
+                        outcome = event
                     yield _sse_event(event, payload)
+                    if acknowledged is not None and not acknowledged.done():
+                        acknowledged.set_result(None)
                     if event in {"done", "error"}:
                         break
             finally:
@@ -434,6 +477,17 @@ def _stream_response(run_kwargs: dict, session_id: str, was_anonymized: bool, ru
                     await asyncio.gather(task, return_exceptions=True)
 
                 runner.run(finish())
+                logger.info(
+                    "Chat stream timing outcome=%s",
+                    outcome,
+                    extra={
+                        "event": "chat_stream_timing",
+                        "session_id": session_id,
+                        "outcome": outcome,
+                        "duration_ms": round((monotonic() - started_at) * 1000, 2),
+                        **timings,
+                    },
+                )
 
     return Response(
         generate(),
@@ -451,6 +505,7 @@ def chat():
     發送對話訊息
     接收使用者訊息與對話歷史，執行 PII 匿名化後透過 OpenRouter Agent 呼叫 AI，回傳回覆。
     """
+    request_started_at = monotonic()
     try:
         req_data = request.get_json()
         if not req_data:
@@ -508,7 +563,13 @@ def chat():
     }
     session_id = str(uuid.uuid4())
     if req_obj.stream:
-        return _stream_response(run_kwargs, session_id, was_anonymized, runtime_config)
+        return _stream_response(
+            run_kwargs,
+            session_id,
+            was_anonymized,
+            runtime_config,
+            request_started_at=request_started_at,
+        )
 
     try:
         result = asyncio.run(get_agent().run(**run_kwargs))

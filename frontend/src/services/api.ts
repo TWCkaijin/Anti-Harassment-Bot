@@ -55,6 +55,13 @@ export interface ChatResponse {
   debug_tool_calls?: DebugToolCall[];
 }
 
+/** Cumulative, display-only preview. Trusted actions arrive in the final response. */
+export interface ChatGuidance {
+  interaction_mode?: "answer" | "clarify";
+  clarifying_questions?: string[];
+  suggested_replies?: string[];
+}
+
 export interface TelActionButton {
   action: "tel";
   phone_number: string;
@@ -268,6 +275,7 @@ async function readChatStream(
   response: Response,
   signal?: AbortSignal,
   onDelta?: (text: string) => void,
+  onGuidance?: (guidance: ChatGuidance) => void,
 ): Promise<ChatResponse> {
   if (!response.body) throw invalidStream();
   const reader = response.body.getReader();
@@ -285,13 +293,27 @@ async function readChatStream(
       const eventData = data.join("\n");
       event = "";
       data = [];
-      if (!eventData || !["delta", "done", "error"].includes(eventName)) return;
+      if (!eventData || !["delta", "guidance", "done", "error"].includes(eventName)) return;
       let payload: unknown;
       try { payload = JSON.parse(eventData); } catch { throw invalidStream(); }
       if (!isRecord(payload)) throw invalidStream();
       if (eventName === "delta") {
         if (typeof payload.text !== "string") throw invalidStream();
         if (payload.text) onDelta?.(payload.text);
+      } else if (eventName === "guidance") {
+        const guidance: ChatGuidance = {};
+        if (payload.interaction_mode !== undefined) {
+          if (payload.interaction_mode !== "answer" && payload.interaction_mode !== "clarify") throw invalidStream();
+          guidance.interaction_mode = payload.interaction_mode;
+        }
+        for (const key of ["clarifying_questions", "suggested_replies"] as const) {
+          const items = payload[key];
+          if (items === undefined) continue;
+          if (!Array.isArray(items) || !items.every(item => typeof item === "string")) throw invalidStream();
+          guidance[key] = items;
+        }
+        // Never promote model-generated actions or other unvalidated metadata.
+        if (Object.keys(guidance).length > 0) onGuidance?.(guidance);
       } else if (eventName === "done") {
         if (typeof payload.reply !== "string" || !Array.isArray(payload.suggested_replies)
           || !Array.isArray(payload.action_buttons) || !Array.isArray(payload.clarifying_questions)
@@ -354,6 +376,7 @@ export async function sendChat(
   request: ChatRequest,
   signal?: AbortSignal,
   onDelta?: (text: string) => void,
+  onGuidance?: (guidance: ChatGuidance) => void,
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/v1/chat/`, {
     method: "POST",
@@ -366,7 +389,7 @@ export async function sendChat(
   if (!response.headers.get("content-type")?.includes("text/event-stream")) {
     return response.json() as Promise<ChatResponse>;
   }
-  return readChatStream(response, signal, onDelta);
+  return readChatStream(response, signal, onDelta, onGuidance);
 }
 
 /**

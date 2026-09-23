@@ -13,6 +13,7 @@ interface FollowUpPanelProps {
   clarifyingQuestions?: string[];
   interactionMode?: "answer" | "clarify";
   isLoading?: boolean;
+  isStreaming?: boolean;
   onSend: (message: string, replyContext?: ReplyContext) => void;
   onHide?: () => void;
   onSent?: () => void;
@@ -39,6 +40,7 @@ export default function FollowUpPanel({
   clarifyingQuestions = [],
   interactionMode = "answer",
   isLoading = false,
+  isStreaming = false,
   onSend,
   onHide,
   onSent,
@@ -123,7 +125,7 @@ export default function FollowUpPanel({
   if (sent || !hasQuestion) return null;
 
   return (
-    <section aria-labelledby={`${panelId}-heading`} onKeyDown={handlePanelKeyDown} className="my-3 overflow-hidden rounded-2xl border border-primary/15 bg-white/95 shadow-sm">
+    <section aria-labelledby={`${panelId}-heading`} aria-busy={isStreaming} onKeyDown={handlePanelKeyDown} className="my-3 overflow-hidden rounded-2xl border border-primary/15 bg-white/95 shadow-sm">
       <div className="flex items-center justify-between gap-3 border-b border-primary/10 px-4 py-2">
         <h2 id={`${panelId}-heading`} className="text-sm font-semibold text-on-surface">{heading}</h2>
         <div className="flex shrink-0 items-center gap-2">
@@ -201,7 +203,7 @@ export default function FollowUpPanel({
               </nav>
             )}
             <p id={`${panelId}-status`} role={statusError ? "alert" : undefined} className={`text-[11px] ${statusError ? "text-error" : "text-on-surface/45"}`}>
-              {statusError ?? (groups.length > 1 ? `已填 ${groups.filter((group) => getAnswer(group).trim()).length} / ${groups.length} 題` : "選好後送出，也可以自由補充")}
+              {statusError ?? (isStreaming ? "正在產生問題與選項…" : groups.length > 1 ? `已填 ${groups.filter((group) => getAnswer(group).trim()).length} / ${groups.length} 題` : "選好後送出，也可以自由補充")}
             </p>
           </div>
           <button

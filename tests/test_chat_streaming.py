@@ -301,3 +301,133 @@ def test_real_chat_stream_passes_through_function_wrapper_without_buffering(monk
     state["continue"].set()
     assert events(b"".join(iterator))[-1][0] == "done"
     response.close()
+
+
+def test_first_character_is_yielded_before_producer_can_continue(monkeypatch):
+    state = {}
+
+    class Agent:
+        async def run(self, on_reply_delta, **kwargs):
+            await on_reply_delta("第")
+            # Cached SDK chunks and synchronous work can execute without any
+            # additional await. The HTTP consumer must get the first char first.
+            state["producer_continued"] = True
+            await on_reply_delta("一個字")
+            return result(reply="第一個字")
+
+    monkeypatch.setattr(chat_module, "get_agent", Agent)
+    response = post_stream()
+    iterator = iter(response.response)
+    assert next(iterator) == b": connected\n\n"
+    try:
+        assert events(next(iterator)) == [("delta", {"text": "第"})]
+        assert "producer_continued" not in state
+    finally:
+        response.close()
+
+
+def test_guidance_streams_before_done_and_preserves_partial_question_text(monkeypatch):
+    state = {}
+
+    class Agent:
+        async def run(self, on_reply_delta, on_guidance, **kwargs):
+            await on_reply_delta("我想先了解情況。")
+            await on_guidance({"interaction_mode": "clarify", "clarifying_questions": ["在哪"]})
+            state["continued"] = True
+            await on_guidance(
+                {
+                    "interaction_mode": "clarify",
+                    "clarifying_questions": ["在哪裡發生？"],
+                    "suggested_replies": ["在工作", "在學校"],
+                }
+            )
+            return result(
+                reply="我想先了解情況。",
+                interaction_mode="clarify",
+                clarifying_questions=["在哪裡發生？"],
+            )
+
+    monkeypatch.setattr(chat_module, "get_agent", Agent)
+    response = post_stream()
+    iterator = iter(response.response)
+    next(iterator)
+    assert events(next(iterator))[0][0] == "delta"
+    assert events(next(iterator)) == [
+        ("guidance", {"interaction_mode": "clarify", "clarifying_questions": ["在哪"]})
+    ]
+    assert "continued" not in state
+    remaining = events(b"".join(iterator))
+    assert [name for name, _ in remaining] == ["guidance", "done"]
+    assert remaining[0][1]["suggested_replies"][0] == "在工作"
+    response.close()
+
+
+def test_guidance_only_failure_does_not_auto_replay(monkeypatch):
+    class Agent:
+        async def run(self, on_guidance, **kwargs):
+            await on_guidance({"interaction_mode": "answer", "suggested_replies": ["我想"]})
+            raise TimeoutError("generation interrupted")
+
+    monkeypatch.setattr(chat_module, "get_agent", Agent)
+    response = post_stream()
+    frames = events(response.get_data())
+    assert [name for name, _ in frames] == ["guidance", "error"]
+    assert frames[-1][1]["retryable"] is False
+    response.close()
+
+
+def test_stream_timing_records_ready_and_yield_without_message_content(monkeypatch, caplog):
+    class Agent:
+        async def run(self, on_reply_delta, on_guidance, **kwargs):
+            await on_reply_delta("private-generated-text")
+            await on_guidance(
+                {"interaction_mode": "answer", "suggested_replies": ["private-option"]}
+            )
+            return result()
+
+    monkeypatch.setattr(chat_module, "get_agent", Agent)
+    with caplog.at_level("INFO"):
+        response = post_stream()
+        response.get_data()
+        response.close()
+    record = next(r for r in caplog.records if getattr(r, "event", None) == "chat_stream_timing")
+    assert record.outcome == "done"
+    assert 0 <= record.first_reply_ready_ms <= record.first_reply_yield_ms <= record.duration_ms
+    assert (
+        0 <= record.first_guidance_ready_ms <= record.first_guidance_yield_ms <= record.duration_ms
+    )
+    assert "private-generated-text" not in caplog.text
+    assert "private-option" not in caplog.text
+
+
+def test_openrouter_first_content_reaches_http_before_next_ready_sdk_chunk(monkeypatch):
+    import backend.app.agents.openrouter_agent as agent_module
+    from tests.test_agent import FakeCompletions, make_agent
+    from tests.test_agent_streaming import FakeStream, chunk
+
+    state = []
+
+    async def before_chunk(index):
+        state.append(index)
+
+    raw = result(reply="你好，慢慢說。").reply
+    boundary = raw.index("好")
+    stream = FakeStream(
+        [chunk(raw[:boundary]), chunk(raw[boundary:]), chunk(finish="stop")],
+        before_chunk=before_chunk,
+    )
+    completions = FakeCompletions([stream])
+    monkeypatch.setattr(chat_module, "get_agent", lambda: make_agent(completions))
+    monkeypatch.setattr(agent_module, "get_runtime_config", chat_module.get_runtime_config)
+    monkeypatch.setattr(agent_module, "get_matching_scenario_scripts", lambda *args, **kwargs: ())
+    response = post_stream()
+    iterator = iter(response.response)
+    next(iterator)
+    try:
+        assert events(next(iterator)) == [("delta", {"text": "你"})]
+        assert state == [0]
+        assert completions.calls[0]["stream"] is True
+        assert not stream.completed
+    finally:
+        response.close()
+    assert stream.closed

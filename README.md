@@ -103,7 +103,7 @@ VITE_API_BASE_URL=http://127.0.0.1:5000
 
 ### 串流聊天 API
 
-前端送出 `POST /v1/chat/` 時加入 `"stream": true`，使用 `fetch` 讀取 `text/event-stream`（SSE），AI 回覆文字會隨模型輸出逐段顯示。情緒、來源、建議回覆、Actions 與釐清問題等 metadata 統一放在最後：完整回覆通過結構驗證、Actions 由已核准的 Skills 解析後，才顯示情緒標籤與可操作選單。一般下一步建議與 AI 明確追問仍維持各自的呈現方式。
+前端送出 `POST /v1/chat/` 時加入 `"stream": true`，使用 `fetch` 讀取 `text/event-stream`（SSE），AI 回覆文字會隨模型輸出逐段顯示。回覆文字的第一個可解碼片段立即交給 HTTP 串流，再讀取下一段，不等待全文或其他欄位。後續問題與建議選項也以 `guidance` 事件逐步顯示；生成中的選項暫不可操作，停止回覆仍可使用。完整回覆通過結構驗證、Actions 由已核准的 Skills 解析後，才套用情緒與來源並開放選單操作。一般下一步建議仍為水平按鈕，只有明確的 AI 追問才顯示詢問面板。
 
 ```bash
 curl --no-buffer http://127.0.0.1:5000/v1/chat/ \
@@ -117,12 +117,24 @@ curl --no-buffer http://127.0.0.1:5000/v1/chat/ \
 | Event | `data` 內容 | 前端行為 |
 | --- | --- | --- |
 | `delta` | `{"text":"新增的回覆文字"}` | 將文字附加到同一則 AI 訊息 |
+| `guidance` | 累積快照，可含 `interaction_mode`、`clarifying_questions`、`suggested_replies`；陣列最後一項可能尚未生成完畢 | 以整份快照更新問題與選項預覽，不附加重複文字；等 `done` 後才可點選 |
 | `done` | 完整聊天回覆：`reply`、`session_id`、`anonymized`、`rag_used`、`emotion`、`emotion_color`、`suggested_replies`、`action_buttons`、`interaction_mode`、`clarifying_questions`；開發模式可另含 `debug_tool_calls` | 以驗證後的 `reply` 定稿，套用 metadata，結束串流 |
 | `error` | `code`、`detail`、`retryable`、`status`；依錯誤可另含 `error_id`，非 production 的開發模式可另含 `debug_message` | 顯示錯誤並結束串流，不顯示未完成的選單 |
 
-開始串流前的驗證、維護模式及存取限制錯誤仍回傳原本的 HTTP 狀態碼與 JSON。開始串流後 HTTP headers 已送出，錯誤以 `error` event 的 `status` 表達，並保留伺服器的 ERROR 日誌。已顯示部分文字時不自動重試，避免混入另一輪生成內容；未收到 `done` 的回覆視為未完成。不傳 `stream` 或設為 `false` 時，仍回傳相容的完整 JSON 回覆。
+開始串流前的驗證、維護模式及存取限制錯誤仍回傳原本的 HTTP 狀態碼與 JSON。開始串流後 HTTP headers 已送出，錯誤以 `error` event 的 `status` 表達，並保留伺服器的 ERROR 日誌。已顯示回覆或引導文字時不自動重試，避免混入另一輪生成內容；發生錯誤或取消時移除尚未定稿的選單，未收到 `done` 的回覆視為未完成。不傳 `stream` 或設為 `false` 時，仍回傳相容的完整 JSON 回覆。
 
 部署 workflow 已將 `VITE_API_BASE_URL` 指向各環境的 `cloudfunctions.net/api` 或 `api_preview`，串流請求直接送到 Functions，不經 Hosting 的 `/api/**` rewrite。Firebase wrapper 保留 WSGI 串流及關閉回呼，避免一次讀完回覆；關閉連線會清理上游生成工作。平台支援可參考 [Cloud Run HTTP/SSE streaming](https://cloud.google.com/blog/products/serverless/cloud-run-now-supports-http-grpc-server-streaming) 與 [Firebase Functions streaming response limits](https://firebase.google.com/docs/functions/quotas)。部署後可對上表的 API URL 執行同一個 `curl --no-buffer` 請求，確認首段 `delta` 在 `done` 之前抵達；本地測試無法代替部署環境的串流驗證。
+
+#### 首字延遲診斷
+
+`stream: true` 已涵蓋 OpenRouter 呼叫與 API → 瀏覽器的每一段。傳送的是模型產生的可見內容；JSON 結構、工具參數與 reasoning 不會顯示成回覆。RAG 回覆仍須先完成必要檢索；多個資料集合採並行查詢。程式不會以固定開場白冒充 first token，也不會覆寫後台設定的模型或推理強度。
+
+應用程式以 INFO 記錄兩種不含聊天內容的計時事件（查詢時需包含 INFO）：
+
+- `jsonPayload.event="openrouter_stream_timing"`：各模型呼叫的 `phase`、`first_upstream_chunk_ms`、`first_reply_delta_ms`、`duration_ms`，比較上游開始回傳到可見回覆的時間。
+- `jsonPayload.event="chat_stream_timing"`：從 chat handler 開始計算的 `first_reply_ready_ms`、`first_reply_yield_ms`、`first_guidance_ready_ms`、`first_guidance_yield_ms`、`duration_ms`。ready 到 yield 的差距是應用程式轉交 WSGI 的延遲；不是使用者網路延遲或瀏覽器實際繪製時間。未到達的階段不會有欄位。
+
+模型排隊、推理與檢索發生在可見文字之前，無法只靠串流完全消除；部署後應以計時日誌及瀏覽器 Network 的實際事件抵達時間確認。OpenRouter 的 TTFT 定義與排隊／prefill 因素見[官方延遲文件](https://openrouter.ai/docs/guides/best-practices/latency-and-performance)。
 
 ## 測試與檢查
 

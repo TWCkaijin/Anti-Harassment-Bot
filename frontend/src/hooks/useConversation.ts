@@ -9,6 +9,7 @@ import {
   ApiError,
   sendChat,
   type ActionButton,
+  type ChatGuidance,
   type ChatResponse,
   type DebugToolCall,
   type RagInfo,
@@ -35,6 +36,7 @@ export interface ConversationMessage {
   isError?: boolean;
   isCancelled?: boolean;
   isStreaming?: boolean;
+  streamingGuidance?: ChatGuidance;
   interruptionReason?: string;
   emotion?: string; // 加入的情緒標籤
   emotionColor?: string; // 情緒對應的顏色
@@ -276,6 +278,20 @@ export function useConversation(sessionId?: string) {
       const assistantId = generateId();
       const assistantTimestamp = Date.now();
       let partialText = "";
+      let partialGuidance: ChatGuidance | undefined;
+      let hasVisibleGuidance = false;
+      const publishStream = () => {
+        progressTimers.forEach(timer => window.clearTimeout(timer));
+        setSessionRetryStatus(targetSessionId, null);
+        setStreamingBySession(previous => ({
+          ...previous,
+          [targetSessionId]: {
+            id: assistantId, role: "assistant", content: partialText,
+            timestamp: assistantTimestamp, isStreaming: true,
+            ...(partialGuidance ? { streamingGuidance: partialGuidance } : {}),
+          },
+        }));
+      };
       const commitAssistant = (assistant: ConversationMessage, response?: ChatResponse) => {
         setSessions(prev => prev.map(session => {
           // Clearing/deleting a conversation must not resurrect an in-flight turn.
@@ -295,26 +311,31 @@ export function useConversation(sessionId?: string) {
             response = await sendChat(request, abortController.signal, text => {
               if (abortController.signal.aborted || !text) return;
               partialText += text;
-              progressTimers.forEach(timer => window.clearTimeout(timer));
-              setSessionRetryStatus(targetSessionId, null);
-              setStreamingBySession(previous => ({
-                ...previous,
-                [targetSessionId]: {
-                  id: assistantId, role: "assistant", content: partialText,
-                  timestamp: assistantTimestamp, isStreaming: true,
-                },
-              }));
+              publishStream();
+            }, guidance => {
+              if (abortController.signal.aborted) return;
+              partialGuidance = guidance;
+              hasVisibleGuidance ||= guidance.interaction_mode === "clarify"
+                ? Boolean(guidance.clarifying_questions?.some(question => question.trim()))
+                : guidance.interaction_mode === "answer" && Boolean(guidance.suggested_replies?.some(reply => reply.trim()));
+              publishStream();
             });
             break;
           } catch (err) {
             if (
-              !abortController.signal.aborted && !partialText &&
+              !abortController.signal.aborted && !partialText && !hasVisibleGuidance &&
               err instanceof ApiError && err.retryable &&
-              // Never automatically replay a response after any text was shown,
+              // Never automatically replay after reply or guidance text was shown,
               // or a rate-limited request before its Retry-After window.
               err.status !== 429 && attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
             ) {
               progressTimers.forEach(timer => window.clearTimeout(timer));
+              partialGuidance = undefined;
+              setStreamingBySession(previous => {
+                const next = { ...previous };
+                delete next[targetSessionId];
+                return next;
+              });
               setSessionRetryStatus(targetSessionId, RETRY_MESSAGE);
               await delay(500 * (attempt + 1), abortController.signal);
               continue;

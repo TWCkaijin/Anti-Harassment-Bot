@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from textwrap import dedent
+from time import monotonic
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -259,6 +260,8 @@ def _clean_final_response(final_text: str | None) -> str:
     cleaned = final_text.strip()
     if cleaned.startswith("```json"):
         cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
     if cleaned.endswith("```"):
         cleaned = cleaned[:-3]
     return cleaned.strip()
@@ -350,20 +353,29 @@ class OpenRouterAgent:
         image_base64: str | None = None,
         use_rag: bool = True,
         on_reply_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_guidance: Callable[[dict], Awaitable[None]] | None = None,
     ) -> AgentResult:
         # WSGI owns a separate event loop per request. A fresh streaming transport
         # prevents pooled sockets from outliving their loop, including cancellation.
-        if on_reply_delta is not None and isinstance(self.client, AsyncOpenAI):
+        if (on_reply_delta is not None or on_guidance is not None) and isinstance(
+            self.client, AsyncOpenAI
+        ):
             async with AsyncOpenAI(
                 base_url=settings.openrouter_base_url,
                 api_key=settings.openrouter_api_key,
                 timeout=settings.openrouter_request_timeout_seconds,
             ) as client:
                 return await self._run(
-                    user_message, history, image_base64, use_rag, on_reply_delta, client
+                    user_message,
+                    history,
+                    image_base64,
+                    use_rag,
+                    on_reply_delta,
+                    on_guidance,
+                    client,
                 )
         return await self._run(
-            user_message, history, image_base64, use_rag, on_reply_delta, self.client
+            user_message, history, image_base64, use_rag, on_reply_delta, on_guidance, self.client
         )
 
     async def _run(
@@ -373,6 +385,7 @@ class OpenRouterAgent:
         image_base64: str | None,
         use_rag: bool,
         on_reply_delta: Callable[[str], Awaitable[None]] | None,
+        on_guidance: Callable[[dict], Awaitable[None]] | None,
         client: AsyncOpenAI,
     ) -> AgentResult:
         """
@@ -397,8 +410,10 @@ class OpenRouterAgent:
             {
                 "role": "system",
                 "content": (
-                    "最終 JSON 請先輸出 reply 欄位，接著輸出情緒、互動模式、問題與動作等其他欄位；"
-                    "reply 會即時顯示，其他欄位會在完整回覆通過驗證後顯示。"
+                    "最終 JSON 請依序輸出 reply、interaction_mode、clarifying_questions、"
+                    "suggested_replies、action_buttons、emotion、emotion_color。"
+                    "reply 的文字會立即逐段顯示，接著逐段顯示追問或下一步建議；"
+                    "情緒與動作等其他欄位在完整回覆通過驗證後才套用。"
                     "需要呼叫檢索工具時，該輪只產生 tool_calls，不要先輸出 reply 或其他回覆內容。"
                     "回覆 JSON 必須包含 action_buttons；沒有適合的動作時輸出空陣列。"
                     "依目前 Skill 的情境指令，從可用 action_buttons 選擇最多三個相關動作，"
@@ -492,7 +507,9 @@ class OpenRouterAgent:
                 create_kwargs["tools"] = [_RAG_TOOL]
                 create_kwargs["tool_choice"] = "required" if requires_grounded_retrieval else "auto"
 
-            response_message = await self._create_message(client, create_kwargs, on_reply_delta)
+            response_message = await self._create_message(
+                client, create_kwargs, on_reply_delta, on_guidance
+            )
             tool_calls = response_message.tool_calls
             rag_used = False
             sources: list[dict[str, Any]] = []
@@ -599,7 +616,7 @@ class OpenRouterAgent:
                         }
                     }
                 final_message = await self._create_message(
-                    client, second_create_kwargs, on_reply_delta
+                    client, second_create_kwargs, on_reply_delta, on_guidance
                 )
                 if final_message.tool_calls:
                     raise AgentContractError("OpenRouter returned tools in the final response")
@@ -630,11 +647,15 @@ class OpenRouterAgent:
         client: AsyncOpenAI,
         create_kwargs: dict[str, Any],
         on_reply_delta: Callable[[str], Awaitable[None]] | None,
+        on_guidance: Callable[[dict], Awaitable[None]] | None = None,
     ):
-        if on_reply_delta is None:
+        if on_reply_delta is None and on_guidance is None:
             response = await client.chat.completions.create(**create_kwargs)
             return response.choices[0].message
 
+        started_at = monotonic()
+        first_chunk_ms = None
+        first_reply_ms = None
         stream = await client.chat.completions.create(**create_kwargs, stream=True)
         content: list[str] = []
         content_length = 0
@@ -656,6 +677,12 @@ class OpenRouterAgent:
                         raise AgentContractError("OpenRouter refused the streamed response")
                     text_delta = getattr(delta, "content", None)
                     calls_delta = getattr(delta, "tool_calls", None) or []
+                    has_reasoning = any(
+                        getattr(delta, field, None)
+                        for field in ("reasoning", "reasoning_content", "reasoning_details")
+                    )
+                    if first_chunk_ms is None and (text_delta or calls_delta or has_reasoning):
+                        first_chunk_ms = round((monotonic() - started_at) * 1000, 2)
                     if finish_reason is not None and (text_delta or calls_delta):
                         raise AgentContractError(
                             "OpenRouter returned data after the stream finished"
@@ -703,7 +730,7 @@ class OpenRouterAgent:
                                 pending = "".join(content)
                                 # Some tool providers emit a preamble. Hold it until
                                 # tools arrive; only structured final replies stream.
-                                if pending.lstrip().startswith("{"):
+                                if pending.lstrip().startswith(("{", "`")):
                                     decoder = ReplyJSONDecoder()
                                     reply_delta = decoder.feed(pending)
                                 else:
@@ -712,7 +739,15 @@ class OpenRouterAgent:
                                 reply_delta = decoder.feed(text_delta)
                             if reply_delta:
                                 emitted = True
-                                await on_reply_delta(reply_delta)
+                                if first_reply_ms is None:
+                                    first_reply_ms = round((monotonic() - started_at) * 1000, 2)
+                                if on_reply_delta is not None:
+                                    await on_reply_delta(reply_delta)
+                            if decoder is not None:
+                                guidance = decoder.take_guidance()
+                                if guidance is not None and on_guidance is not None:
+                                    emitted = True
+                                    await on_guidance(guidance)
                     if choice.finish_reason is not None:
                         finish_reason = choice.finish_reason
                         if finish_reason not in {"stop", "tool_calls"}:
@@ -740,11 +775,34 @@ class OpenRouterAgent:
                 decoder = ReplyJSONDecoder()
                 reply_delta = decoder.feed(text)
                 if reply_delta:
-                    await on_reply_delta(reply_delta)
+                    if first_reply_ms is None:
+                        first_reply_ms = round((monotonic() - started_at) * 1000, 2)
+                    if on_reply_delta is not None:
+                        await on_reply_delta(reply_delta)
+                guidance = decoder.take_guidance()
+                if guidance is not None and on_guidance is not None:
+                    await on_guidance(guidance)
             decoder.finish()
             return ChatCompletionMessage(role="assistant", content=text)
         except StreamReplyError as exc:
             raise AgentContractError(str(exc)) from exc
         finally:
+            logger.info(
+                "OpenRouter stream timing",
+                extra={
+                    "event": "openrouter_stream_timing",
+                    "model": create_kwargs["model"],
+                    "phase": "after_tools"
+                    if any(
+                        isinstance(message, dict) and message.get("role") == "tool"
+                        for message in create_kwargs["messages"]
+                    )
+                    else "initial",
+                    "tool_choice": create_kwargs.get("tool_choice", "none"),
+                    "first_upstream_chunk_ms": first_chunk_ms,
+                    "first_reply_delta_ms": first_reply_ms,
+                    "duration_ms": round((monotonic() - started_at) * 1000, 2),
+                },
+            )
             with suppress(Exception):
                 await stream.close()
