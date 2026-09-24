@@ -1,3 +1,4 @@
+import { trackAnalytics } from "../services/analytics";
 import { useRef, useState } from "react";
 
 import type { ActionOption } from "../services/api";
@@ -25,6 +26,7 @@ export default function NextStepSuggestions({ suggestions, isLoading, onSend }: 
       setSendError("建議未能送出，請再試一次。");
       return;
     }
+    trackAnalytics("next_step_selected");
     setSent(true);
   };
 

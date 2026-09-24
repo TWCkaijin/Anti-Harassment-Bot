@@ -1,3 +1,4 @@
+import { trackAnalytics } from "../services/analytics";
 import type { ActionButton } from "../services/api";
 import { getSafeResourceActions } from "./actionButtonValidation";
 import MaterialIcon from "./MaterialIcon";
@@ -21,6 +22,7 @@ export default function ActionButtons({ actions }: ActionButtonsProps) {
           href={action.action === "tel" ? `tel:${action.phone_number}` : action.url}
           target={action.action === "url" ? "_blank" : undefined}
           rel={action.action === "url" ? "noopener noreferrer" : undefined}
+          onClick={() => trackAnalytics("resource_action_clicked", { action_type: action.action })}
           className={buttonClassName}
         >
           <span aria-hidden="true"><MaterialIcon icon={action.action === "tel" ? "call" : "open_in_new"} size={17} /></span>

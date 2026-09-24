@@ -1,3 +1,4 @@
+import { trackAnalytics } from "../services/analytics";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +14,8 @@ vi.mock("../services/api", async () => {
   return { ...actual, sendChat: vi.fn() };
 });
 
+vi.mock("../services/analytics", () => ({ hasAnalyticsConsent: () => true, trackAnalytics: vi.fn() }));
+
 const successfulResponse: ChatResponse = {
   reply: "我會陪你整理下一步。",
   session_id: "server-session",
@@ -27,6 +30,7 @@ const successfulResponse: ChatResponse = {
 beforeEach(() => {
   window.localStorage.clear();
   vi.mocked(sendChat).mockReset();
+  vi.mocked(trackAnalytics).mockClear();
   vi.useFakeTimers();
 });
 
@@ -484,5 +488,25 @@ describe("useConversation streamed replies", () => {
     await act(async () => { result.current.clearCurrentSession(); await request; });
     expect(result.current.messages).toEqual([]);
     expect(result.current.isLoading).toBe(false);
+  });
+});
+
+
+describe("chat analytics integration", () => {
+  it("records streamed text and completion once without sending content or session IDs", async () => {
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("private-session-id"));
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("private-user-text"); });
+    act(() => pending.delta("private-reply"));
+    act(() => pending.delta("private-reply-part-two"));
+    await act(async () => { pending.resolve(successfulResponse); await request; });
+    const events = vi.mocked(trackAnalytics).mock.calls;
+    expect(events.filter(([event]) => event === "chat_request_started")).toHaveLength(1);
+    expect(events.filter(([event]) => event === "chat_first_token")).toHaveLength(1);
+    expect(events.filter(([event]) => event === "chat_request_finished")).toHaveLength(1);
+    expect(trackAnalytics).toHaveBeenCalledWith("chat_request_finished", expect.objectContaining({ outcome: "success", streamed: true }));
+    expect(JSON.stringify(events)).not.toContain("private-");
+    expect(JSON.stringify(events)).not.toContain(successfulResponse.reply);
   });
 });

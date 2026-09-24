@@ -1,8 +1,11 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { trackAnalytics } from "../services/analytics";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ActionButton } from "../services/api";
 import ActionButtons from "./ActionButtons";
+
+vi.mock("../services/analytics", () => ({ trackAnalytics: vi.fn() }));
 
 describe("ActionButtons", () => {
   it("retains legacy telephone links and opens valid external links in a new tab", () => {
@@ -47,4 +50,13 @@ describe("ActionButtons", () => {
     const { container } = render(<ActionButtons actions={null as unknown as ActionButton[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+});
+
+
+it("records only the resource action type on click", () => {
+  render(<ActionButtons actions={[{ action: "url", label: "private label", url: "https://example.org/private-resource" }]} />);
+  const link = screen.getByRole("link");
+  link.addEventListener("click", event => event.preventDefault());
+  fireEvent.click(link);
+  expect(trackAnalytics).toHaveBeenCalledExactlyOnceWith("resource_action_clicked", { action_type: "url" });
 });
