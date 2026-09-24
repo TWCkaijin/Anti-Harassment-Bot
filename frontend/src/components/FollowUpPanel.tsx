@@ -1,3 +1,4 @@
+import { trackAnalytics } from "../services/analytics";
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 
 import { getUserMessageValidationError } from "../hooks/conversationHistory";
@@ -100,6 +101,10 @@ export default function FollowUpPanel({
       setSubmitError("回覆未能送出，請再試一次。");
       return;
     }
+    trackAnalytics("clarification_submitted", {
+      question_count: groups.length,
+      used_other: groups.some(group => answers[group.key]?.selected === "other"),
+    });
     setSent(true);
     onSent?.();
   };

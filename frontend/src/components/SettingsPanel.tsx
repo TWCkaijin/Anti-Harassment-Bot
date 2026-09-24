@@ -1,3 +1,4 @@
+import { hasAnalyticsConsent, isAnalyticsConfigured, setAnalyticsConsent } from "../services/analytics";
 /**
  * SettingsPanel — 設定面板（側拉抽屜）
  * 語言切換、色彩組合（暫時佔位）、本地紀錄管理、匯出對話。
@@ -21,6 +22,7 @@ export default function SettingsPanel({
   onClearAll,
 }: SettingsPanelProps) {
   const { t, locale, setLocale } = useI18n();
+  const [analyticsEnabled, setAnalyticsEnabled] = useState(hasAnalyticsConsent);
   const [showConfirm, setShowConfirm] = useState(false);
 
   // ── 匯出為 JSON ──
@@ -129,6 +131,19 @@ export default function SettingsPanel({
               </button>
             </div>
           </section>
+
+          {isAnalyticsConfigured() && <section>
+            <label className="flex items-center gap-3 text-sm font-semibold text-on-surface">
+              <input type="checkbox" checked={analyticsEnabled} onChange={event => {
+                setAnalyticsConsent(event.target.checked);
+                setAnalyticsEnabled(hasAnalyticsConsent());
+              }} />
+              分享使用統計（選用）
+            </label>
+            <p className="mt-2 text-xs text-on-surface-variant leading-relaxed">
+              開啟後使用 Google Analytics（含分析 Cookie）記錄回覆耗時、錯誤次數及按鈕使用類型；不傳送對話、圖片、情緒或聯絡資訊。可隨時關閉，關閉不會刪除已送出的統計。
+            </p>
+          </section>}
 
           {/* ── 本地紀錄 ── */}
           <section>

@@ -3,6 +3,7 @@
  * 使用 localStorage 在本地保存對話記錄，保護使用者隱私。
  * 後端不保存任何對話，所有歷史由前端管理並在每次請求時傳送。
  */
+import { createChatMetrics } from "../services/chatMetrics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -273,6 +274,7 @@ export function useConversation(sessionId?: string) {
       // 取得 API-safe 歷史（不含剛加入的使用者訊息）
       const request = createChatRequest(messages, normalizedUserInput, imageBase64);
 
+      const metrics = createChatMetrics(Boolean(imageBase64), request.use_rag);
       const assistantId = generateId();
       const assistantTimestamp = Date.now();
       let partialText = "";
@@ -304,8 +306,10 @@ export function useConversation(sessionId?: string) {
         for (let attempt = 0; attempt <= MAX_RETRYABLE_CHAT_ATTEMPTS; attempt += 1) {
           try {
             abortController.signal.throwIfAborted();
+            metrics.beginAttempt(attempt);
             response = await sendChat(request, abortController.signal, text => {
               if (abortController.signal.aborted || !text) return;
+              metrics.firstToken();
               partialText += text;
               // A received delta proves generation even with an older backend
               // that does not yet send progress events.
@@ -318,9 +322,11 @@ export function useConversation(sessionId?: string) {
               hasVisibleGuidance ||= guidance.interaction_mode === "clarify"
                 ? Boolean(guidance.clarifying_questions?.some(question => question.trim()))
                 : guidance.interaction_mode === "answer" && Boolean(guidance.suggested_replies?.some(reply => reply.trim()));
+              if (hasVisibleGuidance) metrics.firstGuidance();
               publishStream();
             }, progress => {
               if (abortController.signal.aborted) return;
+              metrics.progress(progress);
               setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS[progress.phase]);
             });
             break;
@@ -362,14 +368,17 @@ export function useConversation(sessionId?: string) {
           clarifyingQuestions: response.clarifying_questions,
           debugToolCalls: response.debug_tool_calls,
         }, response);
+        metrics.finish("success", response);
       } catch (err) {
         if (abortController.signal.aborted) {
+          metrics.finish("cancelled");
           commitAssistant({
             id: assistantId, role: "assistant", content: partialText,
             timestamp: assistantTimestamp, isCancelled: true,
           });
           return;
         }
+        metrics.finish("error", undefined, err instanceof ApiError ? err.status : undefined);
         const errorMsg = err instanceof ApiError
           ? `服務暫時無法使用：${err.debugMessage ?? err.detail ?? err.message}`
           : "網路連線失敗，請稍後再試";

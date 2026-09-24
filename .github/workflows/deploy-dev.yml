@@ -81,6 +81,11 @@ jobs:
         run: pnpm run build
         working-directory: frontend
         env:
+          VITE_ANALYTICS_ENABLED: ${{ vars.ANALYTICS_ENABLED }}
+          VITE_FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
+          VITE_FIREBASE_MEASUREMENT_ID: ${{ vars.FIREBASE_MEASUREMENT_ID }}
           VITE_API_BASE_URL: https://asia-east1-anti-harassment-bot.cloudfunctions.net/api_preview
           VITE_ENV: preview
 

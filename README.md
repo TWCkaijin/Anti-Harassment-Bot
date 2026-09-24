@@ -101,6 +101,34 @@ pnpm run dev
 VITE_API_BASE_URL=http://127.0.0.1:5000
 ```
 
+### Firebase Analytics：回覆時間與功能使用
+
+前端已整合 Firebase Web SDK，採 lazy import，不阻擋聊天或等待 SDK 完成。必須設定下列公開 Web app 環境變數、`VITE_ANALYTICS_ENABLED=true`，並由使用者在「設定 → 分享使用統計（選用）」主動開啟，才會初始化及傳送事件。預設關閉；未同意的事件不排隊補送，SDK 載入失敗不影響聊天。這是選擇加入的樣本，不能當成全體使用者流量或全站錯誤率。
+
+1. 在 Firebase 專案啟用 Google Analytics，註冊 Web app，從該 app 設定複製 `apiKey`、`projectId`、`appId`、`measurementId`（`G-...`）。**不要使用 Admin service-account JSON 或私鑰。**
+2. 本地填入 `frontend/.env.local`：`VITE_FIREBASE_API_KEY`、`VITE_FIREBASE_PROJECT_ID`、`VITE_FIREBASE_APP_ID`、`VITE_FIREBASE_MEASUREMENT_ID`、`VITE_ANALYTICS_ENABLED=true`。部署時在 GitHub Repository Variables 設定不含 `VITE_` 前綴的名稱：`FIREBASE_API_KEY`、`FIREBASE_PROJECT_ID`、`FIREBASE_APP_ID`、`FIREBASE_MEASUREMENT_ID`、`ANALYTICS_ENABLED`；main/dev workflows 會映射至前端所需的 `VITE_` 環境變數。Vite 變數是建置時讀取，修改後須重新 build/deploy。
+3. 在 GA4 的 Web 資料串流關閉 **Enhanced measurement（加強型評估）**，避免自動表單、網站搜尋與外連事件額外收集資料；本程式只需要下表的自訂事件。SDK 設定亦停用初始 page_view、廣告個人化與 Google signals，傳送的頁面資訊固定為站點根網址，不含 query/hash、referrer 或使用者頁面標題。Google Analytics 本身仍使用分析 Cookie 與裝置資訊，不能宣稱完全匿名。
+4. 本地可暫設 `VITE_ANALYTICS_DEBUG=true`，開啟使用統計，完成一次聊天與資源點擊，至 Analytics DebugView 驗證。正式建置不要開啟 debug；preview 事件有 `app_environment=preview`，production 為 `production`，請分開篩選或使用獨立資料串流。
+
+| 事件 | 主要欄位 | 用途 |
+| --- | --- | --- |
+| `chat_request_started` | `has_image`、`uses_rag` | 一次有效的使用者送出，只記一次，不含重試 |
+| `chat_first_token` | `duration_ms`、`retry_count` | 從送出到收到第一段非空回覆文字，包含重試等待；不是 OpenRouter 的原生 TTFT，也不是瀏覽器 paint 時間 |
+| `chat_first_guidance` | `duration_ms` | 到第一次收到可顯示引導內容的時間 |
+| `chat_stage_completed` | `phase`、`duration_ms`、`attempt` | 相鄰後端 progress 的 elapsed_ms 差值；重試時重設，不混用不同請求時鐘 |
+| `chat_request_finished` | `outcome`、`duration_ms`、`retry_count`、可選 `first_token_ms`／`first_guidance_ms`／`http_status`，成功另含 `rag_used`、`source_count`、`streamed` | 完整回覆、錯誤、中止分開計算；沒有首字時不填 0，JSON fallback 不冒充串流 TTFT |
+| `resource_action_clicked` | `action_type=tel/url` | 通用資源按鈕點擊；不傳電話、網址、按鈕文字。點擊不代表成功通話或完成求助 |
+| `next_step_selected` | 無內容欄位 | 下一步建議被選取 |
+| `clarification_submitted` | `question_count`、`used_other` | AI 追問提交及「其他」欄位使用情形；不傳問題或答案 |
+
+請在 GA4 自訂定義註冊 event-scoped dimensions：`app_environment`、`phase`、`outcome`、`action_type`；註冊 custom metrics：`duration_ms`、`first_token_ms`、`first_guidance_ms`（毫秒），`retry_count`、`source_count`（數量）。按事件名稱分開看耗時，避免將首字時間和完整回覆時間混在一起平均。P50/P95、漏斗及逐日趨勢可透過 GA4 探索／BigQuery 匯出計算；未註冊的參數仍可在 DebugView 檢查。
+
+自訂事件由白名單清理，只接收類型、布林與非負有限數值；不傳對話、圖片、情緒、檢索查詢、來源名稱、錯誤訊息、使用者 ID 或聊天 session ID。關閉選項後停止後續收集，不會刪除已送出的歷史統計。
+
+CPU、記憶體、Functions 請求數和帳務不是 Firebase Analytics 的指標，請使用 Cloud Monitoring / Billing；模型 Token 用量及費用則需 OpenRouter usage 或後端獨立記錄。本次串接不新增 Token／費用估算，也不會把伺服器私密資料送到瀏覽器。既有 `chat_stream_timing`、`openrouter_stream_timing` 計時仍保留在 Cloud Logging（INFO），可用於診斷未選擇 Analytics 的請求；不含聊天內容。Analytics 亦不能取代 ERROR 日誌。
+
+參考：[Firebase Web Analytics](https://firebase.google.com/docs/analytics/web/get-started)、[自訂事件](https://firebase.google.com/docs/analytics/web/events)、[DebugView](https://firebase.google.com/docs/analytics/debugview)、[Cloud Run 監控](https://cloud.google.com/run/docs/monitoring)。
+
 ### 串流聊天 API
 
 前端送出 `POST /v1/chat/` 時加入 `"stream": true`，使用 `fetch` 讀取 `text/event-stream`（SSE），AI 回覆文字會隨模型輸出逐段顯示。回覆文字的第一個可解碼片段立即交給 HTTP 串流，再讀取下一段，不等待全文或其他欄位。後續問題與建議選項也以 `guidance` 事件逐步顯示；生成中的選項暫不可操作，停止回覆仍可使用。完整回覆通過結構驗證、Actions 由已核准的 Skills 解析後，才套用情緒與來源並開放選單操作。一般下一步建議仍為水平按鈕，只有明確的 AI 追問才顯示詢問面板。
