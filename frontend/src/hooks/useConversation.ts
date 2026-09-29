@@ -3,19 +3,30 @@
  * 使用 localStorage 在本地保存對話記錄，保護使用者隱私。
  * 後端不保存任何對話，所有歷史由前端管理並在每次請求時傳送。
  */
+import { createChatMetrics } from "../services/chatMetrics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiError,
   sendChat,
   type ActionButton,
+  type ChatGuidance,
+  type ChatProgress,
   type ChatResponse,
   type DebugToolCall,
-  type MessageItem,
   type RagInfo,
 } from "../services/api";
+import {
+  createChatRequest,
+  getUserMessageValidationError,
+} from "./conversationHistory";
 
 // ── 型別定義 ──────────────────────────────────────────────────────────────
+
+/** Local display metadata; content remains the complete model-visible message. */
+export interface ReplyContext {
+  answers: Array<{ question: string; answer: string }>;
+}
 
 export interface ConversationMessage {
   id: string;
@@ -26,6 +37,9 @@ export interface ConversationMessage {
   ragUsed?: RagInfo;
   isError?: boolean;
   isCancelled?: boolean;
+  isStreaming?: boolean;
+  streamingGuidance?: ChatGuidance;
+  interruptionReason?: string;
   emotion?: string; // 加入的情緒標籤
   emotionColor?: string; // 情緒對應的顏色
   suggestedReplies?: string[];
@@ -34,6 +48,7 @@ export interface ConversationMessage {
   clarifyingQuestions?: string[];
   debugToolCalls?: DebugToolCall[];
   imageUrl?: string; // 圖片預覽網址 (僅 frontend 顯示用)
+  replyContext?: ReplyContext;
 }
 
 export interface ConversationSession {
@@ -48,17 +63,18 @@ export interface ConversationSession {
 const STORAGE_KEY = "harass_bot_conversations";
 const MAX_SESSIONS = 10;
 const MAX_MESSAGES_PER_SESSION = 100;
-const MAX_HISTORY_TO_SEND = 20; // 每次最多傳送最近 20 輪給後端
 const MAX_RETRYABLE_CHAT_ATTEMPTS = 2;
 const RETRY_MESSAGE = "伺服器回傳錯誤，正在重試中";
-const CHAT_PROGRESS_STAGES = [
-  "正在匿名化",
-  "正在分析",
-  "正在產生檢索資訊",
-  "正在檢索資料庫",
-  "正在生成回覆",
-] as const;
-const CHAT_PROGRESS_STAGE_DURATION_MS = 1000;
+const WAITING_MESSAGE = "正在等待伺服器回應";
+const CHAT_PROGRESS_LABELS: Record<ChatProgress["phase"], string> = {
+  anonymizing: "正在匿名化",
+  preparing: "正在準備回覆",
+  waiting_model: "正在等待 AI 回應",
+  retrieving: "正在檢索資料庫",
+  generating: "正在生成回覆",
+  guidance: "正在產生後續引導",
+  validating: "正在整理回覆",
+};
 
 // ── 輔助函式 ─────────────────────────────────────────────────────────────
 
@@ -66,8 +82,19 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const abort = () => {
+      window.clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function loadSessions(): ConversationSession[] {
@@ -75,7 +102,9 @@ function loadSessions(): ConversationSession[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? (JSON.parse(raw) as ConversationSession[]) : [];
     // 過濾掉沒有訊息的空對話，避免重新載入時留下一堆空對話
-    return parsed.filter(s => s.messages.length > 0);
+    return parsed
+      .map(s => ({ ...s, messages: s.messages.filter(message => !message.isStreaming) }))
+      .filter(s => s.messages.length > 0);
   } catch {
     return [];
   }
@@ -110,6 +139,9 @@ export function useConversation(sessionId?: string) {
   const [sessions, setSessions] = useState<ConversationSession[]>(initialState.sessions);
   const [currentSessionId, setCurrentSessionId] = useState<string>(initialState.currentSessionId);
   const [loadingSessionIds, setLoadingSessionIds] = useState<Set<string>>(() => new Set());
+  // Token updates are intentionally transient: persist only completed or explicitly
+  // interrupted messages, so a page reload cannot promote partial text to a reply.
+  const [streamingBySession, setStreamingBySession] = useState<Record<string, ConversationMessage>>({});
   const [error, setError] = useState<string | null>(null);
   const [retryStatusBySession, setRetryStatusBySession] = useState<Record<string, string>>({});
 
@@ -125,6 +157,13 @@ export function useConversation(sessionId?: string) {
     saveSessions(sessions);
   }, [sessions]);
 
+  useEffect(() => {
+    const controllers = abortControllersRef.current;
+    return () => {
+      controllers.forEach(controller => controller.abort());
+    };
+  }, []);
+
   const setSessionLoading = useCallback((id: string, isLoading: boolean) => {
     const next = new Set(loadingSessionIdsRef.current);
     if (isLoading) {
@@ -138,6 +177,7 @@ export function useConversation(sessionId?: string) {
 
   const setSessionRetryStatus = useCallback((id: string, status: string | null) => {
     setRetryStatusBySession((previous) => {
+      if ((previous[id] ?? null) === status) return previous;
       if (status === null) {
         const next = { ...previous };
         delete next[id];
@@ -150,9 +190,10 @@ export function useConversation(sessionId?: string) {
   // ── 取得當前 Session ───────────────────────────────────────────────────
 
   const currentSession = sessions.find((s) => s.id === currentSessionId);
+  const streamMessage = streamingBySession[currentSessionId];
   const messages = useMemo(
-    () => currentSession?.messages ?? [],
-    [currentSession?.messages]
+    () => streamMessage ? [...(currentSession?.messages ?? []), streamMessage] : currentSession?.messages ?? [],
+    [currentSession?.messages, streamMessage]
   );
   const isLoading = loadingSessionIds.has(currentSessionId);
   const retryStatus = retryStatusBySession[currentSessionId] ?? null;
@@ -189,35 +230,33 @@ export function useConversation(sessionId?: string) {
   // ── 傳送訊息 ──────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(
-    async (userInput: string, imageBase64?: string, imageUrl?: string) => {
+    async (userInput: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext) => {
       const targetSessionId = currentSessionId;
-      if (
-        (!userInput.trim() && !imageBase64) ||
-        loadingSessionIdsRef.current.has(targetSessionId)
-      ) {
+      if (loadingSessionIdsRef.current.has(targetSessionId)) return;
+
+      const normalizedUserInput = userInput.trim();
+      if (!normalizedUserInput && !imageBase64) return;
+
+      const validationError = getUserMessageValidationError(userInput);
+      if (validationError) {
+        setError(validationError);
         return;
       }
 
       setError(null);
-      setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_STAGES[0]);
+      setSessionRetryStatus(targetSessionId, WAITING_MESSAGE);
       setSessionLoading(targetSessionId, true);
       const abortController = new AbortController();
       abortControllersRef.current.set(targetSessionId, abortController);
-      const progressStartedAt = Date.now();
-      const progressTimers = CHAT_PROGRESS_STAGES.slice(1).map((stage, index) =>
-        window.setTimeout(
-          () => setSessionRetryStatus(targetSessionId, stage),
-          CHAT_PROGRESS_STAGE_DURATION_MS * (index + 1)
-        )
-      );
 
       // 建立使用者訊息
       const userMsg: ConversationMessage = {
         id: generateId(),
         role: "user",
-        content: userInput.trim(),
+        content: normalizedUserInput,
         timestamp: Date.now(),
         imageUrl: imageUrl, // 加入圖片預覽 URL
+        ...(replyContext ? { replyContext } : {}),
       };
 
       // 先將使用者訊息加入畫面
@@ -232,64 +271,95 @@ export function useConversation(sessionId?: string) {
         )
       );
 
-      // 取得最近 N 輪歷史（不含剛加入的使用者訊息）
-      const recentHistory: MessageItem[] = messages
-        .slice(-MAX_HISTORY_TO_SEND * 2)
-        .map(({ role, content }) => ({ role, content }));
+      // 取得 API-safe 歷史（不含剛加入的使用者訊息）
+      const request = createChatRequest(messages, normalizedUserInput, imageBase64);
+
+      const metrics = createChatMetrics(Boolean(imageBase64), request.use_rag);
+      const assistantId = generateId();
+      const assistantTimestamp = Date.now();
+      let partialText = "";
+      let partialGuidance: ChatGuidance | undefined;
+      let hasVisibleGuidance = false;
+      const publishStream = () => {
+        setStreamingBySession(previous => ({
+          ...previous,
+          [targetSessionId]: {
+            id: assistantId, role: "assistant", content: partialText,
+            timestamp: assistantTimestamp, isStreaming: true,
+            ...(partialGuidance ? { streamingGuidance: partialGuidance } : {}),
+          },
+        }));
+      };
+      const commitAssistant = (assistant: ConversationMessage, response?: ChatResponse) => {
+        setSessions(prev => prev.map(session => {
+          // Clearing/deleting a conversation must not resurrect an in-flight turn.
+          if (session.id !== targetSessionId || !session.messages.some(message => message.id === userMsg.id)) return session;
+          const updated = session.messages.map(message => message.id === userMsg.id && response?.emotion
+            ? { ...message, emotion: response.emotion, emotionColor: response.emotion_color }
+            : message);
+          return { ...session, messages: [...updated, assistant].slice(-MAX_MESSAGES_PER_SESSION) };
+        }));
+      };
 
       try {
         let response: ChatResponse | undefined;
         for (let attempt = 0; attempt <= MAX_RETRYABLE_CHAT_ATTEMPTS; attempt += 1) {
           try {
-            response = await sendChat({
-              message: userInput.trim(),
-              history: recentHistory,
-              use_rag: true,
-              image_base64: imageBase64,
-            }, abortController.signal);
+            abortController.signal.throwIfAborted();
+            metrics.beginAttempt(attempt);
+            response = await sendChat(request, abortController.signal, text => {
+              if (abortController.signal.aborted || !text) return;
+              metrics.firstToken();
+              partialText += text;
+              // A received delta proves generation even with an older backend
+              // that does not yet send progress events.
+              setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS.generating);
+              publishStream();
+            }, guidance => {
+              if (abortController.signal.aborted) return;
+              partialGuidance = guidance;
+              setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS.guidance);
+              hasVisibleGuidance ||= guidance.interaction_mode === "clarify"
+                ? Boolean(guidance.clarifying_questions?.some(question => question.trim()))
+                : guidance.interaction_mode === "answer" && Boolean(guidance.suggested_replies?.some(reply => reply.trim()));
+              if (hasVisibleGuidance) metrics.firstGuidance();
+              publishStream();
+            }, progress => {
+              if (abortController.signal.aborted) return;
+              metrics.progress(progress);
+              setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS[progress.phase]);
+            });
             break;
           } catch (err) {
             if (
-              err instanceof ApiError &&
-              err.retryable &&
-              attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
+              !abortController.signal.aborted && !partialText && !hasVisibleGuidance &&
+              err instanceof ApiError && err.retryable &&
+              // Never automatically replay after reply or guidance text was shown,
+              // or a rate-limited request before its Retry-After window.
+              err.status !== 429 && attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
             ) {
-              progressTimers.forEach((timer) => window.clearTimeout(timer));
+              partialGuidance = undefined;
+              setStreamingBySession(previous => {
+                const next = { ...previous };
+                delete next[targetSessionId];
+                return next;
+              });
               setSessionRetryStatus(targetSessionId, RETRY_MESSAGE);
-              await delay(500 * (attempt + 1));
+              await delay(500 * (attempt + 1), abortController.signal);
+              setSessionRetryStatus(targetSessionId, WAITING_MESSAGE);
               continue;
             }
             throw err;
           }
         }
 
-        if (!response) {
-          throw new Error("Chat response is missing after retry attempts");
-        }
-
-        const minimumProgressDuration =
-          CHAT_PROGRESS_STAGES.length * CHAT_PROGRESS_STAGE_DURATION_MS;
-        const remainingProgressTime = Math.max(
-          0,
-          minimumProgressDuration - (Date.now() - progressStartedAt)
-        );
-        if (remainingProgressTime > 0) {
-          await delay(remainingProgressTime);
-        }
-
-        if (abortController.signal.aborted) {
-          setSessions((prev) => prev.map((session) => session.id === targetSessionId ? {
-            ...session,
-            messages: [...session.messages, { id: generateId(), role: "assistant", content: "", timestamp: Date.now(), isCancelled: true }],
-          } : session));
-          return;
-        }
-
-        const assistantMsg: ConversationMessage = {
-          id: generateId(),
+        abortController.signal.throwIfAborted();
+        if (!response) throw new Error("Chat response is missing after retry attempts");
+        commitAssistant({
+          id: assistantId,
           role: "assistant",
           content: response.reply,
-          timestamp: Date.now(),
+          timestamp: assistantTimestamp,
           anonymized: response.anonymized,
           ragUsed: response.rag_used,
           suggestedReplies: response.suggested_replies,
@@ -297,61 +367,33 @@ export function useConversation(sessionId?: string) {
           interactionMode: response.interaction_mode,
           clarifyingQuestions: response.clarifying_questions,
           debugToolCalls: response.debug_tool_calls,
-        };
-
-        setSessions((prev) =>
-          prev.map((s) => {
-            if (s.id !== targetSessionId) return s;
-
-            // 更新使用者的訊息：加入 emotion 標籤
-            const newMessages = [...s.messages];
-            const lastUserMsgIdx = newMessages.findLastIndex(m => m.role === "user");
-            if (lastUserMsgIdx !== -1 && response.emotion) {
-              newMessages[lastUserMsgIdx] = {
-                ...newMessages[lastUserMsgIdx],
-                emotion: response.emotion,
-                emotionColor: response.emotion_color,
-              };
-            }
-
-            return {
-              ...s,
-              messages: [...newMessages, assistantMsg].slice(-MAX_MESSAGES_PER_SESSION),
-            };
-          })
-        );
+        }, response);
+        metrics.finish("success", response);
       } catch (err) {
         if (abortController.signal.aborted) {
-          setSessions((prev) => prev.map((session) => session.id === targetSessionId ? {
-            ...session,
-            messages: [...session.messages, { id: generateId(), role: "assistant", content: "", timestamp: Date.now(), isCancelled: true }],
-          } : session));
+          metrics.finish("cancelled");
+          commitAssistant({
+            id: assistantId, role: "assistant", content: partialText,
+            timestamp: assistantTimestamp, isCancelled: true,
+          });
           return;
         }
-        const errorMsg =
-          err instanceof ApiError
-            ? `服務暫時無法使用：${err.debugMessage ?? err.detail ?? err.message}`
-            : "網路連線失敗，請稍後再試";
-
+        metrics.finish("error", undefined, err instanceof ApiError ? err.status : undefined);
+        const errorMsg = err instanceof ApiError
+          ? `服務暫時無法使用：${err.debugMessage ?? err.detail ?? err.message}`
+          : "網路連線失敗，請稍後再試";
         setError(errorMsg);
-
-        // 加入錯誤提示訊息
-        const errorBubble: ConversationMessage = {
-          id: generateId(),
-          role: "assistant",
-          content: errorMsg,
-          timestamp: Date.now(),
-          isError: true,
-        };
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === targetSessionId
-              ? { ...s, messages: [...s.messages, errorBubble] }
-              : s
-          )
-        );
+        commitAssistant({
+          id: assistantId, role: "assistant", content: partialText || errorMsg,
+          timestamp: assistantTimestamp, isError: true,
+          ...(partialText ? { interruptionReason: `回覆中斷，以上內容尚未完成。${errorMsg}` } : {}),
+        });
       } finally {
-        progressTimers.forEach((timer) => window.clearTimeout(timer));
+        setStreamingBySession(previous => {
+          const next = { ...previous };
+          delete next[targetSessionId];
+          return next;
+        });
         setSessionRetryStatus(targetSessionId, null);
         setSessionLoading(targetSessionId, false);
         abortControllersRef.current.delete(targetSessionId);
@@ -367,6 +409,7 @@ export function useConversation(sessionId?: string) {
   // ── 清除當前 Session ──────────────────────────────────────────────────
 
   const clearCurrentSession = useCallback(() => {
+    abortControllersRef.current.get(currentSessionId)?.abort();
     setSessions((prev) =>
       prev.map((s) =>
         s.id === currentSessionId ? { ...s, messages: [] } : s
@@ -378,6 +421,7 @@ export function useConversation(sessionId?: string) {
 
   const deleteSession = useCallback(
     (id: string) => {
+      abortControllersRef.current.get(id)?.abort();
       setSessions((prev) => prev.filter((s) => s.id !== id));
       setSessionLoading(id, false);
       setSessionRetryStatus(id, null);
@@ -401,6 +445,8 @@ export function useConversation(sessionId?: string) {
   // ── 清除所有 Session ───────────────────────────────────────────────────
 
   const clearAllSessions = useCallback(() => {
+    abortControllersRef.current.forEach(controller => controller.abort());
+    setStreamingBySession({});
     setSessions([]);
     const newId = generateId();
     const newSession: ConversationSession = {

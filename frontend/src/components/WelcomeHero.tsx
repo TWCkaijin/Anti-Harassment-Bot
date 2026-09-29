@@ -5,6 +5,10 @@
 import { useRef, useState, type KeyboardEvent, type ChangeEvent } from "react";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
+import {
+  getUserMessageValidationError,
+  MAX_USER_MESSAGE_CHARACTERS,
+} from "../hooks/conversationHistory";
 
 interface WelcomeHeroProps {
   onSuggest: (message: string, imageBase64?: string, imageUrl?: string) => void;
@@ -55,6 +59,7 @@ export default function WelcomeHero({ onSuggest }: WelcomeHeroProps) {
   const handleSend = async () => {
     const trimmed = inputValue.trim();
     if (!trimmed && !selectedFile) return;
+    if (getUserMessageValidationError(inputValue)) return;
 
     let base64: string | undefined;
     if (selectedFile) {
@@ -77,6 +82,9 @@ export default function WelcomeHero({ onSuggest }: WelcomeHeroProps) {
   };
 
   const suggestions = [t.suggestLaw, t.suggestReport, t.suggestSelfCare];
+  const messageLength = inputValue.trim().length;
+  const messageValidationError = getUserMessageValidationError(inputValue);
+  const hasContent = messageLength > 0 || selectedFile !== null;
 
   return (
     <div className="flex-1 flex flex-col hero-mesh-gradient overflow-y-auto">
@@ -140,6 +148,8 @@ export default function WelcomeHero({ onSuggest }: WelcomeHeroProps) {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
+              aria-invalid={Boolean(messageValidationError)}
+              aria-describedby="welcome-message-length"
               placeholder={t.heroInputPlaceholder}
               rows={1}
               className="flex-1 bg-transparent border-none focus:ring-0 px-2 lg:px-4 py-2.5 text-on-surface placeholder:text-on-surface/30 font-medium resize-none leading-relaxed"
@@ -147,11 +157,12 @@ export default function WelcomeHero({ onSuggest }: WelcomeHeroProps) {
             />
             <button
               onClick={handleSend}
-              disabled={!inputValue.trim() && !selectedFile}
+              disabled={!hasContent || Boolean(messageValidationError)}
+              aria-label={t.sendMessage}
               className={`
                 w-10 h-10 lg:w-12 lg:h-12 rounded-full flex items-center justify-center text-white transition-all group shrink-0 mb-0.5 cursor-pointer
                 ${
-                  (inputValue.trim().length > 0 || selectedFile)
+                  (hasContent && !messageValidationError)
                     ? "bg-primary hover:bg-primary/90 shadow-md"
                     : "bg-primary/40 cursor-not-allowed"
                 }
@@ -160,10 +171,18 @@ export default function WelcomeHero({ onSuggest }: WelcomeHeroProps) {
               <MaterialIcon 
                 icon="arrow_forward" 
                 size={24} 
-                className={(inputValue.trim().length > 0 || selectedFile) ? "group-hover:translate-x-0.5 transition-transform" : ""}
+                className={(hasContent && !messageValidationError) ? "group-hover:translate-x-0.5 transition-transform" : ""}
               />
             </button>
           </div>
+
+          <p
+            id="welcome-message-length"
+            className={`mt-1 px-4 text-right text-[11px] ${messageValidationError ? "text-error" : "text-on-surface/45"}`}
+            role={messageValidationError ? "alert" : undefined}
+          >
+            {messageValidationError ?? `${messageLength.toLocaleString("en-US")} / ${MAX_USER_MESSAGE_CHARACTERS.toLocaleString("en-US")}`}
+          </p>
 
           {/* 建議 Chips */}
           <div className="mt-4 flex flex-wrap justify-center gap-2">

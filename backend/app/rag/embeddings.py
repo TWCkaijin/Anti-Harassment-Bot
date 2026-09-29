@@ -29,11 +29,6 @@ class EmbeddingClient:
     def __init__(self) -> None:
         self.provider = settings.embedding_provider
         self.model = settings.embedding_model
-        self._openrouter_client = AsyncOpenAI(
-            base_url=settings.openrouter_base_url,
-            api_key=settings.openrouter_api_key,
-            timeout=settings.openrouter_request_timeout_seconds,
-        )
 
     async def embed(self, text: str, mode: EmbeddingMode) -> list[float]:
         if self.provider == "local":
@@ -41,10 +36,17 @@ class EmbeddingClient:
         return await self._embed_openrouter(text, mode)
 
     async def _embed_openrouter(self, text: str, mode: EmbeddingMode) -> list[float]:
-        response = await self._openrouter_client.embeddings.create(
-            input=_e5_prefix(text, mode),
-            model=self.model,
-        )
+        # WSGI requests run in separate event loops. Do not reuse pooled async
+        # sockets from an earlier request whose loop has already been closed.
+        async with AsyncOpenAI(
+            base_url=settings.openrouter_base_url,
+            api_key=settings.openrouter_api_key,
+            timeout=settings.openrouter_request_timeout_seconds,
+        ) as client:
+            response = await client.embeddings.create(
+                input=_e5_prefix(text, mode),
+                model=self.model,
+            )
         return response.data[0].embedding
 
     def _embed_local(self, text: str, mode: EmbeddingMode) -> list[float]:

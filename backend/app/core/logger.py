@@ -1,11 +1,82 @@
 import json
 import logging
 import os
+import re
 import sys
 from datetime import UTC, datetime
+from typing import Any
 
-# ── 取得環境變數（避免與 config.py 循環引用） ─────────────────────────────
-ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+from flask import has_request_context, request
+
+_TRACE_CONTEXT_PATTERN = re.compile(
+    r"(?P<trace>[0-9a-fA-F]{32})(?:/(?P<span>[0-9]{1,20}))?(?:;o=(?P<sampled>[01]))?"
+)
+_STANDARD_RECORD_KEYS = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
+
+
+def _cloud_project_id() -> str | None:
+    for variable in ("GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "GCP_PROJECT"):
+        if project_id := os.environ.get(variable, "").strip():
+            return project_id
+    # Firebase also accepts a filename here; never open it or credential files.
+    try:
+        firebase_config = json.loads(os.environ.get("FIREBASE_CONFIG", "{}"))
+    except (TypeError, ValueError):
+        return None
+    if isinstance(firebase_config, dict):
+        project_id = firebase_config.get("projectId")
+        if isinstance(project_id, str) and project_id.strip():
+            return project_id.strip()
+    return None
+
+
+def get_request_log_context(req: Any | None = None) -> dict[str, Any]:
+    """Return request routing and validated trace metadata, never request contents."""
+    if req is None:
+        if not has_request_context():
+            return {}
+        req = request
+
+    context: dict[str, Any] = {}
+    for attribute, field in (("method", "request_method"), ("path", "request_path")):
+        value = getattr(req, attribute, None)
+        if isinstance(value, str):
+            context[field] = value
+
+    headers = getattr(req, "headers", None)
+    header = headers.get("X-Cloud-Trace-Context") if headers is not None else None
+    if not isinstance(header, str) or not (match := _TRACE_CONTEXT_PATTERN.fullmatch(header)):
+        return context
+
+    trace_id = match["trace"].lower()
+    span_id = int(match["span"]) if match["span"] is not None else None
+    if int(trace_id, 16) == 0 or (span_id is not None and not 0 < span_id < 2**64):
+        return context
+    if not (project_id := _cloud_project_id()):
+        return context
+
+    context["logging.googleapis.com/trace"] = f"projects/{project_id}/traces/{trace_id}"
+    if span_id is not None:
+        context["logging.googleapis.com/spanId"] = f"{span_id:016x}"
+    if match["sampled"] is not None:
+        context["logging.googleapis.com/trace_sampled"] = match["sampled"] == "1"
+    return context
+
+
+def _safe_log_text(value: Any) -> str:
+    try:
+        return str(value)
+    except Exception:
+        return f"<{type(value).__name__}: unprintable>"
+
+
+def _json_safe_extra(value: Any) -> Any:
+    try:
+        return json.loads(json.dumps(value, default=_safe_log_text, allow_nan=False))
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        # Circular containers, invalid dictionary keys and non-finite floats must
+        # not prevent the original ERROR from reaching Cloud Logging.
+        return _safe_log_text(value)
 
 
 class GCPJsonFormatter(logging.Formatter):
@@ -15,56 +86,34 @@ class GCPJsonFormatter(logging.Formatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        # 將級別對照為 GCP 認可的 severity
-        severity = record.levelname
-        if severity == "WARNING":
-            severity = "WARNING"
-        elif severity == "CRITICAL":
-            severity = "CRITICAL"
-
-        # 構造基本 JSON Payload
         log_data = {
-            "severity": severity,
-            "message": record.getMessage(),
-            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
-            "logging.googleapis.com/sourceLocation": {
-                "file": record.pathname,
-                "line": record.lineno,
-                "function": record.funcName,
-            },
+            key: _json_safe_extra(value)
+            for key, value in record.__dict__.items()
+            if key not in _STANDARD_RECORD_KEYS
         }
+        log_data.update(get_request_log_context())
+        # Framework/application extras cannot override the actual log severity.
+        log_data.update(
+            {
+                "severity": record.levelname,
+                "message": record.getMessage(),
+                "logger": record.name,
+                "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
+                "logging.googleapis.com/sourceLocation": {
+                    "file": record.pathname,
+                    "line": str(record.lineno),
+                    "function": record.funcName,
+                },
+            }
+        )
 
         # 例外追蹤資訊
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
-
-        # 保留自訂的 extra 屬性（過濾掉系統預設屬性）
-        standard_keys = {
-            "name",
-            "msg",
-            "args",
-            "levelname",
-            "levelno",
-            "pathname",
-            "filename",
-            "module",
-            "exc_info",
-            "exc_text",
-            "stack_info",
-            "lineno",
-            "funcName",
-            "created",
-            "msecs",
-            "relativeCreated",
-            "thread",
-            "threadName",
-            "processName",
-            "process",
-            "message",
-        }
-        for key, value in record.__dict__.items():
-            if key not in standard_keys:
-                log_data[key] = value
+        elif record.exc_text:
+            log_data["exception"] = record.exc_text
+        if record.stack_info:
+            log_data["stack"] = self.formatStack(record.stack_info)
 
         return json.dumps(log_data, ensure_ascii=False)
 
@@ -115,8 +164,13 @@ def setup_logging() -> None:
     初始化與設定全域日誌配置。
     根據環境變數 ENVIRONMENT 切換彩色終端機格式或 GCP JSON 結構化格式。
     """
-    # 決定使用哪種 formatter
-    formatter = ColoredFormatter() if ENVIRONMENT == "development" else GCPJsonFormatter()
+    # Deployment wrappers can set ENVIRONMENT after importing this module.
+    environment = os.environ.get("ENVIRONMENT", "development")
+    cloud_runtime = any(
+        name in os.environ for name in ("K_SERVICE", "FUNCTION_TARGET", "FUNCTION_NAME")
+    )
+    local_development = environment == "development" and not cloud_runtime
+    formatter = ColoredFormatter() if local_development else GCPJsonFormatter()
 
     # 清除或接管預設的 root logger
     root_logger = logging.getLogger()
@@ -129,7 +183,7 @@ def setup_logging() -> None:
     root_logger.addHandler(stdout_handler)
 
     # 設定全域與相關框架的日誌等級
-    log_level = logging.DEBUG if ENVIRONMENT == "development" else logging.INFO
+    log_level = logging.DEBUG if local_development else logging.INFO
     root_logger.setLevel(log_level)
 
     # 接管 Uvicorn/FastAPI 的日誌，使其格式統一

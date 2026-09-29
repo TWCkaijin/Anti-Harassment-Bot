@@ -1,5 +1,9 @@
 """測試：runtime admin API 將 prompt section 寫入 Firestore。"""
 
+import logging
+
+import pytest
+
 import backend.app.api.admin as admin_module
 from backend.app.core.runtime_config import RuntimeConfig
 from backend.app.main import app
@@ -134,3 +138,108 @@ def test_admin_lists_and_updates_shared_scenario_scripts(monkeypatch):
     assert response.status_code == 200
     assert calls[0][0] == "call_support"
     assert calls[0][2] == "admin"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "dependency", "operation", "public_detail"),
+    [
+        (
+            "PUT",
+            "/config",
+            "update_runtime_config",
+            "update_runtime_config",
+            "update runtime config",
+        ),
+        (
+            "POST",
+            "/config/reset",
+            "reset_runtime_config",
+            "reset_runtime_config",
+            "reset runtime config",
+        ),
+        (
+            "POST",
+            "/config/seed",
+            "seed_runtime_config_if_missing",
+            "seed_runtime_config",
+            "seed runtime config",
+        ),
+        (
+            "GET",
+            "/scenario-scripts",
+            "list_scenario_scripts",
+            "list_scenario_scripts",
+            "load scenario scripts",
+        ),
+        (
+            "PUT",
+            "/scenario-scripts/test_skill",
+            "upsert_scenario_script",
+            "upsert_scenario_script",
+            "save scenario script",
+        ),
+        (
+            "DELETE",
+            "/scenario-scripts/test_skill",
+            "delete_scenario_script",
+            "delete_scenario_script",
+            "delete scenario script",
+        ),
+        (
+            "POST",
+            "/scenario-scripts/seed",
+            "seed_example_scenario_scripts",
+            "seed_scenario_scripts",
+            "seed scenario scripts",
+        ),
+    ],
+)
+def test_admin_operation_failure_logs_cause_without_changing_public_error(
+    monkeypatch, caplog, method, path, dependency, operation, public_detail
+):
+    failure = RuntimeError("Firestore write failed because the test database is unavailable")
+
+    def fail(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(admin_module.settings, "admin_api_key", "private-admin-token")
+    monkeypatch.setattr(admin_module, dependency, fail)
+
+    with caplog.at_level(logging.ERROR, logger=admin_module.__name__):
+        response = app.test_client().open(
+            f"/api/v1/admin{path}",
+            method=method,
+            headers={
+                "Authorization": "Bearer private-admin-token",
+                "X-Admin-User": "private-admin-identity",
+                "X-Admin-Token": "private-header-token",
+            },
+            json={"instruction": "private-payload-value"},
+        )
+
+    assert response.status_code == 500
+    assert response.get_json() == {"detail": f"Failed to {public_detail}: RuntimeError"}
+    failures = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "admin_operation_failed"
+    ]
+    assert len(failures) == 1
+    record = failures[0]
+    assert record.levelno == logging.ERROR
+    assert record.operation == operation
+    assert record.error_type == "RuntimeError"
+    assert record.exc_info is not None
+    assert record.exc_info[1] is failure
+    assert record.exc_info[2] is not None
+    assert str(failure) in caplog.text
+    assert "Traceback (most recent call last)" in caplog.text
+    assert operation in record.getMessage()
+    for private_value in (
+        "private-admin-token",
+        "private-header-token",
+        "private-admin-identity",
+        "private-payload-value",
+    ):
+        assert private_value not in caplog.text
+        assert private_value not in repr(record.__dict__)

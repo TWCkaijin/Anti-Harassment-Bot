@@ -9,6 +9,7 @@ from flask import Blueprint, jsonify, request
 
 from backend.app.agents.openrouter_agent import get_default_prompt_sections
 from backend.app.core.config import get_settings
+from backend.app.core.logger import get_logger
 from backend.app.core.runtime_config import (
     get_runtime_config,
     reset_runtime_config,
@@ -23,7 +24,20 @@ from backend.app.core.scenario_scripts import (
 )
 
 settings = get_settings()
+logger = get_logger(__name__)
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+
+def _log_operation_failure(operation: str, error: Exception) -> None:
+    logger.exception(
+        "Admin operation failed: %s",
+        operation,
+        extra={
+            "event": "admin_operation_failed",
+            "operation": operation,
+            "error_type": type(error).__name__,
+        },
+    )
 
 
 def _public_config():
@@ -80,6 +94,7 @@ def put_config():
     except ValueError as exc:
         return jsonify({"detail": str(exc)}), 422
     except Exception as exc:
+        _log_operation_failure("update_runtime_config", exc)
         return jsonify({"detail": f"Failed to update runtime config: {type(exc).__name__}"}), 500
     return jsonify(_public_config())
 
@@ -92,6 +107,7 @@ def seed_config():
     try:
         seed_runtime_config_if_missing(updated_by=identity or "admin")
     except Exception as exc:
+        _log_operation_failure("seed_runtime_config", exc)
         return jsonify({"detail": f"Failed to seed runtime config: {type(exc).__name__}"}), 500
     return jsonify(_public_config())
 
@@ -104,6 +120,7 @@ def reset_config():
     try:
         reset_runtime_config(updated_by=identity or "admin")
     except Exception as exc:
+        _log_operation_failure("reset_runtime_config", exc)
         return jsonify({"detail": f"Failed to reset runtime config: {type(exc).__name__}"}), 500
     return jsonify(_public_config())
 
@@ -116,6 +133,7 @@ def seed_scenario_scripts():
     try:
         scripts = seed_example_scenario_scripts(updated_by=identity or "admin")
     except Exception as exc:
+        _log_operation_failure("seed_scenario_scripts", exc)
         return jsonify({"detail": f"Failed to seed scenario scripts: {type(exc).__name__}"}), 500
     return jsonify({"script_ids": [script.script_id for script in scripts]})
 
@@ -128,6 +146,7 @@ def get_scenario_scripts():
     try:
         return jsonify({"skills": [script.public_dict() for script in list_scenario_scripts(True)]})
     except Exception as exc:
+        _log_operation_failure("list_scenario_scripts", exc)
         return jsonify({"detail": f"Failed to load scenario scripts: {type(exc).__name__}"}), 500
 
 
@@ -146,6 +165,7 @@ def put_scenario_script(script_id: str):
     except ValueError as exc:
         return jsonify({"detail": str(exc)}), 422
     except Exception as exc:
+        _log_operation_failure("upsert_scenario_script", exc)
         return jsonify({"detail": f"Failed to save scenario script: {type(exc).__name__}"}), 500
 
 
@@ -157,5 +177,6 @@ def remove_scenario_script(script_id: str):
     try:
         delete_scenario_script(script_id)
     except Exception as exc:
+        _log_operation_failure("delete_scenario_script", exc)
         return jsonify({"detail": f"Failed to delete scenario script: {type(exc).__name__}"}), 500
     return "", 204
