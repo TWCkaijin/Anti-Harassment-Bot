@@ -150,7 +150,15 @@ curl --no-buffer http://127.0.0.1:5000/v1/chat/ \
 | `done` | 完整聊天回覆：`reply`、`session_id`、`anonymized`、`rag_used`、`emotion`、`emotion_color`、`suggested_replies`、`action_buttons`、`interaction_mode`、`clarifying_questions`；開發模式可另含 `debug_tool_calls` | 以驗證後的 `reply` 定稿，套用 metadata，結束串流 |
 | `error` | `code`、`detail`、`retryable`、`status`；依錯誤可另含 `error_id`，非 production 的開發模式可另含 `debug_message` | 顯示錯誤並結束串流，不顯示未完成的選單 |
 
-`progress.phase` 包含 `anonymizing`（啟用匿名化時）、`preparing`（準備模型輸入）、`waiting_model`（送出模型請求）、`retrieving`（實際呼叫資料檢索）、`generating`（已收到回覆文字）、`guidance`（已收到引導資料）、`validating`（檢查完整回覆）。只有實際執行的階段才會出現；沒有檢索就不顯示檢索提示，未收到新事件就維持目前狀態。首段回覆或引導內容優先送出，接著才補上對應狀態，不為進度提示延遲首字。`elapsed_ms` 是階段發生時間，並非完成比例或剩餘時間；不包含瀏覽器到伺服器的網路時間。
+`progress.phase` 包含 `anonymizing`（啟用文字遮罩或處理 v2 摘要欄位時）、`preparing`（準備請求與必要事實）、`waiting_model`（送出模型請求）、`retrieving`（實際呼叫資料檢索）、`generating`（已收到回覆文字）、`guidance`（已收到引導資料）、`validating`（檢查回覆結構與可用的引用欄位）。只有實際執行的階段才會出現；沒有檢索就不顯示檢索提示，未收到新事件就維持目前狀態。首段回覆或引導內容優先送出，接著才補上對應狀態，不為進度提示延遲首字。`elapsed_ms` 是階段發生時間，並非完成比例或剩餘時間；不包含瀏覽器到伺服器的網路時間。
+
+#### 可收合的處理過程
+
+送出訊息後，回答上方會展開「處理過程」，按實際收到的事件累積步驟；使用者可自行收合，完成後自動收合成箭頭，點擊或用 Enter／Space 可重新展開。停止及錯誤分別顯示「已停止」「處理中斷」。它呈現可觀察的系統操作，並非原始 Chain of Thought，也不代表法律正確性已獲驗證；沒有額外模型呼叫或用定時器虛構進度。
+
+前端加上實際連線／重試事件，記錄自本次送出起的瀏覽器經過時間，跨重試不歸零；數字只在事件抵達或回覆結束時更新，不是倒數計時。最多保留 40 筆步驟，去除相鄰同階段重複事件，但保留工具流程再次回到模型的階段。請求次數不是模型呼叫次數。這份 `processingTrace` 僅保存固定階段代碼、時間、請求次數與結果，隨完成的對話在 localStorage 保存及 JSON 匯出；不送回模型、Analytics 或後端，也不包含搜尋詞、案件事實或 reasoning。舊訊息不補造步驟。
+
+本機瀏覽器回歸使用 `tests/browser_processing_smoke.mjs`：先以 `PYTHONPATH=. SYNTHETIC_MODEL_DELAY_SECONDS=2 .venv/bin/python tests/browser_fixture_server.py` 啟動合成 API，再在 `frontend` 啟動 `VITE_API_BASE_URL=http://127.0.0.1:5055/api VITE_ANALYTICS_ENABLED=false pnpm dev --host 127.0.0.1`，最後於專案根目錄以 `node tests/browser_processing_smoke.mjs` 執行。可透過 `PLAYWRIGHT_MODULE` 指向既有 Playwright 安裝。腳本禁止非本機網路，桌面／手機均檢查展開、手動收合、完成收合、鍵盤、重新整理與取消；結果預設在 `/tmp/harass-processing-smoke`。測試為觀察暫態而延緩真實 SSE frame 的轉送，不能當成延遲測量。
 
 開始串流前的驗證、維護模式及存取限制錯誤仍回傳原本的 HTTP 狀態碼與 JSON。開始串流後 HTTP headers 已送出，錯誤以 `error` event 的 `status` 表達，並保留伺服器的 ERROR 日誌。已顯示回覆或引導文字時不自動重試，避免混入另一輪生成內容；發生錯誤或取消時移除尚未定稿的選單，未收到 `done` 的回覆視為未完成。不傳 `stream` 或設為 `false` 時，仍回傳相容的完整 JSON 回覆。
 

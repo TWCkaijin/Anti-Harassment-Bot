@@ -55,6 +55,25 @@ const zhTW = {
   ragSourceRemedy: "救濟管道",
   ragSourceUnknown: "其他資料",
   anonymizedLabel: "已遮蔽部分文字識別資訊",
+  processingTraceTitle: "處理過程",
+  processingTraceCaption: "顯示系統處理步驟，不代表完整內部推理或法律正確性驗證。",
+  processingTraceSteps: "已觀察到的處理步驟",
+  processingSeconds: (value: string) => `${value} 秒`,
+  processingAttempt: (value: number) => `第 ${value} 次請求`,
+  processingOutcomes: {
+    running: "處理中", complete: "回覆完成", cancelled: "已停止", error: "處理中斷",
+  },
+  processingPhases: {
+    connecting: "正在連線",
+    retrying: "正在重試請求",
+    anonymizing: "正在套用文字遮罩",
+    preparing: "正在準備回覆",
+    waiting_model: "正在等待模型回應",
+    retrieving: "正在檢索資料庫",
+    generating: "正在接收回覆內容",
+    guidance: "正在準備後續引導",
+    validating: "檢查回覆格式與引用",
+  },
 
   // ── EmergencyFab ──
   emergency113: "113 保護專線",

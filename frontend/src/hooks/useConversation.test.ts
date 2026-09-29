@@ -123,8 +123,10 @@ describe("local case facts and request ownership", () => {
     vi.mocked(checkHealth).mockResolvedValue(v2Health);
     let resolveOld!: (value: ChatResponse) => void;
     let oldDelta!: (text: string) => void;
-    vi.mocked(sendChat).mockImplementationOnce((_request, _signal, delta) => {
+    let oldProgress!: (value: ChatProgress) => void;
+    vi.mocked(sendChat).mockImplementationOnce((_request, _signal, delta, _guidance, progress) => {
       oldDelta = delta!;
+      oldProgress = progress!;
       return new Promise(resolve => { resolveOld = resolve; });
     });
     const { result } = renderHook(() => useConversation("replace"));
@@ -138,8 +140,10 @@ describe("local case facts and request ownership", () => {
     act(() => replacement.delta("新的回覆"));
     await act(async () => { resolveOld(v2Response(0)); await oldRequest; });
     act(() => oldDelta("過期的文字"));
+    act(() => oldProgress({ phase: "retrieving", elapsed_ms: 9999 }));
     expect(result.current.isLoading).toBe(true);
     expect(result.current.messages.at(-1)?.content).toBe("新的回覆");
+    expect(result.current.messages.at(-1)?.processingTrace?.steps.map(step => step.phase)).toEqual(["connecting", "generating"]);
     await act(async () => { replacement.resolve(v2Response(1, { reply: "依新摘要回答" })); await newRequest; });
     expect(result.current.messages.at(-1)?.content).toBe("依新摘要回答");
     expect(result.current.caseFacts.facts.other_role?.value).toBe("同事");
@@ -401,14 +405,17 @@ describe("useConversation actual progress", () => {
     let request!: Promise<void>;
     act(() => { request = result.current.sendMessage("請幫我了解"); });
     expect(result.current.retryStatus).toBe("正在等待伺服器回應");
-    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages.at(-1)).toMatchObject({ content: "", processingTrace: { outcome: "running", steps: [{ phase: "connecting", attempt: 0 }] } });
+    expect(JSON.parse(localStorage.getItem("harass_bot_conversations")!)[0].messages).toHaveLength(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(result.current.retryStatus).toBe("正在等待伺服器回應");
     act(() => pending.progress({ phase: "waiting_model", elapsed_ms: 64 }));
     expect(result.current.retryStatus).toBe("正在等待 AI 回應");
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(result.current.retryStatus).toBe("正在等待 AI 回應");
-    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages.at(-1)?.processingTrace?.steps.map(step => step.phase)).toEqual(["connecting", "waiting_model"]);
     act(() => pending.progress({ phase: "retrieving", elapsed_ms: 60_200 }));
     expect(result.current.retryStatus).toBe("正在檢索資料庫");
     act(() => pending.delta("我會陪您"));
@@ -420,6 +427,11 @@ describe("useConversation actual progress", () => {
     await act(async () => { pending.resolve(successfulResponse); await request; });
     expect(result.current.retryStatus).toBeNull();
     expect(result.current.isLoading).toBe(false);
+    const trace = result.current.messages.at(-1)?.processingTrace;
+    expect(trace?.outcome).toBe("complete");
+    expect(trace?.steps.map(step => step.phase)).toEqual(["connecting", "waiting_model", "retrieving", "generating", "guidance", "validating"]);
+    expect(JSON.parse(localStorage.getItem("harass_bot_conversations")!)[0].messages.at(-1).processingTrace).toEqual(trace);
+    expect(trackAnalytics).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ processingTrace: expect.anything() }));
   });
 
   it("still retries after progress-only failures and resets the status for the new request", async () => {
@@ -432,7 +444,8 @@ describe("useConversation actual progress", () => {
     let request!: Promise<void>;
     await act(async () => { request = result.current.sendMessage("請重試"); await Promise.resolve(); });
     expect(result.current.retryStatus).toBe("伺服器回傳錯誤，正在重試中");
-    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages.at(-1)?.processingTrace?.steps.at(-1)?.phase).toBe("retrying");
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     expect(sendChat).toHaveBeenCalledTimes(2);
     expect(result.current.retryStatus).toBe("正在等待伺服器回應");
@@ -440,6 +453,9 @@ describe("useConversation actual progress", () => {
     expect(result.current.retryStatus).toBe("正在準備回覆");
     await act(async () => { pending.resolve(successfulResponse); await request; });
     expect(result.current.retryStatus).toBeNull();
+    expect(result.current.messages.at(-1)?.processingTrace?.steps.map(step => [step.phase, step.attempt])).toEqual([
+      ["connecting", 0], ["waiting_model", 0], ["retrying", 0], ["connecting", 1], ["preparing", 1],
+    ]);
   });
 
   it("clears progress on stop and ignores late callbacks", async () => {
@@ -453,6 +469,7 @@ describe("useConversation actual progress", () => {
     expect(result.current.retryStatus).toBeNull();
     expect(result.current.isLoading).toBe(false);
     expect(result.current.messages.at(-1)?.isCancelled).toBe(true);
+    expect(result.current.messages.at(-1)?.processingTrace).toMatchObject({ outcome: "cancelled", steps: [{ phase: "connecting" }, { phase: "retrieving" }] });
   });
 });
 

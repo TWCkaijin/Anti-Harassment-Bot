@@ -54,6 +54,31 @@ describe("MessageItem streaming state", () => {
     expect(screen.getAllByText("部分回覆")).toHaveLength(1);
     expect(screen.getByRole("alert")).toHaveTextContent("回覆中斷，以上內容尚未完成");
   });
+
+  it("places the observed processing trace above the answer without duplicating the old streaming label", () => {
+    render(<I18nProvider><MessageItem streamingStatus="舊進度文字" message={{
+      ...base, role: "assistant", content: "部分答案", isStreaming: true,
+      processingTrace: { outcome: "running", duration_ms: 300, steps: [{ phase: "generating", elapsed_ms: 300, attempt: 1 }] },
+    }} /></I18nProvider>);
+    const toggle = screen.getByRole("button", { name: "處理過程" });
+    expect(toggle.compareDocumentPosition(screen.getByText("部分答案")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("正在接收回覆內容")).toBeVisible();
+    expect(screen.queryByText("舊進度文字")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
+  it("keeps the no-trace streaming fallback and does not fabricate history for older messages", () => {
+    const { rerender } = render(<I18nProvider><MessageItem streamingStatus="舊進度文字" message={{ ...base, role: "assistant", isStreaming: true }} /></I18nProvider>);
+    expect(screen.getByRole("status")).toHaveTextContent("舊進度文字");
+    expect(screen.queryByRole("button", { name: "處理過程" })).not.toBeInTheDocument();
+    rerender(<I18nProvider><MessageItem message={{ ...base, role: "assistant" }} /></I18nProvider>);
+    expect(screen.queryByRole("button", { name: "處理過程" })).not.toBeInTheDocument();
+  });
+
+  it("does not render a processing trace on user messages", () => {
+    renderMessage({ ...base, processingTrace: { outcome: "complete", duration_ms: 500, steps: [] } });
+    expect(screen.queryByRole("button", { name: "處理過程" })).not.toBeInTheDocument();
+  });
 });
 
 

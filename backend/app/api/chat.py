@@ -513,7 +513,7 @@ def _stream_response(
 
             async def produce():
                 try:
-                    if runtime_config.enable_anonymization:
+                    if runtime_config.enable_anonymization or req_obj.contract_version == 2:
                         await emit_progress({"phase": "anonymizing"})
                     run_kwargs, was_anonymized = _prepare_agent_input(req_obj, runtime_config)
                     result = await get_agent().run(

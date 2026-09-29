@@ -4,7 +4,10 @@ Run with ``python -m tests.browser_fixture_server``. No model or Firestore reque
 is made: dependencies below are replaced before serving. Never deploy this file.
 """
 
+import asyncio
 import json
+import math
+import os
 from types import SimpleNamespace
 
 from backend.app.agents import guided_chat
@@ -17,6 +20,15 @@ from backend.app.rag.base import RAGDocument
 
 class FixtureCompletions:
     async def create(self, **kwargs):
+        # A bounded, opt-in SDK wait lets browser tests observe genuine progress
+        # events from the local pipeline without invoking an external provider.
+        try:
+            delay = float(os.environ.get("SYNTHETIC_MODEL_DELAY_SECONDS", "0"))
+        except ValueError:
+            delay = 0.0
+        delay = min(5.0, max(0.0, delay)) if math.isfinite(delay) else 0.0
+        if delay:
+            await asyncio.sleep(delay)
         content = {
             "answer_sections": [
                 {

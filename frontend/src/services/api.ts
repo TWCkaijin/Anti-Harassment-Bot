@@ -77,7 +77,7 @@ export interface ChatGuidance {
   suggested_replies?: string[];
 }
 
-const CHAT_PROGRESS_PHASES = [
+export const CHAT_PROGRESS_PHASES = [
   "anonymizing", "preparing", "waiting_model", "retrieving", "generating", "guidance", "validating",
 ] as const;
 

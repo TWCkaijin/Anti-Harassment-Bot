@@ -27,6 +27,7 @@ import {
 } from "./conversationHistory";
 import { applyFactUpdates, emptyCaseContext, normalizeCaseContext, parseFact } from "../services/caseFacts";
 import { loadConversationStorage, saveConversationStorage, STORAGE_KEY, type StorageIssue } from "./conversationStorage";
+import { appendProcessingStep, type ProcessingPhase, type ProcessingTrace } from "../services/processingTrace";
 
 // ── 型別定義 ──────────────────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ export interface ConversationMessage {
   contractVersion?: 2;
   superseded?: boolean;
   answerSections?: ChatResponse["answer_sections"];
+  processingTrace?: ProcessingTrace;
   requestKind?: "request" | "clarification" | "regeneration";
   originRequestId?: string;
 }
@@ -319,6 +321,10 @@ export function useConversation(sessionId?: string) {
       const metrics = createChatMetrics(Boolean(imageBase64), request.use_rag);
       const assistantId = generateId();
       const assistantTimestamp = Date.now();
+      const processingStarted = performance.now();
+      let processingTrace: ProcessingTrace = { steps: [], duration_ms: 0, outcome: "running" };
+      let processingAttempt = 0;
+      const processingElapsed = () => Math.max(0, Math.round(performance.now() - processingStarted));
       let partialText = "";
       let partialGuidance: ChatGuidance | undefined;
       let hasVisibleGuidance = false;
@@ -329,12 +335,23 @@ export function useConversation(sessionId?: string) {
           [targetSessionId]: {
             id: assistantId, role: "assistant", content: partialText,
             timestamp: assistantTimestamp, isStreaming: true,
+            processingTrace,
             ...(partialGuidance ? { streamingGuidance: partialGuidance } : {}),
           },
         }));
       };
+      const recordProcessingStep = (phase: ProcessingPhase) => {
+        if (!isOwner() || finished || abortController.signal.aborted) return;
+        processingTrace = appendProcessingStep(processingTrace, phase, processingElapsed(), processingAttempt);
+        publishStream();
+      };
       const commitAssistant = (assistant: ConversationMessage, response?: ChatResponse) => {
         if (!isOwner()) return;
+        const finalTrace: ProcessingTrace = {
+          ...processingTrace,
+          duration_ms: Math.max(processingTrace.duration_ms, processingElapsed()),
+          outcome: assistant.isCancelled ? "cancelled" : assistant.isError ? "error" : "complete",
+        };
         setSessions(prev => prev.map(session => {
           // Clearing/deleting a conversation must not resurrect an in-flight turn.
           if (!isOwner() || session.id !== targetSessionId || !session.messages.some(message => message.id === userMsg.id)) return session;
@@ -344,7 +361,7 @@ export function useConversation(sessionId?: string) {
           const accepted = response?.contract_version === 2 && response.facts_revision === caseContext.revision
             ? applyFactUpdates(caseContext, response.fact_updates ?? []) : { context: caseContext, pending: [] };
           return { ...session, ...(contractV2 ? { caseFacts: accepted.context, pendingFacts: accepted.pending } : {}),
-            messages: [...updated, { ...assistant, ...(response?.contract_version === 2 ? { factsRevision: accepted.context.revision } : {}) }].slice(-MAX_MESSAGES_PER_SESSION) };
+            messages: [...updated, { ...assistant, processingTrace: finalTrace, ...(response?.contract_version === 2 ? { factsRevision: accepted.context.revision } : {}) }].slice(-MAX_MESSAGES_PER_SESSION) };
         }));
       };
 
@@ -353,6 +370,8 @@ export function useConversation(sessionId?: string) {
         for (let attempt = 0; attempt <= MAX_RETRYABLE_CHAT_ATTEMPTS; attempt += 1) {
           try {
             abortController.signal.throwIfAborted();
+            processingAttempt = attempt;
+            recordProcessingStep("connecting");
             metrics.beginAttempt(attempt);
             response = await sendChat(request, abortController.signal, text => {
               if (!isOwner() || finished || abortController.signal.aborted || !text) return;
@@ -361,7 +380,7 @@ export function useConversation(sessionId?: string) {
               // A received delta proves generation even with an older backend
               // that does not yet send progress events.
               setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS.generating);
-              publishStream();
+              recordProcessingStep("generating");
             }, guidance => {
               if (!isOwner() || finished || abortController.signal.aborted) return;
               partialGuidance = guidance;
@@ -370,11 +389,12 @@ export function useConversation(sessionId?: string) {
                 ? Boolean(guidance.clarifying_questions?.some(question => question.trim()))
                 : guidance.interaction_mode === "answer" && Boolean(guidance.suggested_replies?.some(reply => reply.trim()));
               if (hasVisibleGuidance) metrics.firstGuidance();
-              publishStream();
+              recordProcessingStep("guidance");
             }, progress => {
               if (!isOwner() || finished || abortController.signal.aborted) return;
               metrics.progress(progress);
               setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS[progress.phase]);
+              recordProcessingStep(progress.phase);
             });
             break;
           } catch (err) {
@@ -386,11 +406,7 @@ export function useConversation(sessionId?: string) {
               err.status !== 429 && attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
             ) {
               partialGuidance = undefined;
-              setStreamingBySession(previous => {
-                const next = { ...previous };
-                delete next[targetSessionId];
-                return next;
-              });
+              recordProcessingStep("retrying");
               setSessionRetryStatus(targetSessionId, RETRY_MESSAGE);
               await delay(500 * (attempt + 1), abortController.signal);
               setSessionRetryStatus(targetSessionId, WAITING_MESSAGE);

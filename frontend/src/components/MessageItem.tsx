@@ -9,6 +9,7 @@ import remarkGfm from "remark-gfm";
 
 import MaterialIcon from "./MaterialIcon";
 import ActionButtons from "./ActionButtons";
+import ProcessingTrace from "./ProcessingTrace";
 import { getSafeResourceActions } from "./actionButtonValidation";
 import { useI18n } from "../i18n";
 import React from "react";
@@ -191,6 +192,8 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
           />
         )}
 
+        {!isUser && message.processingTrace && <ProcessingTrace trace={message.processingTrace} />}
+
         {/* 訊息內容 */}
         {!isCancelled && replyAnswers.length > 0 && (
           <div aria-label="回覆內容" className="space-y-4">
@@ -238,7 +241,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
           )}
         </div>}
 
-        {message.isStreaming && <p role="status" className="text-xs text-on-surface/50 animate-pulse">{streamingStatus ?? "正在回覆…"}</p>}
+        {message.isStreaming && !message.processingTrace && <p role="status" className="text-xs text-on-surface/50 animate-pulse">{streamingStatus ?? "正在回覆…"}</p>}
         {isCancelled && <p className="text-sm font-medium text-on-surface/55">{message.content ? "使用者已終止回覆，以上內容尚未完成" : "使用者已終止回覆"}</p>}
         {message.interruptionReason && <p role="alert" className="text-sm font-medium">{message.interruptionReason}</p>}
         {message.superseded && <p className="text-xs text-on-surface/60">{t.supersededAnswer}</p>}
