@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "path": "resource/chatgpt_scene.xlsx",
+      "sha256": "72edcc648e1f44a30db3b819a00eafb296d84bd52b4c407ee39f61f0465f4ab4",
+      "count": 335
+    },
+    {
+      "path": "resource/gemini_scene.xlsx",
+      "sha256": "4db2efb4c19c1fcf54353a77ee5f09276efd18b33dc8f9a19a9877b86a9275ac",
+      "count": 299
+    }
+  ],
+  "candidate_count": 634,
+  "reviewed_gold_count": 0,
+  "candidate_sha256": "22525076ee26df1bc3595610d28652827b1e21053a12e67da1a62b2d04f31ec9",
+  "family_count": 634,
+  "family_method": "normalized character trigram Jaccard >= 0.72; transitive groups",
+  "split_method": "family SHA256 modulo 10: development 0-5, validation 6-7, holdout 8-9",
+  "split_status": "provisional; expert and semantic duplicate review required before benchmark use",
+  "split_counts": {
+    "development": 373,
+    "holdout": 106,
+    "validation": 155
+  },
+  "warnings": {
+    "ambiguous_topic:性影像": 11,
+    "conditional_supplement": 6,
+    "supplemental_text_without_mapped_law": 9
+  },
+  "generation_provenance": "Workbook filenames only; generating model, prompt, and human review are not established.",
+  "evidence_boundary": "Offline and synthetic results verify evaluator behavior only; they are not measured model accuracy, legal correctness, deployed retrieval quality, or latency. Unreviewed candidate labels are excluded from quality metrics."
+}

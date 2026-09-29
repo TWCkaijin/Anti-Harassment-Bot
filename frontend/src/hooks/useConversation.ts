@@ -9,23 +9,32 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
   sendChat,
+  checkHealth,
   type ActionButton,
   type ChatGuidance,
   type ChatProgress,
   type ChatResponse,
   type DebugToolCall,
   type RagInfo,
+  type CaseContext,
+  type Clarification,
+  type ClarificationAnswer,
+  type FactUpdate,
 } from "../services/api";
 import {
   createChatRequest,
   getUserMessageValidationError,
 } from "./conversationHistory";
+import { applyFactUpdates, emptyCaseContext, normalizeCaseContext, parseFact } from "../services/caseFacts";
+import { loadConversationStorage, saveConversationStorage, STORAGE_KEY, type StorageIssue } from "./conversationStorage";
 
 // ── 型別定義 ──────────────────────────────────────────────────────────────
 
 /** Local display metadata; content remains the complete model-visible message. */
 export interface ReplyContext {
   answers: Array<{ question: string; answer: string }>;
+  clarificationAnswer?: ClarificationAnswer;
+  factsRevision?: number;
 }
 
 export interface ConversationMessage {
@@ -49,6 +58,13 @@ export interface ConversationMessage {
   debugToolCalls?: DebugToolCall[];
   imageUrl?: string; // 圖片預覽網址 (僅 frontend 顯示用)
   replyContext?: ReplyContext;
+  clarification?: Clarification | null;
+  factsRevision?: number;
+  contractVersion?: 2;
+  superseded?: boolean;
+  answerSections?: ChatResponse["answer_sections"];
+  requestKind?: "request" | "clarification" | "regeneration";
+  originRequestId?: string;
 }
 
 export interface ConversationSession {
@@ -56,18 +72,20 @@ export interface ConversationSession {
   createdAt: number;
   messages: ConversationMessage[];
   title?: string;
+  schemaVersion?: 2;
+  caseFacts?: CaseContext;
+  pendingFacts?: FactUpdate[];
 }
 
 // ── 常數 ─────────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = "harass_bot_conversations";
 const MAX_SESSIONS = 10;
 const MAX_MESSAGES_PER_SESSION = 100;
 const MAX_RETRYABLE_CHAT_ATTEMPTS = 2;
 const RETRY_MESSAGE = "伺服器回傳錯誤，正在重試中";
 const WAITING_MESSAGE = "正在等待伺服器回應";
 const CHAT_PROGRESS_LABELS: Record<ChatProgress["phase"], string> = {
-  anonymizing: "正在匿名化",
+  anonymizing: "正在遮蔽文字識別資訊",
   preparing: "正在準備回覆",
   waiting_model: "正在等待 AI 回應",
   retrieving: "正在檢索資料庫",
@@ -80,6 +98,11 @@ const CHAT_PROGRESS_LABELS: Record<ChatProgress["phase"], string> = {
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function latestUserRequest(messages: ConversationMessage[]): ConversationMessage | undefined {
+  return [...messages].reverse().find(message => message.role === "user" && message.content.trim()
+    && message.requestKind !== "clarification" && message.requestKind !== "regeneration" && !message.replyContext?.clarificationAnswer);
 }
 
 function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -97,34 +120,12 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function loadSessions(): ConversationSession[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as ConversationSession[]) : [];
-    // 過濾掉沒有訊息的空對話，避免重新載入時留下一堆空對話
-    return parsed
-      .map(s => ({ ...s, messages: s.messages.filter(message => !message.isStreaming) }))
-      .filter(s => s.messages.length > 0);
-  } catch {
-    return [];
-  }
-}
-
-function saveSessions(sessions: ConversationSession[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-  } catch {
-    // localStorage 可能已滿，清除最舊的 session
-    const trimmed = sessions.slice(-MAX_SESSIONS + 2);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
-  }
-}
-
 // ── Hook ─────────────────────────────────────────────────────────────────
 
 export function useConversation(sessionId?: string) {
   const [initialState] = useState(() => {
-    const loaded = loadSessions();
+    const storage = loadConversationStorage();
+    const loaded = storage.sessions;
     const id = sessionId ?? generateId();
     if (!loaded.some(s => s.id === id)) {
       loaded.push({
@@ -133,7 +134,7 @@ export function useConversation(sessionId?: string) {
         messages: [],
       });
     }
-    return { sessions: loaded, currentSessionId: id };
+    return { sessions: loaded, currentSessionId: id, storage };
   });
 
   const [sessions, setSessions] = useState<ConversationSession[]>(initialState.sessions);
@@ -144,17 +145,32 @@ export function useConversation(sessionId?: string) {
   const [streamingBySession, setStreamingBySession] = useState<Record<string, ConversationMessage>>({});
   const [error, setError] = useState<string | null>(null);
   const [retryStatusBySession, setRetryStatusBySession] = useState<Record<string, string>>({});
+  const [storageIssue, setStorageIssue] = useState<StorageIssue>(initialState.storage.issue);
+  const storageWritableRef = useRef(initialState.storage.writable);
+  const [contractV2, setContractV2] = useState(false);
+  const [isBackendConnected, setIsBackendConnected] = useState<boolean | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    checkHealth().then(health => {
+      if (mounted) { setContractV2(health.capabilities?.chat_contract_versions.includes(2) === true); setIsBackendConnected(true); }
+    }).catch(() => { if (mounted) setIsBackendConnected(false); });
+    return () => { mounted = false; };
+  }, []);
 
   // 同步到 localStorage
   const sessionsRef = useRef(sessions);
   const loadingSessionIdsRef = useRef<Set<string>>(new Set());
   const abortControllersRef = useRef(new Map<string, AbortController>());
+  const ownersRef = useRef(new Map<string, symbol>());
   useEffect(() => {
     sessionsRef.current = sessions;
   });
 
   useEffect(() => {
-    saveSessions(sessions);
+    if (storageWritableRef.current) {
+      const saved = saveConversationStorage(sessions);
+      setStorageIssue(saved ? null : "unavailable");
+    }
   }, [sessions]);
 
   useEffect(() => {
@@ -203,7 +219,7 @@ export function useConversation(sessionId?: string) {
   const createNewSession = useCallback(() => {
     // 若當前 Session 已經是空的，就不需再建立新對話
     const current = sessionsRef.current.find(s => s.id === currentSessionId);
-    if (current && current.messages.length === 0) {
+    if (current && current.messages.length === 0 && Object.keys(normalizeCaseContext(current.caseFacts).facts).length === 0) {
       return currentSessionId;
     }
 
@@ -216,7 +232,7 @@ export function useConversation(sessionId?: string) {
     
     setSessions((prev) => {
       // 在建立新 Session 時，順便清除其他空的 Session，避免清單被「新的對話」洗版
-      const filtered = prev.filter(s => s.messages.length > 0 || s.id === currentSessionId);
+      const filtered = prev.filter(s => s.messages.length > 0 || Object.keys(normalizeCaseContext(s.caseFacts).facts).length > 0 || s.id === currentSessionId);
       const trimmed = filtered.length >= MAX_SESSIONS ? filtered.slice(filtered.length - MAX_SESSIONS + 1) : filtered;
       if (trimmed.some(s => s.id === newId)) return trimmed;
       return [...trimmed, newSession];
@@ -230,9 +246,22 @@ export function useConversation(sessionId?: string) {
   // ── 傳送訊息 ──────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(
-    async (userInput: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext) => {
+    async (userInput: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext, contextOverride?: CaseContext, regenerationOriginId?: string) => {
       const targetSessionId = currentSessionId;
       if (loadingSessionIdsRef.current.has(targetSessionId)) return;
+      const targetSession = sessionsRef.current.find(session => session.id === targetSessionId);
+      if (!targetSession) return;
+      let caseContext = normalizeCaseContext(contextOverride ?? targetSession.caseFacts);
+      if (!contractV2 && (caseContext.revision > 0 || Object.keys(caseContext.facts).length > 0)) {
+        setError("目前服務尚未支援這份情境摘要，請改開新對話。");
+        return;
+      }
+      const typedAnswer = replyContext?.clarificationAnswer;
+      if (typedAnswer && (!contractV2 || replyContext.factsRevision !== caseContext.revision || !parseFact(typedAnswer))) {
+        setError("情境摘要已更新，請使用最新問題或直接輸入。");
+        return;
+      }
+      if (typedAnswer) caseContext = { ...caseContext, revision: caseContext.revision + 1, facts: { ...caseContext.facts, [typedAnswer.fact_key]: parseFact(typedAnswer)! } };
 
       const normalizedUserInput = userInput.trim();
       if (!normalizedUserInput && !imageBase64) return;
@@ -248,6 +277,10 @@ export function useConversation(sessionId?: string) {
       setSessionLoading(targetSessionId, true);
       const abortController = new AbortController();
       abortControllersRef.current.set(targetSessionId, abortController);
+      const owner = Symbol(targetSessionId);
+      ownersRef.current.set(targetSessionId, owner);
+      const isOwner = () => ownersRef.current.get(targetSessionId) === owner;
+      let finished = false;
 
       // 建立使用者訊息
       const userMsg: ConversationMessage = {
@@ -257,7 +290,9 @@ export function useConversation(sessionId?: string) {
         timestamp: Date.now(),
         imageUrl: imageUrl, // 加入圖片預覽 URL
         ...(replyContext ? { replyContext } : {}),
+        requestKind: regenerationOriginId ? "regeneration" : typedAnswer ? "clarification" : "request",
       };
+      userMsg.originRequestId = regenerationOriginId ?? (typedAnswer ? latestUserRequest(targetSession.messages)?.id : userMsg.id);
 
       // 先將使用者訊息加入畫面
       setSessions((prev) =>
@@ -265,6 +300,8 @@ export function useConversation(sessionId?: string) {
           s.id === targetSessionId
             ? {
                 ...s,
+                ...(contractV2 ? { caseFacts: caseContext } : {}),
+                pendingFacts: [],
                 messages: [...s.messages, userMsg].slice(-MAX_MESSAGES_PER_SESSION),
               }
             : s
@@ -272,7 +309,12 @@ export function useConversation(sessionId?: string) {
       );
 
       // 取得 API-safe 歷史（不含剛加入的使用者訊息）
-      const request = createChatRequest(messages, normalizedUserInput, imageBase64);
+      const request = createChatRequest(targetSession.messages.filter(message => !message.superseded), normalizedUserInput, imageBase64, contractV2 ? 2 : undefined);
+      if (contractV2) {
+        request.contract_version = 2;
+        request.case_context = structuredClone(caseContext);
+        if (typedAnswer) request.clarification_answer = typedAnswer;
+      }
 
       const metrics = createChatMetrics(Boolean(imageBase64), request.use_rag);
       const assistantId = generateId();
@@ -281,7 +323,8 @@ export function useConversation(sessionId?: string) {
       let partialGuidance: ChatGuidance | undefined;
       let hasVisibleGuidance = false;
       const publishStream = () => {
-        setStreamingBySession(previous => ({
+        if (!isOwner() || finished) return;
+        setStreamingBySession(previous => !isOwner() || finished ? previous : ({
           ...previous,
           [targetSessionId]: {
             id: assistantId, role: "assistant", content: partialText,
@@ -291,13 +334,17 @@ export function useConversation(sessionId?: string) {
         }));
       };
       const commitAssistant = (assistant: ConversationMessage, response?: ChatResponse) => {
+        if (!isOwner()) return;
         setSessions(prev => prev.map(session => {
           // Clearing/deleting a conversation must not resurrect an in-flight turn.
-          if (session.id !== targetSessionId || !session.messages.some(message => message.id === userMsg.id)) return session;
+          if (!isOwner() || session.id !== targetSessionId || !session.messages.some(message => message.id === userMsg.id)) return session;
           const updated = session.messages.map(message => message.id === userMsg.id && response?.emotion
             ? { ...message, emotion: response.emotion, emotionColor: response.emotion_color }
             : message);
-          return { ...session, messages: [...updated, assistant].slice(-MAX_MESSAGES_PER_SESSION) };
+          const accepted = response?.contract_version === 2 && response.facts_revision === caseContext.revision
+            ? applyFactUpdates(caseContext, response.fact_updates ?? []) : { context: caseContext, pending: [] };
+          return { ...session, ...(contractV2 ? { caseFacts: accepted.context, pendingFacts: accepted.pending } : {}),
+            messages: [...updated, { ...assistant, ...(response?.contract_version === 2 ? { factsRevision: accepted.context.revision } : {}) }].slice(-MAX_MESSAGES_PER_SESSION) };
         }));
       };
 
@@ -308,7 +355,7 @@ export function useConversation(sessionId?: string) {
             abortController.signal.throwIfAborted();
             metrics.beginAttempt(attempt);
             response = await sendChat(request, abortController.signal, text => {
-              if (abortController.signal.aborted || !text) return;
+              if (!isOwner() || finished || abortController.signal.aborted || !text) return;
               metrics.firstToken();
               partialText += text;
               // A received delta proves generation even with an older backend
@@ -316,7 +363,7 @@ export function useConversation(sessionId?: string) {
               setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS.generating);
               publishStream();
             }, guidance => {
-              if (abortController.signal.aborted) return;
+              if (!isOwner() || finished || abortController.signal.aborted) return;
               partialGuidance = guidance;
               setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS.guidance);
               hasVisibleGuidance ||= guidance.interaction_mode === "clarify"
@@ -325,14 +372,14 @@ export function useConversation(sessionId?: string) {
               if (hasVisibleGuidance) metrics.firstGuidance();
               publishStream();
             }, progress => {
-              if (abortController.signal.aborted) return;
+              if (!isOwner() || finished || abortController.signal.aborted) return;
               metrics.progress(progress);
               setSessionRetryStatus(targetSessionId, CHAT_PROGRESS_LABELS[progress.phase]);
             });
             break;
           } catch (err) {
             if (
-              !abortController.signal.aborted && !partialText && !hasVisibleGuidance &&
+              isOwner() && !abortController.signal.aborted && !partialText && !hasVisibleGuidance &&
               err instanceof ApiError && err.retryable &&
               // Never automatically replay after reply or guidance text was shown,
               // or a rate-limited request before its Retry-After window.
@@ -354,7 +401,9 @@ export function useConversation(sessionId?: string) {
         }
 
         abortController.signal.throwIfAborted();
+        if (!isOwner()) return;
         if (!response) throw new Error("Chat response is missing after retry attempts");
+        if (response.contract_version === 2 && response.facts_revision !== caseContext.revision) throw new ApiError(502, "情境摘要版本不符", "請重新送出訊息", false);
         commitAssistant({
           id: assistantId,
           role: "assistant",
@@ -367,9 +416,13 @@ export function useConversation(sessionId?: string) {
           interactionMode: response.interaction_mode,
           clarifyingQuestions: response.clarifying_questions,
           debugToolCalls: response.debug_tool_calls,
+          contractVersion: response.contract_version,
+          clarification: response.clarification,
+          answerSections: response.answer_sections,
         }, response);
         metrics.finish("success", response);
       } catch (err) {
+        if (!isOwner()) return;
         if (abortController.signal.aborted) {
           metrics.finish("cancelled");
           commitAssistant({
@@ -389,7 +442,10 @@ export function useConversation(sessionId?: string) {
           ...(partialText ? { interruptionReason: `回覆中斷，以上內容尚未完成。${errorMsg}` } : {}),
         });
       } finally {
-        setStreamingBySession(previous => {
+        finished = true;
+        if (isOwner()) {
+          setStreamingBySession(previous => {
+          if (previous[targetSessionId]?.id !== assistantId) return previous;
           const next = { ...previous };
           delete next[targetSessionId];
           return next;
@@ -397,10 +453,32 @@ export function useConversation(sessionId?: string) {
         setSessionRetryStatus(targetSessionId, null);
         setSessionLoading(targetSessionId, false);
         abortControllersRef.current.delete(targetSessionId);
+        }
       }
     },
-    [currentSessionId, messages, setSessionLoading, setSessionRetryStatus]
+    [currentSessionId, contractV2, setSessionLoading, setSessionRetryStatus]
   );
+
+  const saveCaseFacts = useCallback(async (context: CaseContext, answerAgain = false) => {
+    const session = sessionsRef.current.find(item => item.id === currentSessionId);
+    if (!session || !contractV2) return;
+    ownersRef.current.delete(currentSessionId);
+    abortControllersRef.current.get(currentSessionId)?.abort();
+    abortControllersRef.current.delete(currentSessionId);
+    setSessionLoading(currentSessionId, false);
+    setSessionRetryStatus(currentSessionId, null);
+    setStreamingBySession(previous => { const next = { ...previous }; delete next[currentSessionId]; return next; });
+    const current = normalizeCaseContext(session.caseFacts);
+    const nextFacts = { ...normalizeCaseContext(context), revision: current.revision + 1 };
+    const next = sessionsRef.current.map(item => item.id === currentSessionId ? {
+      ...item, caseFacts: nextFacts, pendingFacts: [],
+      messages: item.messages.map(message => message.role === "assistant" ? { ...message, superseded: true } : message),
+    } : item);
+    sessionsRef.current = next;
+    setSessions(next);
+    const originalRequest = latestUserRequest(session.messages);
+    if (answerAgain && originalRequest) await sendMessage(originalRequest.content, undefined, undefined, undefined, nextFacts, originalRequest.id);
+  }, [currentSessionId, contractV2, sendMessage, setSessionLoading, setSessionRetryStatus]);
 
   const stopCurrentResponse = useCallback(() => {
     abortControllersRef.current.get(currentSessionId)?.abort();
@@ -409,19 +487,25 @@ export function useConversation(sessionId?: string) {
   // ── 清除當前 Session ──────────────────────────────────────────────────
 
   const clearCurrentSession = useCallback(() => {
+    ownersRef.current.delete(currentSessionId);
     abortControllersRef.current.get(currentSessionId)?.abort();
     setSessions((prev) =>
       prev.map((s) =>
-        s.id === currentSessionId ? { ...s, messages: [] } : s
+        s.id === currentSessionId ? { ...s, messages: [], caseFacts: emptyCaseContext(), pendingFacts: [] } : s
       )
     );
-  }, [currentSessionId]);
+    setSessionLoading(currentSessionId, false);
+    setSessionRetryStatus(currentSessionId, null);
+    setStreamingBySession(previous => { const next = { ...previous }; delete next[currentSessionId]; return next; });
+  }, [currentSessionId, setSessionLoading, setSessionRetryStatus]);
 
   // ── 刪除 Session ──────────────────────────────────────────────────────
 
   const deleteSession = useCallback(
     (id: string) => {
+      ownersRef.current.delete(id);
       abortControllersRef.current.get(id)?.abort();
+      sessionsRef.current = sessionsRef.current.filter(session => session.id !== id);
       setSessions((prev) => prev.filter((s) => s.id !== id));
       setSessionLoading(id, false);
       setSessionRetryStatus(id, null);
@@ -445,6 +529,7 @@ export function useConversation(sessionId?: string) {
   // ── 清除所有 Session ───────────────────────────────────────────────────
 
   const clearAllSessions = useCallback(() => {
+    ownersRef.current.clear();
     abortControllersRef.current.forEach(controller => controller.abort());
     setStreamingBySession({});
     setSessions([]);
@@ -462,8 +547,10 @@ export function useConversation(sessionId?: string) {
     setRetryStatusBySession({});
     try {
       localStorage.removeItem(STORAGE_KEY);
+      storageWritableRef.current = true;
+      setStorageIssue(null);
     } catch {
-      // ignore
+      setStorageIssue("unavailable");
     }
   }, []);
 
@@ -475,6 +562,14 @@ export function useConversation(sessionId?: string) {
     isLoading,
     error,
     retryStatus,
+    contractV2,
+    isBackendConnected,
+    storageIssue,
+    caseFacts: normalizeCaseContext(currentSession?.caseFacts),
+    incompatibleSummary: !contractV2 && (normalizeCaseContext(currentSession?.caseFacts).revision > 0 || Object.keys(normalizeCaseContext(currentSession?.caseFacts).facts).length > 0),
+    canRegenerate: Boolean(latestUserRequest(currentSession?.messages ?? [])),
+    pendingFacts: currentSession?.pendingFacts ?? [],
+    saveCaseFacts,
     stopCurrentResponse,
     sendMessage,
     createNewSession,

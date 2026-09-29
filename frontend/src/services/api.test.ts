@@ -4,6 +4,7 @@ import {
   getRuntimeConfig,
   normalizeApiErrorDetail,
   sendChat,
+  parseChatResponse,
   updateRuntimeConfig,
   type RuntimeConfig,
 } from "./api";
@@ -124,6 +125,29 @@ const chatResponse = {
   clarifying_questions: [],
 };
 const chatRequest = { message: "你好", history: [], use_rag: true };
+it("validates typed done metadata and rejects malformed facts", () => {
+  const response = { ...chatResponse, contract_version: 2, facts_revision: 0, fact_updates: [], clarification: null, answer_sections: [], execution: { route: "tool", model_calls: 1 } };
+  expect(parseChatResponse(response)).toEqual(response);
+  expect(() => parseChatResponse({ ...response, fact_updates: [{ fact_key: "name", status: "provided", value: "secret", evidence: "secret", kind: "explicit" }] })).toThrow();
+  expect(() => parseChatResponse({ ...response, facts_revision: -1 })).toThrow();
+});
+it("rejects extra fact metadata, absent evidence and unsafe clarification shapes", () => {
+  const response = { ...chatResponse, contract_version: 2, facts_revision: 0, fact_updates: [], clarification: null, answer_sections: [], execution: { route: "tool", model_calls: 1 } };
+  const update = { fact_key: "other_role", status: "provided", value: "主管", evidence: "我的主管", kind: "confirmation" };
+  expect(() => parseChatResponse({ ...response, fact_updates: [{ ...update, person_name: "private" }] })).toThrow();
+  expect(() => parseChatResponse({ ...response, fact_updates: [{ ...update, evidence: undefined }] })).toThrow();
+  expect(() => parseChatResponse({ ...response, fact_updates: [{ ...update, evidence: "   " }] })).toThrow();
+  const clarification = { question_id: "case.other_role.0", fact_key: "other_role", reason: "影響方向", question: "對方是？", options: [{ label: "主管", value: "主管" }] };
+  expect(() => parseChatResponse({ ...response, clarification: { ...clarification, private_detail: "private" } })).toThrow();
+  expect(() => parseChatResponse({ ...response, clarification: { ...clarification, options: [{ label: "主管", value: "主管", private_detail: "private" }] } })).toThrow();
+});
+it.each([{}, [null], [{ label: {} }], [{ label: "法規", source_url: {} }], [{ label: "法規", type: "made-up" }]])("rejects malformed retrieved sources before rendering: %j", sources => {
+  expect(() => parseChatResponse({ ...chatResponse, rag_used: { status: true, sources } })).toThrow();
+});
+it("accepts nullable optional source metadata from older APIs", () => {
+  const source = { label: "法規", type: "law", collection: null, doc_id: null, distance: null, source_url: null, article: null, version: null };
+  expect(parseChatResponse({ ...chatResponse, rag_used: { status: true, sources: [source] } }).rag_used.sources).toEqual([source]);
+});
 const encoder = new TextEncoder();
 const eventText = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
 

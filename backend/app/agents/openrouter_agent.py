@@ -124,7 +124,7 @@ _DEFAULT_SYSTEM_SECTIONS: tuple[tuple[str, str, str], ...] = (
             請依下列順序初步判斷情境。若資訊不足，請改以詢問問題釐清相關詳情，取代證據不足的判斷。
             1. 是否有立即安全風險
             - 若使用者描述正在遭受威脅、跟蹤、暴力、強迫、被限制行動、性侵害風險、自傷或輕生意念，優先提供安全提醒與緊急資源，例如 110、119、113 保護專線，並建議移動到安全處所或聯絡可信任的人。
-            - 當輸入指令包含太多情緒用詞時，先安撫情緒，例如“你不是一個人。我會在這裡陪著你”等等的安撫用詞，越溫柔越好，並現階段先不提供法律建議。
+            - 情緒強烈時提供支持性回應，並依使用者需求提供簡短、必要的程序資訊；不要僅因情緒用詞而停止法律資訊。
             - 當事件描述不清時，依照雙方關係、地點、行為類別，一步一步引導回應。
             - 對話表現出申訴需求時，表示鼓勵語氣，並提供資源轉介資訊。
 
@@ -291,6 +291,7 @@ class AgentResult:
     sources: list[dict[str, Any]] = field(default_factory=list)
     available_actions: list[dict[str, Any]] = field(default_factory=list)
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    guidance: dict[str, Any] = field(default_factory=dict)
 
 
 def _source_type_from_collection(
@@ -355,7 +356,31 @@ class OpenRouterAgent:
         on_reply_delta: Callable[[str], Awaitable[None]] | None = None,
         on_guidance: Callable[[dict], Awaitable[None]] | None = None,
         on_progress: Callable[[dict], Awaitable[None]] | None = None,
+        contract_version: int = 1,
+        case_context: dict | None = None,
+        clarification_answer: dict | None = None,
     ) -> AgentResult:
+        if contract_version == 2:
+            from backend.app.agents.guided_chat import run_guided
+
+            arguments = dict(
+                user_message=user_message,
+                history=history,
+                image_base64=image_base64,
+                case_context=case_context,
+                clarification_answer=clarification_answer,
+                on_reply_delta=on_reply_delta,
+                on_guidance=on_guidance,
+                on_progress=on_progress,
+            )
+            if isinstance(self.client, AsyncOpenAI):
+                async with AsyncOpenAI(
+                    base_url=settings.openrouter_base_url,
+                    api_key=settings.openrouter_api_key,
+                    timeout=settings.openrouter_request_timeout_seconds,
+                ) as client:
+                    return await run_guided(self.rag, client, **arguments)
+            return await run_guided(self.rag, self.client, **arguments)
         # WSGI owns a separate event loop per request. A fresh streaming transport
         # prevents pooled sockets from outliving their loop, including cancellation.
         if (on_reply_delta is not None or on_guidance is not None) and isinstance(

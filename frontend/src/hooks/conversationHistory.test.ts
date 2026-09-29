@@ -12,6 +12,10 @@ import {
 } from "./conversationHistory";
 
 describe("buildChatHistory", () => {
+  it("keeps at most four complete recent turns", () => {
+    const messages = Array.from({ length: 7 }, (_, index) => [{ role: "user" as const, content: `Q${index}` }, { role: "assistant" as const, content: `A${index}` }]).flat();
+    expect(buildChatHistory(messages).map(message => message.content)).toEqual(["Q3", "A3", "Q4", "A4", "Q5", "A5", "Q6", "A6"]);
+  });
   it("filters UI-only records and blank content", () => {
     const history = buildChatHistory([
       { role: "user", content: "  可保留的問題  " },
@@ -34,7 +38,7 @@ describe("buildChatHistory", () => {
       { role: "assistant", content: "y".repeat(MAX_ASSISTANT_HISTORY_CHARACTERS + 1) },
       { role: "user", content: "u".repeat(MAX_USER_HISTORY_CHARACTERS) },
       { role: "assistant", content: "a".repeat(MAX_ASSISTANT_HISTORY_CHARACTERS) },
-    ]);
+    ], MAX_USER_HISTORY_CHARACTERS + MAX_ASSISTANT_HISTORY_CHARACTERS);
 
     expect(history).toHaveLength(2);
     expect(history[0].content).toHaveLength(MAX_USER_HISTORY_CHARACTERS);
@@ -44,9 +48,9 @@ describe("buildChatHistory", () => {
   it("keeps a contiguous newest suffix within the aggregate budget", () => {
     const history = buildChatHistory([
       { role: "user", content: "a".repeat(MAX_USER_HISTORY_CHARACTERS) },
-      { role: "assistant", content: "b".repeat(MAX_ASSISTANT_HISTORY_CHARACTERS) },
+      { role: "assistant", content: "b".repeat(MAX_HISTORY_TOTAL_CHARACTERS - MAX_USER_HISTORY_CHARACTERS) },
       { role: "user", content: "c".repeat(MAX_USER_HISTORY_CHARACTERS) },
-      { role: "assistant", content: "d".repeat(MAX_ASSISTANT_HISTORY_CHARACTERS) },
+      { role: "assistant", content: "d".repeat(MAX_HISTORY_TOTAL_CHARACTERS - MAX_USER_HISTORY_CHARACTERS) },
     ]);
 
     expect(history.map(({ content }) => content[0])).toEqual(["c", "d"]);
@@ -100,6 +104,14 @@ describe("buildChatHistory", () => {
 });
 
 describe("createChatRequest", () => {
+  it("retains the legacy history budget until v2 capability is confirmed", () => {
+    const messages = Array.from({ length: 7 }, (_, index) => [{ role: "user" as const, content: `Q${index}` }, { role: "assistant" as const, content: `A${index}` }]).flat();
+    expect(createChatRequest(messages, "下一題").history).toHaveLength(14);
+    expect(createChatRequest(messages, "下一題", undefined, 2).history).toHaveLength(8);
+    const longTurns = Array.from({ length: 3 }, () => [{ role: "user" as const, content: "Q".repeat(2000) }, { role: "assistant" as const, content: "A".repeat(2000) }]).flat();
+    expect(createChatRequest(longTurns, "下一題").history.reduce((sum, message) => sum + message.content.length, 0)).toBe(12_000);
+    expect(createChatRequest(longTurns, "下一題", undefined, 2).history.reduce((sum, message) => sum + message.content.length, 0)).toBe(4_000);
+  });
   it("preserves the image-only request contract", () => {
     expect(createChatRequest([], "   ", "data:image/png;base64,AAAA")).toEqual({
       message: "",

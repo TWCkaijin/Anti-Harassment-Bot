@@ -1,7 +1,7 @@
 const zhTW = {
   // ── App / 通用 ──
   appTitle: "性騷擾防治智能 AI",
-  appSubtitle: "溫暖守護 · 匿名安全 · 法律知識庫",
+  appSubtitle: "溫暖守護 · 本地紀錄 · 法律知識庫",
   brandName: "溫暖守護 AI",
   brandSub: "屏東縣政府性騷擾治理政策Agent",
 
@@ -21,8 +21,8 @@ const zhTW = {
   emergencyContacts: "緊急聯絡",
   counseling: "心理諮商",
   settings: "設定",
-  privacyNote: "對話僅保存於您的裝置",
-  privacyNoteSub: "關閉瀏覽器後不影響紀錄",
+  privacyNote: "對話紀錄保存在此裝置",
+  privacyNoteSub: "提問內容會傳至服務處理",
 
   // ── WelcomeHero ──
   heroChip: "AI 助理已就緒",
@@ -54,7 +54,7 @@ const zhTW = {
   ragSourceJudgment: "歷史判決",
   ragSourceRemedy: "救濟管道",
   ragSourceUnknown: "其他資料",
-  anonymizedLabel: "隱私去識別化保護",
+  anonymizedLabel: "已遮蔽部分文字識別資訊",
 
   // ── EmergencyFab ──
   emergency113: "113 保護專線",
@@ -77,6 +77,41 @@ const zhTW = {
   close: "關閉",
   cancel: "取消",
   confirm: "確認",
+  showEmotionLabels: "顯示情緒標籤",
+  emotionLabelsNote: "標籤由 AI 推測，並非心理評估。關閉只隱藏標籤，不刪除對話。",
+  preferenceSaveFailed: "此設定暫時只在本次使用有效，無法寫入裝置。",
+  caseSummary: "目前了解的情況",
+  caseSummaryNote: "只整理判斷所需資訊，請勿填姓名、電話或精確地址。摘要保存在此裝置，提問時會傳送給服務處理。",
+  caseSummaryEmpty: "尚未整理必要資訊，您可以直接開始對話。",
+  caseSummaryEdit: "修改摘要",
+  caseSummarySave: "儲存摘要",
+  caseSummarySaveAnswer: "儲存並重新回答",
+  caseFactNotAsked: "尚未提供",
+  caseFactProvided: "已提供",
+  caseFactUnknown: "不確定",
+  caseFactDeclined: "暫不提供",
+  caseFactProposed: "待您確認的資訊",
+  caseFactUseProposal: "採用此內容",
+  caseFactValue: "內容",
+  caseFactInvalid: "已提供的內容須為 1 至 300 個字元。",
+  clarificationTitle: "先確認一個會影響處理方向的問題",
+  clarificationOther: "自行補充",
+  clarificationSubmit: "送出回覆",
+  clarificationHide: "隱藏問題，直接輸入",
+  clarificationShow: "顯示問題",
+  supersededAnswer: "摘要已更正，這則回覆依據較早的資訊。",
+  storageUnavailable: "無法保存到此裝置。目前內容仍在此分頁，請先匯出重要內容；重新整理可能遺失。",
+  storageInvalid: "部分本地紀錄無法讀取，為保留原資料，暫停覆寫。可先匯出可讀取的內容，再清除紀錄重新開始。",
+  storageFuture: "本地紀錄來自較新的版本，已停止覆寫。請使用較新版本開啟。",
+  incompatibleSummary: "目前服務尚未支援這份情境摘要。為避免忽略您更正的資訊，這段對話暫停傳送；您可以開啟新對話。原摘要仍保留在此裝置。",
+  answerDirection: "可能的處理方向",
+  answerBasis: "參考依據",
+  answerNextSteps: "下一步",
+  caseFactLabels: {
+    subject_role: "您的角色", other_role: "對方的角色", relationship: "雙方關係", work_related: "是否與工作有關",
+    internship_related: "是否與實習有關", education_related: "是否與教育活動有關", behavior: "行為類型", ongoing: "是否持續發生",
+    event_time: "事件大約時間", age_group: "年齡區間", city: "縣市", desired_help: "希望獲得的協助",
+  },
 } as const;
 
 export type TranslationKeys = keyof typeof zhTW;

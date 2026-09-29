@@ -7,12 +7,16 @@ import { useState } from "react";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n, type Locale } from "../i18n";
 import type { ConversationSession } from "../hooks/useConversation";
+import { formatConversationText } from "../services/conversationExport";
 
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
   sessions: ConversationSession[];
   onClearAll: () => void;
+  showEmotions?: boolean;
+  onShowEmotionsChange?: (value: boolean) => void;
+  preferenceSaveFailed?: boolean;
 }
 
 export default function SettingsPanel({
@@ -20,6 +24,7 @@ export default function SettingsPanel({
   onClose,
   sessions,
   onClearAll,
+  showEmotions = false, onShowEmotionsChange, preferenceSaveFailed = false,
 }: SettingsPanelProps) {
   const { t, locale, setLocale } = useI18n();
   const [analyticsEnabled, setAnalyticsEnabled] = useState(hasAnalyticsConsent);
@@ -35,12 +40,9 @@ export default function SettingsPanel({
   const exportAsTxt = () => {
     let text = "";
     for (const session of sessions) {
-      if (session.messages.length === 0) continue;
+      if (session.messages.length === 0 && Object.keys(session.caseFacts?.facts ?? {}).length === 0) continue;
       text += `=== 對話 ${new Date(session.createdAt).toLocaleString()} ===\n\n`;
-      for (const msg of session.messages) {
-        const role = msg.role === "user" ? "使用者" : "AI";
-        text += `[${role}] ${msg.content}\n\n`;
-      }
+      text += formatConversationText(session, t);
       text += "\n---\n\n";
     }
     downloadFile(text, "conversations.txt", "text/plain");
@@ -131,6 +133,14 @@ export default function SettingsPanel({
               </button>
             </div>
           </section>
+
+          {onShowEmotionsChange && <section>
+            <label className="flex items-center gap-3 text-sm font-semibold text-on-surface">
+              <input type="checkbox" checked={showEmotions} onChange={event => onShowEmotionsChange(event.target.checked)} />{t.showEmotionLabels}
+            </label>
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">{t.emotionLabelsNote}</p>
+            {preferenceSaveFailed && <p role="alert" className="mt-2 text-xs text-error">{t.preferenceSaveFailed}</p>}
+          </section>}
 
           {isAnalyticsConfigured() && <section>
             <label className="flex items-center gap-3 text-sm font-semibold text-on-surface">

@@ -1,7 +1,7 @@
 const en = {
   // ── App / General ──
   appTitle: "Anti-Harassment AI",
-  appSubtitle: "Warm Protection · Anonymous · Legal Knowledge",
+  appSubtitle: "Support · Local history · Legal knowledge",
   brandName: "Guardian AI",
   brandSub: "AI Assistant",
 
@@ -21,8 +21,8 @@ const en = {
   emergencyContacts: "Emergency",
   counseling: "Counseling",
   settings: "Settings",
-  privacyNote: "🔒 Chats saved on your device only",
-  privacyNoteSub: "Data persists after closing browser",
+  privacyNote: "Conversation history is saved on this device",
+  privacyNoteSub: "Questions are sent to the service for processing",
 
   // ── WelcomeHero ──
   heroChip: "AI Assistant Ready",
@@ -54,7 +54,7 @@ const en = {
   ragSourceJudgment: "Judgments",
   ragSourceRemedy: "Remedies",
   ragSourceUnknown: "Other Sources",
-  anonymizedLabel: "Privacy de-identification",
+  anonymizedLabel: "Some text identifiers were masked",
 
   // ── EmergencyFab ──
   emergency113: "113 Protection Hotline",
@@ -78,6 +78,41 @@ const en = {
   close: "Close",
   cancel: "Cancel",
   confirm: "Confirm",
+  showEmotionLabels: "Show emotion labels",
+  emotionLabelsNote: "AI-generated labels are not a psychological assessment. Turning them off hides labels without deleting messages.",
+  preferenceSaveFailed: "This preference could not be saved and only applies to this visit.",
+  caseSummary: "Current situation summary",
+  caseSummaryNote: "Include only necessary details, without names, phone numbers or exact addresses. The summary stays on this device and is sent with questions for processing.",
+  caseSummaryEmpty: "No details have been recorded. You can start chatting directly.",
+  caseSummaryEdit: "Edit summary",
+  caseSummarySave: "Save summary",
+  caseSummarySaveAnswer: "Save and answer again",
+  caseFactNotAsked: "Not provided yet",
+  caseFactProvided: "Provided",
+  caseFactUnknown: "Not sure",
+  caseFactDeclined: "Prefer not to say",
+  caseFactProposed: "Details awaiting your confirmation",
+  caseFactUseProposal: "Use this detail",
+  caseFactValue: "Detail",
+  caseFactInvalid: "Provided details must contain 1 to 300 characters.",
+  clarificationTitle: "One detail that may affect the next steps",
+  clarificationOther: "Use my own words",
+  clarificationSubmit: "Send reply",
+  clarificationHide: "Hide question and type freely",
+  clarificationShow: "Show question",
+  supersededAnswer: "Your summary has changed. This reply used earlier details.",
+  storageUnavailable: "This device could not save the conversation. It remains in this tab; export important content before refreshing.",
+  storageInvalid: "Some saved records cannot be read. Saving has paused to protect the original data. Export readable content before clearing records.",
+  storageFuture: "Saved records use a newer format. Saving is paused; open them with a newer version.",
+  incompatibleSummary: "This service has not confirmed support for your summary. Sending is paused to avoid ignoring corrected details. You can start a new chat; the original summary remains on this device.",
+  answerDirection: "Possible direction",
+  answerBasis: "Supporting sources",
+  answerNextSteps: "Next steps",
+  caseFactLabels: {
+    subject_role: "Your role", other_role: "Other person's role", relationship: "Relationship", work_related: "Related to work",
+    internship_related: "Related to an internship", education_related: "Related to education", behavior: "Type of behavior", ongoing: "Ongoing behavior",
+    event_time: "Approximate event date", age_group: "Age group", city: "City or county", desired_help: "Help you want",
+  },
 } as const;
 
 export default en;

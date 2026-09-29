@@ -9,12 +9,14 @@ import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
 import SettingsPanel from "./components/SettingsPanel";
 import AdminPanel from "./components/AdminPanel";
+import { useEmotionPreference } from "./hooks/useEmotionPreference";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const { showEmotions, updateShowEmotions, preferenceSaveFailed } = useEmotionPreference();
 
   const {
     sessions,
@@ -29,6 +31,7 @@ export default function App() {
     deleteSession,
     renameSession,
     clearAllSessions,
+    caseFacts, pendingFacts, saveCaseFacts, contractV2, isBackendConnected, storageIssue, incompatibleSummary, canRegenerate,
   } = useConversation();
 
   const handleOpenSettings = useCallback(() => {
@@ -60,11 +63,20 @@ export default function App() {
       />
 
       {/* 主要對話區 */}
-        <ChatArea
+      <ChatArea
+          key={currentSessionId}
           messages={messages}
           isLoading={isLoading}
           retryStatus={retryStatus}
           onStop={stopCurrentResponse}
+          caseFacts={contractV2 ? caseFacts : undefined}
+          pendingFacts={pendingFacts}
+          onSaveCaseFacts={saveCaseFacts}
+          backendConnected={isBackendConnected}
+          storageIssue={storageIssue}
+          showEmotions={showEmotions}
+          incompatibleSummary={incompatibleSummary}
+          canRegenerate={canRegenerate}
         onSend={sendMessage}
         onOpenSidebar={() => setSidebarOpen(true)}
       />
@@ -77,6 +89,9 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         sessions={sessions}
         onClearAll={clearAllSessions}
+        showEmotions={showEmotions}
+        onShowEmotionsChange={updateShowEmotions}
+        preferenceSaveFailed={preferenceSaveFailed}
       />
 
       <AdminPanel

@@ -2,7 +2,7 @@ import { trackAnalytics } from "../services/analytics";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, sendChat, type ChatGuidance, type ChatProgress, type ChatResponse } from "../services/api";
+import { ApiError, sendChat, checkHealth, type ChatGuidance, type ChatProgress, type ChatResponse } from "../services/api";
 import {
   MAX_USER_MESSAGE_CHARACTERS,
   USER_MESSAGE_TOO_LONG_ERROR,
@@ -11,7 +11,7 @@ import { useConversation } from "./useConversation";
 
 vi.mock("../services/api", async () => {
   const actual = await vi.importActual<typeof import("../services/api")>("../services/api");
-  return { ...actual, sendChat: vi.fn() };
+  return { ...actual, sendChat: vi.fn(), checkHealth: vi.fn() };
 });
 
 vi.mock("../services/analytics", () => ({ hasAnalyticsConsent: () => true, trackAnalytics: vi.fn() }));
@@ -30,12 +30,142 @@ const successfulResponse: ChatResponse = {
 beforeEach(() => {
   window.localStorage.clear();
   vi.mocked(sendChat).mockReset();
+  vi.mocked(checkHealth).mockResolvedValue({ status: "ok", timestamp: "test", version: "test", environment: "test" });
   vi.mocked(trackAnalytics).mockClear();
   vi.useFakeTimers();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+const v2Response = (revision: number, extra: Partial<ChatResponse> = {}): ChatResponse => ({ ...successfulResponse, contract_version: 2, facts_revision: revision, fact_updates: [], clarification: null, answer_sections: [], execution: { route: "direct_retrieval", model_calls: 1 }, ...extra });
+const v2Health = { status: "ok", timestamp: "test", version: "test", environment: "test", capabilities: { chat_contract_versions: [1, 2] } };
+
+describe("local case facts and request ownership", () => {
+  it("regenerates the original user request after two typed answers and repeated summary edits", async () => {
+    vi.mocked(checkHealth).mockResolvedValue(v2Health);
+    vi.mocked(sendChat).mockImplementation(async request => v2Response(request.case_context!.revision));
+    const { result } = renderHook(() => useConversation("original-intent"));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await result.current.sendMessage("我想知道如何申訴"); });
+    const originId = result.current.messages[0].id;
+    await act(async () => { await result.current.sendMessage("對方是誰？\n主管", undefined, undefined, { answers: [{ question: "對方是誰？", answer: "主管" }], factsRevision: 0, clarificationAnswer: { question_id: "case.other_role.0", fact_key: "other_role", status: "provided", value: "主管" } }); });
+    await act(async () => { await result.current.sendMessage("與工作有關？\n是", undefined, undefined, { answers: [{ question: "與工作有關？", answer: "是" }], factsRevision: 1, clarificationAnswer: { question_id: "case.work_related.1", fact_key: "work_related", status: "provided", value: "是" } }); });
+    await act(async () => { await result.current.saveCaseFacts({ ...result.current.caseFacts, facts: { ...result.current.caseFacts.facts, other_role: { status: "provided", value: "同事" } } }, true); });
+    expect(vi.mocked(sendChat).mock.calls[3][0].message).toBe("我想知道如何申訴");
+    expect(result.current.messages.filter(message => message.role === "user").at(-1)).toMatchObject({ requestKind: "regeneration", originRequestId: originId });
+    await act(async () => { await result.current.saveCaseFacts(result.current.caseFacts, true); });
+    expect(vi.mocked(sendChat).mock.calls[4][0].message).toBe("我想知道如何申訴");
+    expect(result.current.messages.filter(message => message.role === "user").at(-1)?.originRequestId).toBe(originId);
+  });
+
+  it("keeps facts-only edits local when there is no original request to regenerate", async () => {
+    vi.mocked(checkHealth).mockResolvedValue(v2Health);
+    const { result } = renderHook(() => useConversation("facts-only"));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.canRegenerate).toBe(false);
+    await act(async () => { await result.current.saveCaseFacts({ schema_version: 1, revision: 0, facts: { city: { status: "declined" } } }, true); });
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(result.current.caseFacts.facts.city).toEqual({ status: "declined" });
+  });
+  it("blocks an existing summary on legacy services without erasing it, and permits a new legacy chat", async () => {
+    const facts = { schema_version: 1, revision: 3, facts: { other_role: { status: "provided", value: "同事" } } };
+    localStorage.setItem("harass_bot_conversations", JSON.stringify([{ id: "v2-existing", createdAt: 1, schemaVersion: 2, caseFacts: facts, messages: [{ id: "u", role: "user", content: "原本的問題", timestamp: 1 }] }]));
+    vi.mocked(sendChat).mockResolvedValue(successfulResponse);
+    const { result } = renderHook(() => useConversation("v2-existing"));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.incompatibleSummary).toBe(true);
+    await act(async () => { await result.current.sendMessage("接續原本的問題"); });
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(result.current.caseFacts).toEqual(facts);
+    act(() => { result.current.createNewSession(); });
+    expect(result.current.incompatibleSummary).toBe(false);
+    await act(async () => { await result.current.sendMessage("新的問題"); });
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendChat).mock.calls[0][0]).not.toHaveProperty("contract_version");
+    expect(result.current.sessions.find(session => session.id === "v2-existing")?.caseFacts).toEqual(facts);
+  });
+  it("does not send v2 fields before a completed capability handshake", async () => {
+    let resolveHealth!: (value: typeof v2Health) => void;
+    vi.mocked(checkHealth).mockReturnValueOnce(new Promise(resolve => { resolveHealth = resolve; }));
+    vi.mocked(sendChat).mockResolvedValue(successfulResponse);
+    const { result } = renderHook(() => useConversation("handshake"));
+    await act(async () => { await result.current.sendMessage("第一個問題"); });
+    expect(vi.mocked(sendChat).mock.calls[0][0]).not.toHaveProperty("contract_version");
+    await act(async () => { resolveHealth(v2Health); });
+    await act(async () => { await result.current.sendMessage("下一個問題"); });
+    expect(vi.mocked(sendChat).mock.calls[1][0]).toMatchObject({ contract_version: 2, case_context: { schema_version: 1, revision: 0, facts: {} } });
+  });
+
+  it("applies explicit updates only on done and marks conflicting information pending", async () => {
+    vi.mocked(checkHealth).mockResolvedValue(v2Health);
+    const pending = deferredResponse();
+    const { result } = renderHook(() => useConversation("v2-done"));
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void>;
+    act(() => { request = result.current.sendMessage("我是學生"); });
+    act(() => pending.delta("學生"));
+    expect(result.current.caseFacts.facts).toEqual({});
+    await act(async () => {
+      pending.resolve(v2Response(0, { fact_updates: [{ fact_key: "subject_role", status: "provided", value: "學生", evidence: "我是學生", kind: "explicit" }] }));
+      await request;
+    });
+    expect(result.current.caseFacts).toMatchObject({ revision: 1, facts: { subject_role: { status: "provided", value: "學生" } } });
+    vi.mocked(sendChat).mockResolvedValueOnce(v2Response(1, { fact_updates: [{ fact_key: "subject_role", status: "provided", value: "員工", evidence: "我是員工", kind: "explicit" }] }));
+    await act(async () => { await result.current.sendMessage("我是員工"); });
+    expect(result.current.caseFacts.facts.subject_role?.value).toBe("學生");
+    expect(result.current.pendingFacts).toHaveLength(1);
+  });
+
+  it("keeps a new request alive when a replaced request finishes after a correction", async () => {
+    vi.mocked(checkHealth).mockResolvedValue(v2Health);
+    let resolveOld!: (value: ChatResponse) => void;
+    let oldDelta!: (text: string) => void;
+    vi.mocked(sendChat).mockImplementationOnce((_request, _signal, delta) => {
+      oldDelta = delta!;
+      return new Promise(resolve => { resolveOld = resolve; });
+    });
+    const { result } = renderHook(() => useConversation("replace"));
+    await act(async () => { await Promise.resolve(); });
+    let oldRequest!: Promise<void>;
+    act(() => { oldRequest = result.current.sendMessage("原本的問題"); });
+    const replacement = deferredResponse();
+    let newRequest!: Promise<void>;
+    act(() => { newRequest = result.current.saveCaseFacts({ schema_version: 1, revision: 0, facts: { other_role: { status: "provided", value: "同事" } } }, true); });
+    expect(vi.mocked(sendChat).mock.calls[1][0].case_context).toMatchObject({ revision: 1, facts: { other_role: { value: "同事" } } });
+    act(() => replacement.delta("新的回覆"));
+    await act(async () => { resolveOld(v2Response(0)); await oldRequest; });
+    act(() => oldDelta("過期的文字"));
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.messages.at(-1)?.content).toBe("新的回覆");
+    await act(async () => { replacement.resolve(v2Response(1, { reply: "依新摘要回答" })); await newRequest; });
+    expect(result.current.messages.at(-1)?.content).toBe("依新摘要回答");
+    expect(result.current.caseFacts.facts.other_role?.value).toBe("同事");
+  });
+
+  it("rejects answers from an obsolete summary and preserves unknown on a successful typed reply", async () => {
+    vi.mocked(checkHealth).mockResolvedValue(v2Health);
+    const { result } = renderHook(() => useConversation("stale-question"));
+    await act(async () => { await Promise.resolve(); });
+    const answer = { answers: [{ question: "對方是？", answer: "不確定" }], factsRevision: 8, clarificationAnswer: { question_id: "case.other_role.8", fact_key: "other_role" as const, status: "unknown" as const } };
+    await act(async () => { await result.current.sendMessage("不確定", undefined, undefined, answer); });
+    expect(sendChat).not.toHaveBeenCalled();
+    vi.mocked(sendChat).mockResolvedValueOnce(v2Response(1));
+    await act(async () => { await result.current.sendMessage("不確定", undefined, undefined, { ...answer, factsRevision: 0 }); });
+    expect(result.current.caseFacts.facts.other_role).toEqual({ status: "unknown" });
+    expect(vi.mocked(sendChat).mock.calls[0][0].clarification_answer).toEqual(answer.clarificationAnswer);
+  });
+
+  it("surfaces storage failure without discarding messages", async () => {
+    vi.mocked(sendChat).mockResolvedValue(successfulResponse);
+    const { result } = renderHook(() => useConversation("full"));
+    vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
+    await act(async () => { await result.current.sendMessage("留在分頁的問題"); });
+    expect(result.current.storageIssue).toBe("unavailable");
+    expect(result.current.messages).toHaveLength(2);
+  });
 });
 
 describe("useConversation cancellation", () => {

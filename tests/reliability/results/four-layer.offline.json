@@ -1,0 +1,708 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-26T18:29:53.458300+00:00",
+  "mode": "offline_fixture",
+  "metadata": {
+    "model": "synthetic fixture; no model called",
+    "prompt_sha256": "not_applicable_no_model_prompt",
+    "config_sha256": "not_applicable_fixture_observations",
+    "corpus_version": "synthetic_nonlegal_fixture_v1",
+    "case_sha256": "ccc364054e1a18a6bd64c3023a5b46c7e0fd53272878805bbc54ff50151d0b4e",
+    "evaluator_sha256": "f70eb8f6f54f92ece11ed2d1afb2dc9cd0901ecf4d398507f810b3a5b46a9687",
+    "contract_version": 2,
+    "retrieval_k": 3,
+    "source_cases_sha256": "846beead5c97f117b699fe37f156ecc2f1c7a949981911c2327af39729bdf59b"
+  },
+  "metadata_warnings": [],
+  "summary": {
+    "attempted_case_count": 8,
+    "groups": {
+      "synthetic_fixture": {
+        "case_count": 7,
+        "api_failure_count": 0,
+        "not_observed_count": 0,
+        "law_routing": {
+          "evaluated_count": 3,
+          "precision": 0.6666666666666666,
+          "recall": 0.5,
+          "f1": 0.5714285714285714,
+          "exact_match_rate": 0.3333333333333333,
+          "per_law_confusion_matrix": {
+            "刑法": {
+              "tp": 0,
+              "fp": 0,
+              "fn": 1,
+              "tn": 2
+            },
+            "性別平等工作法": {
+              "tp": 1,
+              "fp": 0,
+              "fn": 0,
+              "tn": 2
+            },
+            "性別平等教育法": {
+              "tp": 0,
+              "fp": 0,
+              "fn": 1,
+              "tn": 2
+            },
+            "性騷擾防治法": {
+              "tp": 1,
+              "fp": 1,
+              "fn": 0,
+              "tn": 1
+            }
+          }
+        },
+        "retrieval": {
+          "evaluated_count": 3,
+          "recall_at_k": 0.6666666666666666,
+          "mrr": 0.6666666666666666,
+          "unknown_version_count": 2
+        },
+        "answer": {
+          "structural_check_count": 7,
+          "citation_failure_count": 1,
+          "known_error_case_count": 1,
+          "pending_expert_review_count": 7,
+          "expert_pass_count": 0,
+          "expert_fail_count": 0
+        },
+        "guidance": {
+          "evaluated_count": 4,
+          "scenario_pass_rate": 0.75,
+          "necessary_clarification_rate": 1.0,
+          "unnecessary_clarification_rate": 0.25,
+          "repeated_known_question_count": 1
+        }
+      },
+      "unreviewed": {
+        "case_count": 1,
+        "api_failure_count": 0,
+        "not_observed_count": 0,
+        "law_routing": {
+          "evaluated_count": 0,
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "exact_match_rate": null,
+          "per_law_confusion_matrix": {}
+        },
+        "retrieval": {
+          "evaluated_count": 0,
+          "recall_at_k": null,
+          "mrr": null,
+          "unknown_version_count": 0
+        },
+        "answer": {
+          "structural_check_count": 1,
+          "citation_failure_count": 0,
+          "known_error_case_count": 0,
+          "pending_expert_review_count": 1,
+          "expert_pass_count": 0,
+          "expert_fail_count": 0
+        },
+        "guidance": {
+          "evaluated_count": 0,
+          "scenario_pass_rate": null,
+          "necessary_clarification_rate": null,
+          "unnecessary_clarification_rate": null,
+          "repeated_known_question_count": 0
+        }
+      }
+    },
+    "evidence_boundary": "Offline and synthetic results verify evaluator behavior only; they are not measured model accuracy, legal correctness, deployed retrieval quality, or latency. Unreviewed candidate labels are excluded from quality metrics."
+  },
+  "records": [
+    {
+      "case_id": "synthetic:outdated-one-year",
+      "family_id": "fixture-version",
+      "split": "fixture",
+      "review_status": "synthetic_fixture",
+      "api_ok": true,
+      "turn_count": 1,
+      "layers": {
+        "law_routing": {
+          "status": "evaluated",
+          "scope": "law-name routing only; not article, factual, or legal correctness",
+          "expected": [
+            "性騷擾防治法"
+          ],
+          "predicted": [
+            "性騷擾防治法"
+          ],
+          "conditional_laws": [],
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "missing": [],
+          "extra": [],
+          "polarity_conflicts": [],
+          "coverage_pass": true,
+          "exact_pass": true,
+          "primary_expected": "性騷擾防治法",
+          "primary_predicted": "not_provided"
+        },
+        "retrieval": {
+          "status": "evaluated",
+          "retrieved_count": 1,
+          "version_unknown_count": 0,
+          "ranking_source": "sources_proxy",
+          "k": 3,
+          "recall_at_k": 0.0,
+          "reciprocal_rank": 0.0,
+          "wrong_version_ids": [],
+          "unverified_version_ids": [
+            "law/article-13"
+          ],
+          "version_check_status": "unknown"
+        },
+        "answer": {
+          "status": "structural_checks_only",
+          "citation_count": 1,
+          "unknown_citation_ids": [],
+          "citation_validity": "pass",
+          "citation_support": "pending_expert_review",
+          "legal_correctness": "pending_expert_review",
+          "response_sha256": "1dc86d4ab5ab09be8aaac90fedaaa4c4d668951ddef009c8dc4228ead1320f20",
+          "known_error_pattern_hits": [
+            "申訴期限一律.{0,20}一年"
+          ],
+          "known_error_check": "fail",
+          "note": "A valid source ID proves provenance only, not entailment; pattern checks cannot certify an answer."
+        },
+        "guidance": {
+          "status": "not_evaluated",
+          "reason": "No reviewed multi-turn guidance annotation"
+        }
+      }
+    },
+    {
+      "case_id": "synthetic:invalid-citation",
+      "family_id": "fixture-citation",
+      "split": "fixture",
+      "review_status": "synthetic_fixture",
+      "api_ok": true,
+      "turn_count": 1,
+      "layers": {
+        "law_routing": {
+          "status": "evaluated",
+          "scope": "law-name routing only; not article, factual, or legal correctness",
+          "expected": [
+            "刑法",
+            "性別平等工作法"
+          ],
+          "predicted": [
+            "性別平等工作法"
+          ],
+          "conditional_laws": [],
+          "tp": 1,
+          "fp": 0,
+          "fn": 1,
+          "missing": [
+            "刑法"
+          ],
+          "extra": [],
+          "polarity_conflicts": [],
+          "coverage_pass": false,
+          "exact_pass": false,
+          "primary_expected": "性別平等工作法",
+          "primary_predicted": "not_provided"
+        },
+        "retrieval": {
+          "status": "evaluated",
+          "retrieved_count": 1,
+          "version_unknown_count": 1,
+          "ranking_source": "sources_proxy",
+          "k": 3,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0,
+          "wrong_version_ids": [],
+          "unverified_version_ids": [],
+          "version_check_status": "unknown"
+        },
+        "answer": {
+          "status": "structural_checks_only",
+          "citation_count": 1,
+          "unknown_citation_ids": [
+            "law/fabricated"
+          ],
+          "citation_validity": "fail",
+          "citation_support": "pending_expert_review",
+          "legal_correctness": "pending_expert_review",
+          "response_sha256": "504988634981de11dfdb46eb132f6269b0c3a42ea95e85c2ebfd4fb1b52eb782",
+          "known_error_pattern_hits": [],
+          "known_error_check": "no_configured_error_detected",
+          "note": "A valid source ID proves provenance only, not entailment; pattern checks cannot certify an answer."
+        },
+        "guidance": {
+          "status": "not_evaluated",
+          "reason": "No reviewed multi-turn guidance annotation"
+        }
+      }
+    },
+    {
+      "case_id": "synthetic:necessary-clarification",
+      "family_id": "fixture-clarification",
+      "split": "fixture",
+      "review_status": "synthetic_fixture",
+      "api_ok": true,
+      "turn_count": 2,
+      "layers": {
+        "law_routing": {
+          "status": "not_evaluated",
+          "reason": "No reviewed law-routing annotation; candidate names are not gold"
+        },
+        "retrieval": {
+          "status": "not_evaluated",
+          "reason": "No reviewed relevant-document set",
+          "retrieved_count": 0,
+          "version_unknown_count": 0,
+          "ranking_source": "sources_proxy"
+        },
+        "answer": {
+          "status": "structural_checks_only",
+          "citation_count": 0,
+          "unknown_citation_ids": [],
+          "citation_validity": "not_evaluated",
+          "citation_support": "pending_expert_review",
+          "legal_correctness": "pending_expert_review",
+          "response_sha256": "b2aaf6adf1abf4db6662083790678aae0fa453d7969589d2b0c670681a7af9e2",
+          "known_error_pattern_hits": [],
+          "known_error_check": "not_evaluated",
+          "note": "A valid source ID proves provenance only, not entailment; pattern checks cannot certify an answer."
+        },
+        "guidance": {
+          "status": "evaluated",
+          "scope": "contract and annotated pattern checks; semantic appropriateness still requires expert review",
+          "pass": true,
+          "turns": [
+            {
+              "expected_mode": "clarify",
+              "actual_mode": "clarify",
+              "mode_ok": true,
+              "field_ok": true,
+              "repeated_known_question": false,
+              "revision_ok": true,
+              "contradictory_reply_pattern": false,
+              "pass": true
+            },
+            {
+              "expected_mode": "answer",
+              "actual_mode": "answer",
+              "mode_ok": true,
+              "field_ok": true,
+              "repeated_known_question": false,
+              "revision_ok": true,
+              "contradictory_reply_pattern": false,
+              "pass": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "synthetic:declined-and-abstain",
+      "family_id": "fixture-declined",
+      "split": "fixture",
+      "review_status": "synthetic_fixture",
+      "api_ok": true,
+      "turn_count": 1,
+      "layers": {
+        "law_routing": {
+          "status": "not_evaluated",
+          "reason": "No reviewed law-routing annotation; candidate names are not gold"
+        },
+        "retrieval": {
+          "status": "not_evaluated",
+          "reason": "No reviewed relevant-document set",
+          "retrieved_count": 0,
+          "version_unknown_count": 0,
+          "ranking_source": "sources_proxy"
+        },
+        "answer": {
+          "status": "structural_checks_only",
+          "citation_count": 0,
+          "unknown_citation_ids": [],
+          "citation_validity": "not_evaluated",
+          "citation_support": "pending_expert_review",
+          "legal_correctness": "pending_expert_review",
+          "response_sha256": "e79e5b14f294638a8af926c0f2c4e42b23fe9b6e15134d86324fdde4ed7903a2",
+          "known_error_pattern_hits": [],
+          "known_error_check": "not_evaluated",
+          "note": "A valid source ID proves provenance only, not entailment; pattern checks cannot certify an answer."
+        },
+        "guidance": {
+          "status": "evaluated",
+          "scope": "contract and annotated pattern checks; semantic appropriateness still requires expert review",
+          "pass": true,
+          "turns": [
+            {
+              "expected_mode": "abstain",
+              "actual_mode": "abstain",
+              "mode_ok": true,
+              "field_ok": true,
+              "repeated_known_question": false,
+              "revision_ok": true,
+              "contradictory_reply_pattern": false,
+              "pass": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "synthetic:confirmed-correction",
+      "family_id": "fixture-correction",
+      "split": "fixture",
+      "review_status": "synthetic_fixture",
+      "api_ok": true,
+      "turn_count": 1,
+      "layers": {
+        "law_routing": {
+          "status": "not_evaluated",
+          "reason": "No reviewed law-routing annotation; candidate names are not gold"
+        },
+        "retrieval": {
+          "status": "not_evaluated",
+          "reason": "No reviewed relevant-document set",
+          "retrieved_count": 0,
+          "version_unknown_count": 0,
+          "ranking_source": "sources_proxy"
+        },
+        "answer": {
+          "status": "structural_checks_only",
+          "citation_count": 0,
+          "unknown_citation_ids": [],
+          "citation_validity": "not_evaluated",
+          "citation_support": "pending_expert_review",
+          "legal_correctness": "pending_expert_review",
+          "response_sha256": "4b18061c7fe98aeda97e5ce8778f681759b51de5a29e6f6aa6142e9f6b0bc1ff",
+          "known_error_pattern_hits": [],
+          "known_error_check": "not_evaluated",
+          "note": "A valid source ID proves provenance only, not entailment; pattern checks cannot certify an answer."
+        },
+        "guidance": {
+          "status": "evaluated",
+          "scope": "contract and annotated pattern checks; semantic appropriateness still requires expert review",
+          "pass": true,
+          "turns": [
+            {
+              "expected_mode": "answer",
+              "actual_mode": "answer",
+              "mode_ok": true,
+              "field_ok": true,
+              "repeated_known_question": false,
+              "revision_ok": true,
+              "contradictory_reply_pattern": false,
+              "pass": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "synthetic:unnecessary-repeat",
+      "family_id": "fixture-repeat",
+      "split": "fixture",
+      "review_status": "synthetic_fixture",
+      "api_ok": true,
+      "turn_count": 1,
+      "layers": {
+        "law_routing": {
+          "status": "not_evaluated",
+          "reason": "No reviewed law-routing annotation; candidate names are not gold"
+        },
+        "retrieval": {
+          "status": "not_evaluated",
+          "reason": "No reviewed relevant-document set",
+          "retrieved_count": 0,
+          "version_unknown_count": 0,
+          "ranking_source": "sources_proxy"
+        },
+        "answer": {
+          "status": "structural_checks_only",
+          "citation_count": 0,
+          "unknown_citation_ids": [],
+          "citation_validity": "not_evaluated",
+          "citation_support": "pending_expert_review",
+          "legal_correctness": "pending_expert_review",
+          "response_sha256": "bba7e60cf5217b2d08416e13ab2f31278598731615989663cd5f9c1bcc0ad5f2",
+          "known_error_pattern_hits": [],
+          "known_error_check": "not_evaluated",
+          "note": "A valid source ID proves provenance only, not entailment; pattern checks cannot certify an answer."
+        },
+        "guidance": {
+          "status": "evaluated",
+          "scope": "contract and annotated pattern checks; semantic appropriateness still requires expert review",
+          "pass": false,
+          "turns": [
+            {
+              "expected_mode": "answer",
+              "actual_mode": "clarify",
+              "mode_ok": false,
+              "field_ok": true,
+              "repeated_known_question": true,
+              "revision_ok": false,
+              "contradictory_reply_pattern": false,
+              "pass": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "synthetic:unreviewed-not-gold",
+      "family_id": "fixture-candidate",
+      "split": "fixture",
+      "review_status": "unreviewed",
+      "api_ok": true,
+      "turn_count": 1,
+      "layers": {
+        "law_routing": {
+          "status": "not_evaluated",
+          "reason": "No reviewed law-routing annotation; candidate names are not gold"
+        },
+        "retrieval": {
+          "status": "not_evaluated",
+          "reason": "No reviewed relevant-document set",
+          "retrieved_count": 0,
+          "version_unknown_count": 0,
+          "ranking_source": "sources_proxy"
+        },
+        "answer": {
+          "status": "structural_checks_only",
+          "citation_count": 0,
+          "unknown_citation_ids": [],
+          "citation_validity": "not_evaluated",
+          "citation_support": "pending_expert_review",
+          "legal_correctness": "pending_expert_review",
+          "response_sha256": "14b5dad889e618cfdac773bfe37e46e698aff60d7872dd28ab52d01f0415f82f",
+          "known_error_pattern_hits": [],
+          "known_error_check": "not_evaluated",
+          "note": "A valid source ID proves provenance only, not entailment; pattern checks cannot certify an answer."
+        },
+        "guidance": {
+          "status": "not_evaluated",
+          "reason": "No reviewed multi-turn guidance annotation"
+        }
+      }
+    },
+    {
+      "case_id": "synthetic:wrong-version",
+      "family_id": "fixture-wrong-version",
+      "split": "fixture",
+      "review_status": "synthetic_fixture",
+      "api_ok": true,
+      "turn_count": 1,
+      "layers": {
+        "law_routing": {
+          "status": "evaluated",
+          "scope": "law-name routing only; not article, factual, or legal correctness",
+          "expected": [
+            "性別平等教育法"
+          ],
+          "predicted": [
+            "性騷擾防治法"
+          ],
+          "conditional_laws": [],
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "missing": [
+            "性別平等教育法"
+          ],
+          "extra": [
+            "性騷擾防治法"
+          ],
+          "polarity_conflicts": [],
+          "coverage_pass": false,
+          "exact_pass": false,
+          "primary_expected": "性別平等教育法",
+          "primary_predicted": "not_provided"
+        },
+        "retrieval": {
+          "status": "evaluated",
+          "retrieved_count": 2,
+          "version_unknown_count": 1,
+          "ranking_source": "sources_proxy",
+          "k": 3,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0,
+          "wrong_version_ids": [
+            "law/education"
+          ],
+          "unverified_version_ids": [
+            "law/unknown"
+          ],
+          "version_check_status": "fail"
+        },
+        "answer": {
+          "status": "structural_checks_only",
+          "citation_count": 1,
+          "unknown_citation_ids": [],
+          "citation_validity": "pass",
+          "citation_support": "pending_expert_review",
+          "legal_correctness": "pending_expert_review",
+          "response_sha256": "0564d046ccc40cb3520d8632d39d4438a7c5582b34db7c72c7fba9db391c24c7",
+          "known_error_pattern_hits": [],
+          "known_error_check": "no_configured_error_detected",
+          "note": "A valid source ID proves provenance only, not entailment; pattern checks cannot certify an answer."
+        },
+        "guidance": {
+          "status": "not_evaluated",
+          "reason": "No reviewed multi-turn guidance annotation"
+        }
+      }
+    }
+  ],
+  "observations": [
+    {
+      "case_id": "synthetic:outdated-one-year",
+      "responses": [
+        {
+          "reply": "依性騷擾防治法第13條，申訴期限一律是事件發生後一年。",
+          "interaction_mode": "answer",
+          "sources": [
+            {
+              "doc_id": "law/article-13",
+              "version": "fixture-legacy"
+            }
+          ],
+          "answer_sections": [
+            {
+              "kind": "legal_basis",
+              "text": "申訴期限一律一年。",
+              "source_ids": [
+                "law/article-13"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "synthetic:invalid-citation",
+      "responses": [
+        {
+          "reply": "可能涉及性別平等工作法。",
+          "interaction_mode": "answer",
+          "sources": [
+            {
+              "doc_id": "law/work-12"
+            }
+          ],
+          "answer_sections": [
+            {
+              "kind": "legal_basis",
+              "text": "參考法規。",
+              "source_ids": [
+                "law/fabricated"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "synthetic:necessary-clarification",
+      "responses": [
+        {
+          "reply": "對方與你的關係是什麼？不需提供姓名。",
+          "interaction_mode": "clarify",
+          "facts_revision": 0,
+          "clarification": {
+            "fact_key": "relationship",
+            "question_id": "relationship-v1",
+            "question": "對方與你的關係是什麼？"
+          },
+          "sources": []
+        },
+        {
+          "reply": "我理解對方是同事；可以先整理你願意提供的事件資訊。",
+          "interaction_mode": "answer",
+          "facts_revision": 1,
+          "sources": []
+        }
+      ]
+    },
+    {
+      "case_id": "synthetic:declined-and-abstain",
+      "responses": [
+        {
+          "reply": "可以不補充；目前資訊不足以判斷適用的法律，我可以先整理一般求助選項。",
+          "interaction_mode": "answer",
+          "abstained": true,
+          "facts_revision": 0,
+          "execution": {
+            "route": "insufficient_evidence",
+            "model_calls": 0
+          },
+          "sources": []
+        }
+      ]
+    },
+    {
+      "case_id": "synthetic:confirmed-correction",
+      "responses": [
+        {
+          "reply": "已更正為同學。接下來以更新後的資訊整理可採取的方向。",
+          "interaction_mode": "answer",
+          "facts_revision": 1,
+          "sources": []
+        }
+      ]
+    },
+    {
+      "case_id": "synthetic:unnecessary-repeat",
+      "responses": [
+        {
+          "reply": "請再說對方是誰。",
+          "interaction_mode": "clarify",
+          "facts_revision": 1,
+          "clarification": {
+            "fact_key": "relationship"
+          },
+          "sources": []
+        }
+      ]
+    },
+    {
+      "case_id": "synthetic:unreviewed-not-gold",
+      "responses": [
+        {
+          "reply": "可能涉及性騷擾防治法。",
+          "interaction_mode": "answer",
+          "sources": []
+        }
+      ]
+    },
+    {
+      "case_id": "synthetic:wrong-version",
+      "responses": [
+        {
+          "reply": "不適用性別平等教育法；適用性騷擾防治法。",
+          "interaction_mode": "answer",
+          "sources": [
+            {
+              "doc_id": "law/education",
+              "version": "fixture-legacy"
+            },
+            {
+              "doc_id": "law/unknown"
+            }
+          ],
+          "answer_sections": [
+            {
+              "kind": "legal_basis",
+              "text": "引用來源。",
+              "source_ids": [
+                "law/education"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

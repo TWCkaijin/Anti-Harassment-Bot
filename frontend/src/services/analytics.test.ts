@@ -17,6 +17,7 @@ beforeEach(() => {
   mock.logEvent.mockReset();
   localStorage.clear();
   vi.stubEnv("VITE_ANALYTICS_ENABLED", "true");
+  vi.stubEnv("VITE_ANALYTICS_DEBUG", "false");
   vi.stubEnv("VITE_FIREBASE_API_KEY", "public-web-key");
   vi.stubEnv("VITE_FIREBASE_PROJECT_ID", "test-project");
   vi.stubEnv("VITE_FIREBASE_APP_ID", "1:123:web:test");
@@ -27,6 +28,14 @@ afterEach(() => vi.unstubAllEnvs());
 async function settled() { await new Promise(resolve => setTimeout(resolve, 10)); }
 
 describe("optional Firebase analytics", () => {
+  it("includes debug mode only when explicitly enabled", async () => {
+    vi.stubEnv("VITE_ANALYTICS_DEBUG", "true");
+    const analytics = await import("./analytics");
+    analytics.setAnalyticsConsent(true);
+    analytics.trackAnalytics("next_step_selected");
+    await vi.waitFor(() => expect(mock.logEvent).toHaveBeenCalledOnce());
+    expect(mock.logEvent.mock.calls[0][2]).toEqual({ app_environment: "development", debug_mode: true });
+  });
   it("does not initialize or replay pre-consent events", async () => {
     const analytics = await import("./analytics");
     analytics.trackAnalytics("chat_request_started", { has_image: true });
