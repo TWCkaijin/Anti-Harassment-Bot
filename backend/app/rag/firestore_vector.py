@@ -1,5 +1,6 @@
 import asyncio
 from math import isfinite
+from time import monotonic
 
 from firebase_admin import firestore
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
@@ -30,7 +31,9 @@ class FirestoreVectorRAG(BaseRAG):
         try:
             embedding = await self.embedding_client.embed(text, mode="query")
         except Exception as exc:
-            logger.exception("Failed to get query embedding")
+            # Provider exception bodies can echo the query, which may contain
+            # request-local facts. Keep only the error category in this layer.
+            logger.error("Failed to get query embedding error_type=%s", type(exc).__name__)
             raise RAGEmbeddingError("Query embedding service is unavailable") from exc
         if not embedding:
             raise RAGEmbeddingError("Query embedding service returned an empty vector")
@@ -44,11 +47,19 @@ class FirestoreVectorRAG(BaseRAG):
         collection_name: str | None = None,
         collection_names_by_data_type: dict[str, str] | None = None,
         distance_threshold: float | None = None,
+        selected_data_types: list[str] | None = None,
+        preserve_data_types: bool = False,
+        timings: dict | None = None,
     ) -> list[RAGDocument]:
         """
         將查詢字串轉為向量，並在 Firestore 進行相似度檢索。
         """
+        embedding_started = monotonic()
         query_vector = await self._get_embedding(query)
+        if timings is not None:
+            timings["embedding_ms"] = (
+                timings.get("embedding_ms", 0.0) + (monotonic() - embedding_started) * 1000
+            )
         if not query_vector:
             raise RAGEmbeddingError("Query embedding service returned an empty vector")
 
@@ -66,6 +77,14 @@ class FirestoreVectorRAG(BaseRAG):
         collection_names = (
             [collection_name] if collection_name else collections_by_data_type.get(data_type)
         )
+        if selected_data_types is not None:
+            if not selected_data_types or any(
+                kind not in {"law", "judgment", "remedy"} for kind in selected_data_types
+            ):
+                raise ValueError("Unsupported retrieval data types")
+            collection_names = list(
+                dict.fromkeys(collections_by_data_type[kind][0] for kind in selected_data_types)
+            )
         if not collection_names:
             logger.warning("Unknown RAG data_type=%s; falling back to law collection.", data_type)
             collection_names = collections_by_data_type["law"]
@@ -74,6 +93,7 @@ class FirestoreVectorRAG(BaseRAG):
         # Firestore's synchronous client must not block SSE heartbeats. These
         # independent reads share the same embedding and can run concurrently;
         # gather preserves collection order for stable ranking tie-breaks.
+        search_started = monotonic()
         results_by_collection = await asyncio.gather(
             *(
                 asyncio.to_thread(
@@ -86,6 +106,19 @@ class FirestoreVectorRAG(BaseRAG):
                 for target_collection in collection_names
             )
         )
+        if timings is not None:
+            timings["vector_search_ms"] = (
+                timings.get("vector_search_ms", 0.0) + (monotonic() - search_started) * 1000
+            )
+        if preserve_data_types and len(collection_names) > 1:
+            # Reserve one result from each requested type before filling the budget.
+            # A mixed request cannot lose all statutory evidence to similar judgments.
+            ordered = []
+            for rank in range(max((len(items) for items in results_by_collection), default=0)):
+                for items in results_by_collection:
+                    if rank < len(items):
+                        ordered.append(items[rank])
+            return ordered[: max(top_k, len(collection_names))]
         if len(results_by_collection) == 1:
             return results_by_collection[0][:top_k]
 
@@ -170,11 +203,11 @@ class FirestoreVectorRAG(BaseRAG):
                 )
             return results
         except Exception as exc:
-            logger.exception(
-                "Firestore Vector Search failed for %s: %s "
+            logger.error(
+                "Firestore Vector Search failed for %s: error_type=%s "
                 "(project=%s, vector_field=embedding, vector_dim=%s)",
                 collection_name,
-                exc,
+                type(exc).__name__,
                 getattr(self.db, "project", None),
                 len(query_vector),
             )

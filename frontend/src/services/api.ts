@@ -3,6 +3,9 @@
  * 所有與後端通訊皆透過此模組，方便統一管理 base URL 與錯誤處理。
  */
 
+import { isClarification, isFactUpdate, type CaseContext, type Clarification, type ClarificationAnswer, type FactUpdate } from "./caseFacts";
+export type { CaseContext, Clarification, ClarificationAnswer, FactUpdate, FactKey, CaseFact } from "./caseFacts";
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
 
@@ -18,6 +21,9 @@ export interface ChatRequest {
   history: MessageItem[];
   use_rag: boolean;
   image_base64?: string;
+  contract_version?: 2;
+  case_context?: CaseContext;
+  clarification_answer?: ClarificationAnswer;
 }
 
 export type RagSourceType = "law" | "judgment" | "remedy" | "unknown";
@@ -25,9 +31,12 @@ export type RagSourceType = "law" | "judgment" | "remedy" | "unknown";
 export interface RagSource {
   label: string;
   type: RagSourceType;
-  collection?: string;
-  doc_id?: string;
-  distance?: number;
+  collection?: string | null;
+  doc_id?: string | null;
+  distance?: number | null;
+  source_url?: string | null;
+  article?: string | null;
+  version?: string | null;
 }
 
 export interface RagInfo {
@@ -53,6 +62,12 @@ export interface ChatResponse {
   interaction_mode: "answer" | "clarify";
   clarifying_questions: string[];
   debug_tool_calls?: DebugToolCall[];
+  contract_version?: 2;
+  facts_revision?: number;
+  fact_updates?: FactUpdate[];
+  clarification?: Clarification | null;
+  answer_sections?: Array<{ kind: "direction" | "basis" | "next_steps"; text: string; source_ids: string[] }>;
+  execution?: { route: string; model_calls: number };
 }
 
 /** Cumulative, display-only preview. Trusted actions arrive in the final response. */
@@ -116,6 +131,7 @@ export interface HealthResponse {
   timestamp: string;
   version: string;
   environment: string;
+  capabilities?: { chat_contract_versions: number[] };
 }
 
 export interface RuntimeConfig {
@@ -280,6 +296,35 @@ function invalidStream(): ApiError {
   return new ApiError(502, "回覆串流中斷", "回覆未完整接收，請重新送出訊息", true);
 }
 
+export function parseChatResponse(payload: unknown): ChatResponse {
+  if (!isRecord(payload) || typeof payload.reply !== "string" || !Array.isArray(payload.suggested_replies)
+    || !Array.isArray(payload.action_buttons) || !Array.isArray(payload.clarifying_questions)
+    || !isRecord(payload.rag_used) || typeof payload.rag_used.status !== "boolean"
+    || !Array.isArray(payload.rag_used.sources) || payload.rag_used.sources.length > 100 || !payload.rag_used.sources.every(isRagSource)
+    || !["answer", "clarify"].includes(String(payload.interaction_mode))) throw invalidStream();
+  if (payload.contract_version !== undefined && payload.contract_version !== 2) throw invalidStream();
+  if (payload.contract_version === 2) {
+    if (!Number.isSafeInteger(payload.facts_revision) || Number(payload.facts_revision) < 0
+      || !Array.isArray(payload.fact_updates) || payload.fact_updates.length > 13 || !payload.fact_updates.every(isFactUpdate)
+      || (payload.clarification !== null && !isClarification(payload.clarification))
+      || !Array.isArray(payload.answer_sections) || payload.answer_sections.length > 6
+      || !payload.answer_sections.every(section => isRecord(section) && ["direction", "basis", "next_steps"].includes(String(section.kind))
+        && typeof section.text === "string" && Array.isArray(section.source_ids) && section.source_ids.every(id => typeof id === "string"))
+      || !isRecord(payload.execution) || typeof payload.execution.route !== "string" || !Number.isSafeInteger(payload.execution.model_calls)
+      || Number(payload.execution.model_calls) < 0) throw invalidStream();
+  }
+  return payload as unknown as ChatResponse;
+}
+
+function isRagSource(value: unknown): value is RagSource | string {
+  if (typeof value === "string") return value.trim().length > 0 && value.length <= 4000;
+  if (!isRecord(value) || typeof value.label !== "string" || !value.label.trim() || value.label.length > 4000) return false;
+  if (Object.keys(value).some(key => !["label", "type", "collection", "doc_id", "distance", "source_url", "article", "version"].includes(key))) return false;
+  if (value.type !== undefined && !["law", "judgment", "remedy", "unknown"].includes(String(value.type))) return false;
+  if (["collection", "doc_id", "source_url", "article", "version"].some(key => value[key] != null && (typeof value[key] !== "string" || value[key].length > 4000))) return false;
+  return value.distance == null || (typeof value.distance === "number" && Number.isFinite(value.distance));
+}
+
 /** Consume complete SSE events, preserving split UTF-8 characters and line endings. */
 async function readChatStream(
   response: Response,
@@ -331,11 +376,7 @@ async function readChatStream(
         // Never promote model-generated actions or other unvalidated metadata.
         if (Object.keys(guidance).length > 0) onGuidance?.(guidance);
       } else if (eventName === "done") {
-        if (typeof payload.reply !== "string" || !Array.isArray(payload.suggested_replies)
-          || !Array.isArray(payload.action_buttons) || !Array.isArray(payload.clarifying_questions)
-          || !isRecord(payload.rag_used)
-          || !["answer", "clarify"].includes(String(payload.interaction_mode))) throw invalidStream();
-        result = payload as unknown as ChatResponse;
+        result = parseChatResponse(payload);
       } else {
         throw new ApiError(
           typeof payload.status === "number" ? payload.status : 502,
@@ -404,7 +445,7 @@ export async function sendChat(
   if (!response.ok) await throwResponseError(response);
   // Allow the new client to work during a rolling backend deployment.
   if (!response.headers.get("content-type")?.includes("text/event-stream")) {
-    return response.json() as Promise<ChatResponse>;
+    return parseChatResponse(await response.json());
   }
   return readChatStream(response, signal, onDelta, onGuidance, onProgress);
 }

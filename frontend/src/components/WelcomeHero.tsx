@@ -12,9 +12,10 @@ import {
 
 interface WelcomeHeroProps {
   onSuggest: (message: string, imageBase64?: string, imageUrl?: string) => void;
+  disabled?: boolean;
 }
 
-export default function WelcomeHero({ onSuggest }: WelcomeHeroProps) {
+export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHeroProps) {
   const { t } = useI18n();
   const [inputValue, setInputValue] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -57,6 +58,7 @@ export default function WelcomeHero({ onSuggest }: WelcomeHeroProps) {
   };
 
   const handleSend = async () => {
+    if (disabled) return;
     const trimmed = inputValue.trim();
     if (!trimmed && !selectedFile) return;
     if (getUserMessageValidationError(inputValue)) return;
@@ -157,7 +159,7 @@ export default function WelcomeHero({ onSuggest }: WelcomeHeroProps) {
             />
             <button
               onClick={handleSend}
-              disabled={!hasContent || Boolean(messageValidationError)}
+              disabled={disabled || !hasContent || Boolean(messageValidationError)}
               aria-label={t.sendMessage}
               className={`
                 w-10 h-10 lg:w-12 lg:h-12 rounded-full flex items-center justify-center text-white transition-all group shrink-0 mb-0.5 cursor-pointer
@@ -189,6 +191,7 @@ export default function WelcomeHero({ onSuggest }: WelcomeHeroProps) {
             {suggestions.map((suggestion) => (
               <button
                 key={suggestion}
+                disabled={disabled}
                 onClick={() => onSuggest(suggestion)}
                 className="px-3 py-1.5 bg-surface-container rounded-full text-xs font-semibold text-on-surface-variant cursor-pointer hover:bg-surface-container-high transition-colors tracking-wide"
               >

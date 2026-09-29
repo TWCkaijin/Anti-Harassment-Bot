@@ -1,5 +1,9 @@
 # 「適用法規」API 可靠性評測
 
+新增的離線四層評測、634題未覆核候選資料、合成反例與v2多輪harness，請見 [FOUR_LAYER.md](FOUR_LAYER.md)。本頁保留既有法名覆蓋率工具的操作方式；法名命中不等於法律內容正確。
+
+首可讀文字／完整回覆P50與P95、階段耗時、呼叫次數及成本待測工具，請見 [BENCHMARK.md](BENCHMARK.md)；預設離線，報告不包含案件原文。
+
 `applicable_law_api_eval.py` 是獨立的黑箱評測工具。它只讀取 XLSX，透過既有
 chat HTTP API 提問，不會 import 或改動 backend/agent。問題只包含情境，不包含
 「適用法規」或補充標籤。

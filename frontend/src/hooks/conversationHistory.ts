@@ -1,10 +1,13 @@
 import type { ChatRequest, MessageItem } from "../services/api";
 
-export const MAX_HISTORY_MESSAGES = 40;
+export const MAX_HISTORY_MESSAGES = 8;
+export const MAX_HISTORY_TURNS = 4;
+export const LEGACY_HISTORY_MESSAGES = 40;
+export const LEGACY_HISTORY_CHARACTERS = 12_000;
 export const MAX_USER_MESSAGE_CHARACTERS = 2_000;
 export const MAX_USER_HISTORY_CHARACTERS = MAX_USER_MESSAGE_CHARACTERS;
 export const MAX_ASSISTANT_HISTORY_CHARACTERS = 6_000;
-export const MAX_HISTORY_TOTAL_CHARACTERS = 12_000;
+export const MAX_HISTORY_TOTAL_CHARACTERS = 6_000;
 export const USER_MESSAGE_TOO_LONG_ERROR = `訊息不可超過 ${MAX_USER_MESSAGE_CHARACTERS.toLocaleString("en-US")} 個字元`;
 
 interface HistoryCandidate {
@@ -94,17 +97,20 @@ function buildSerializableTurns(messages: readonly HistoryCandidate[]): HistoryT
 export function buildChatHistory(
   messages: readonly HistoryCandidate[],
   totalCharacterBudget = MAX_HISTORY_TOTAL_CHARACTERS,
+  turnLimit = MAX_HISTORY_TURNS,
+  messageLimit = MAX_HISTORY_MESSAGES,
 ): MessageItem[] {
   if (totalCharacterBudget <= 0) return [];
 
   const turns = buildSerializableTurns(messages);
   const selectedTurns: MessageItem[][] = [];
   let remainingCharacters = totalCharacterBudget;
-  let remainingMessages = MAX_HISTORY_MESSAGES;
+  let remainingMessages = messageLimit;
 
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
     if (turn.messages.length === 0) continue;
+    if (selectedTurns.length >= turnLimit) break;
 
     // Select a genuinely contiguous suffix of whole serializable turns. Never
     // backfill an older small turn after a newer turn exceeds either budget.
@@ -126,13 +132,14 @@ export function createChatRequest(
   messages: readonly HistoryCandidate[],
   userInput: string,
   imageBase64?: string,
+  contractVersion?: 2,
 ): ChatRequest {
   const validationError = getUserMessageValidationError(userInput);
   if (validationError) throw new RangeError(validationError);
 
   return {
     message: userInput.trim(),
-    history: buildChatHistory(messages),
+    history: contractVersion === 2 ? buildChatHistory(messages) : buildChatHistory(messages, LEGACY_HISTORY_CHARACTERS, LEGACY_HISTORY_MESSAGES, LEGACY_HISTORY_MESSAGES),
     use_rag: true,
     image_base64: imageBase64,
   };

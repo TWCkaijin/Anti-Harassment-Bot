@@ -12,6 +12,7 @@ import {
 } from "react";
 import MaterialIcon from "./MaterialIcon";
 import FollowUpPanel from "./FollowUpPanel";
+import TypedClarification from "./TypedClarification";
 import NextStepSuggestions from "./NextStepSuggestions";
 import type { ConversationMessage, ReplyContext } from "../hooks/useConversation";
 import { getFollowUpData } from "./actionButtonValidation";
@@ -28,9 +29,11 @@ interface ChatInputProps {
   replyPrompt?: ConversationMessage;
   streamingPrompt?: Pick<ConversationMessage, "id" | "streamingGuidance">;
   onStop?: () => void;
+  caseRevision?: number;
+  disabled?: boolean;
 }
 
-export default function ChatInput({ onSend, isLoading, suggestedReplies = [], replyPrompt, streamingPrompt, onStop }: ChatInputProps) {
+export default function ChatInput({ onSend, isLoading, suggestedReplies = [], replyPrompt, streamingPrompt, onStop, caseRevision, disabled = false }: ChatInputProps) {
   const { t } = useI18n();
   const [value, setValue] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -40,15 +43,17 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
   const preview = isLoading ? streamingPrompt?.streamingGuidance : undefined;
   const promptKey = streamingPrompt?.id ?? replyPrompt?.id ?? JSON.stringify(suggestedReplies);
   const panelReplies = preview ? preview.suggested_replies ?? [] : replyPrompt?.suggestedReplies ?? suggestedReplies;
-  const interactionMode = preview ? preview.interaction_mode : replyPrompt?.interactionMode;
+  const typedQuestion = !preview && replyPrompt?.contractVersion === 2 && replyPrompt.factsRevision === caseRevision ? replyPrompt.clarification : undefined;
+  const interactionMode = preview ? preview.interaction_mode : replyPrompt?.contractVersion === 2 ? "answer" : replyPrompt?.interactionMode;
   const clarifyingQuestions = preview ? preview.clarifying_questions : replyPrompt?.clarifyingQuestions;
   const actions = preview ? undefined : replyPrompt?.actionButtons;
-  const { hasQuestion, optionActions, suggestions } = getFollowUpData({
+  const { hasQuestion: hasLegacyQuestion, optionActions, suggestions } = getFollowUpData({
     actions,
     suggestedReplies: panelReplies,
     clarifyingQuestions,
     interactionMode,
   });
+  const hasQuestion = Boolean(typedQuestion) || hasLegacyQuestion;
   const nextSteps = preview && interactionMode !== "answer" ? [] : optionActions.length > 0
     ? optionActions.flatMap((action) => action.options)
     : suggestions.map((suggestion) => ({ label: suggestion, value: suggestion }));
@@ -117,7 +122,7 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
   };
 
   const handleSend = async () => {
-    if (isLoading || menuVisible) return;
+    if (disabled || isLoading || menuVisible) return;
     const trimmed = value.trim();
     if (!trimmed && !selectedFile) return;
     if (getUserMessageValidationError(value)) return;
@@ -163,19 +168,23 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
   const messageLength = value.trim().length;
   const messageValidationError = getUserMessageValidationError(value);
   const hasContent = messageLength > 0 || selectedFile !== null;
-  const canSend = hasContent && !messageValidationError;
+  const canSend = !disabled && hasContent && !messageValidationError;
 
   return (
     <footer className="shrink-0 px-6 lg:px-10 pb-2 lg:pb-4 bg-transparent">
       <div className="w-full relative">
         <div ref={panelRef} hidden={!menuVisible} inert={!menuVisible}>
-          {hasQuestion && <FollowUpPanel
+          {typedQuestion && <TypedClarification key={`${promptKey}-${caseRevision}`} clarification={typedQuestion} revision={caseRevision!} isLoading={Boolean(isLoading)} onHide={hideMenu} onSend={(message, context) => {
+            onSend(message, undefined, undefined, context);
+            setMenuState({ key: promptKey, hidden: true, sent: true });
+          }} />}
+          {!typedQuestion && hasLegacyQuestion && <FollowUpPanel
             key={promptKey}
             suggestedReplies={panelReplies}
             actions={actions}
             interactionMode={interactionMode}
             clarifyingQuestions={clarifyingQuestions}
-            isLoading={isLoading}
+            isLoading={isLoading || disabled}
             isStreaming={Boolean(preview)}
             onSend={(message, replyContext) => onSend(message, undefined, undefined, replyContext)}
             onHide={hideMenu}
@@ -193,7 +202,7 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
               onClick={showMenu}
               className="rounded-lg px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary"
             >
-              顯示選單
+              {typedQuestion ? t.clarificationShow : "顯示選單"}
             </button>
           </div>
         )}
@@ -217,7 +226,7 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
             <NextStepSuggestions
               key={promptKey}
               suggestions={nextSteps}
-              isLoading={isLoading}
+              isLoading={isLoading || disabled}
               onSend={(message) => onSend(message)}
             />
           )}

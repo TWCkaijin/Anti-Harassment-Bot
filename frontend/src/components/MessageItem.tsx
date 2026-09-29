@@ -18,6 +18,7 @@ import type { RagSource, RagSourceType } from "../services/api";
 interface MessageItemProps {
   message: ConversationMessage;
   streamingStatus?: string | null;
+  showEmotions?: boolean;
 }
 
 const getEmotionColorClasses = (color?: string) => {
@@ -51,6 +52,9 @@ const normalizeSource = (source: RagSource | string): RagSource => {
     type: source.type ?? "unknown",
     collection: source.collection,
     doc_id: source.doc_id,
+    source_url: source.source_url,
+    article: source.article,
+    version: source.version,
   };
 };
 
@@ -83,7 +87,7 @@ const getSourceStyle = (type: RagSourceType) => {
   }
 };
 
-export default function MessageItem({ message, streamingStatus }: MessageItemProps) {
+export default function MessageItem({ message, streamingStatus, showEmotions = false }: MessageItemProps) {
   const { t } = useI18n();
   const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
   const isUser = message.role === "user";
@@ -126,6 +130,7 @@ export default function MessageItem({ message, streamingStatus }: MessageItemPro
   };
 
   const activeSourceGroup = sourceGroups.find(({ type }) => type === activeSourceType);
+  const answerSections = isCompleteAssistant ? message.answerSections?.filter(section => section.text.trim()) : undefined;
 
   return (
     <div
@@ -156,7 +161,7 @@ export default function MessageItem({ message, streamingStatus }: MessageItemPro
           )}
         </div>
         {/* 情緒標籤 (僅針對使用者訊息顯示) */}
-        {isUser && message.emotion && (
+        {isUser && showEmotions && message.emotion && (
           <span
             className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${getEmotionColorClasses(message.emotionColor)}`}
           >
@@ -202,7 +207,19 @@ export default function MessageItem({ message, streamingStatus }: MessageItemPro
             ))}
           </div>
         )}
-        {replyAnswers.length === 0 && message.content && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
+        {answerSections && answerSections.length > 0 && <div className="space-y-4">
+          {answerSections.map((section, index) => <section key={`${section.kind}-${index}`} className="markdown-message break-words">
+            <h3 className="mb-2 text-sm font-semibold">{section.kind === "direction" ? t.answerDirection : section.kind === "basis" ? t.answerBasis : t.answerNextSteps}</h3>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{section.text}</ReactMarkdown>
+            {section.source_ids.length > 0 && <ul className="mt-2 text-xs text-on-surface/60">
+              {section.source_ids.map(id => {
+                const source = message.ragUsed?.sources.find(item => typeof item !== "string" && item.doc_id === id);
+                return source && typeof source !== "string" ? <li key={id}>{source.label}{source.article ? ` · ${source.article}` : ""}</li> : null;
+              })}
+            </ul>}
+          </section>)}
+        </div>}
+        {(!answerSections || answerSections.length === 0) && replyAnswers.length === 0 && message.content && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
           {isUser || isError ? (
             message.content
           ) : (
@@ -224,6 +241,7 @@ export default function MessageItem({ message, streamingStatus }: MessageItemPro
         {message.isStreaming && <p role="status" className="text-xs text-on-surface/50 animate-pulse">{streamingStatus ?? "正在回覆…"}</p>}
         {isCancelled && <p className="text-sm font-medium text-on-surface/55">{message.content ? "使用者已終止回覆，以上內容尚未完成" : "使用者已終止回覆"}</p>}
         {message.interruptionReason && <p role="alert" className="text-sm font-medium">{message.interruptionReason}</p>}
+        {message.superseded && <p className="text-xs text-on-surface/60">{t.supersededAnswer}</p>}
         {!isUser && !isError && !isCancelled && message.debugToolCalls !== undefined && (
           <details className="mt-3 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-xs text-amber-950">
             <summary className="flex cursor-pointer items-center gap-1.5 font-semibold">
@@ -284,7 +302,10 @@ export default function MessageItem({ message, streamingStatus }: MessageItemPro
                       key={`${src.label}-${i}`}
                       className="min-w-0 break-words rounded-md bg-white px-3 py-2 leading-relaxed shadow-sm"
                     >
-                      {src.label}
+                      <span>{src.label}</span>
+                      {src.article && <span className="ml-2">{src.article}</span>}
+                      {src.version && <span className="ml-2 text-on-surface/60">{src.version}</span>}
+                      {src.source_url && /^https?:\/\//i.test(src.source_url) && <a href={src.source_url} target="_blank" rel="noreferrer" className="ml-2 text-primary underline">{t.answerBasis}</a>}
                     </li>
                   ))}
                 </ul>

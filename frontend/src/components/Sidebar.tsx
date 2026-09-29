@@ -8,6 +8,7 @@ import { createPortal } from "react-dom";
 import MaterialIcon from "./MaterialIcon";
 import { useI18n } from "../i18n";
 import type { ConversationSession } from "../hooks/useConversation";
+import { formatConversationText } from "../services/conversationExport";
 
 interface SidebarProps {
   sessions: ConversationSession[];
@@ -100,13 +101,12 @@ export default function Sidebar({
 
   // 只顯示有訊息的對話，由新到舊排序
   const sortedSessions = [...sessions]
-    .filter((s) => s.messages.length > 0)
+    .filter((s) => s.messages.length > 0 || Object.keys(s.caseFacts?.facts ?? {}).length > 0)
     .sort((a, b) => b.createdAt - a.createdAt);
   const openMenuSession = sortedSessions.find((session) => session.id === menuOpenId);
 
   const handleExport = (session: ConversationSession) => {
-    // 建立只包含有意義的文字紀錄的簡單匯出版本，或 JSON
-    const exportData = session.messages.map(m => `[${m.role === 'user' ? 'User' : 'AI'}]: ${m.content}`).join('\n\n');
+    const exportData = formatConversationText(session, t);
     const blob = new Blob([exportData], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

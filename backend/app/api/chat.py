@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from backend.app.agents.openrouter_agent import AgentContractError, AgentResult, OpenRouterAgent
 from backend.app.core.anonymizer import anonymize, anonymize_messages
+from backend.app.core.case_context import CaseContext, ClarificationAnswer
 from backend.app.core.chat_response import (
     ASSISTANT_REPLY_MAX_LENGTH,
     AssistantChatResponse,
@@ -197,12 +198,23 @@ def _service_error(
         if isinstance(exc, ValidationError)
         else exc
     )
+    # V2 transports local case facts: provider errors can echo their input.
+    # Record a category only, including in development, never an upstream body.
+    request_payload = request.get_json(silent=True) if request.is_json else None
+    private_case_request = (
+        isinstance(request_payload, dict) and request_payload.get("contract_version") == 2
+    )
+    if private_case_request:
+        error_message = type(exc).__name__
+        log_exception = RuntimeError(error_message)
     logger.error(
         "Chat request failed [%s]: %s: %s",
         code,
         type(exc).__name__,
         error_message,
-        exc_info=(type(log_exception), log_exception, exc.__traceback__),
+        exc_info=None
+        if private_case_request
+        else (type(log_exception), log_exception, exc.__traceback__),
         extra={
             "event": "chat_request_failed",
             "error_code": code,
@@ -216,7 +228,7 @@ def _service_error(
     payload = {"code": code, "detail": detail, "retryable": retryable}
     if error_id:
         payload["error_id"] = error_id
-    if runtime_config.development_mode:
+    if runtime_config.development_mode and not private_case_request:
         payload["debug_message"] = f"{type(exc).__name__}: {str(exc)[:2000]}"
     return jsonify(payload), status_code
 
@@ -293,6 +305,9 @@ class ChatRequest(BaseModel):
     use_rag: bool = Field(default=True, description="是否啟用 RAG 檢索增強")
     stream: bool = Field(default=False, description="以 SSE 串流回覆文字，完成後傳回完整資料")
     image_base64: str | None = Field(default=None, description="使用者上傳的圖片 (base64 data URL)")
+    contract_version: Literal[1, 2] = 1
+    case_context: CaseContext | None = None
+    clarification_answer: ClarificationAnswer | None = None
 
     @field_validator("image_base64")
     @classmethod
@@ -301,6 +316,10 @@ class ChatRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_message_or_image(self):
+        if self.contract_version != 2 and (
+            self.case_context is not None or self.clarification_answer is not None
+        ):
+            raise ValueError("Case context requires contract version 2")
         if not self.message.strip() and not self.image_base64:
             raise ValueError("message or image_base64 is required")
         history_characters = sum(len(item.content) for item in self.history)
@@ -375,6 +394,8 @@ def _response_payload(result: AgentResult, session_id: str, was_anonymized: bool
         "interaction_mode": structured_response.interaction_mode,
         "clarifying_questions": structured_response.clarifying_questions,
     }
+    if result.guidance:
+        payload.update(result.guidance)
     if runtime_config.development_mode:
         payload["debug_tool_calls"] = result.tool_calls
     return payload
@@ -394,12 +415,38 @@ def _prepare_agent_input(req_obj: ChatRequest, runtime_config) -> tuple[dict, bo
         message = anon_result.anonymized
         was_anonymized = anon_result.was_modified
         history = anonymize_messages(history)
-    return {
+    arguments = {
         "user_message": message,
         "history": history,
         "image_base64": req_obj.image_base64 if runtime_config.enable_image_upload else None,
         "use_rag": req_obj.use_rag,
-    }, was_anonymized
+    }
+    if req_obj.contract_version == 2:
+
+        def clean_case_text(value):
+            nonlocal was_anonymized
+            if isinstance(value, str):
+                result = anonymize(value)
+                was_anonymized = was_anonymized or result.was_modified
+                return result.anonymized
+            if isinstance(value, dict):
+                return {key: clean_case_text(item) for key, item in value.items()}
+            return value
+
+        # Case facts are always redacted at the outbound boundary, even when a
+        # legacy runtime toggle disables anonymization for the older contract.
+        arguments.update(
+            contract_version=2,
+            case_context=clean_case_text(
+                (req_obj.case_context or CaseContext()).model_dump(exclude_none=True)
+            ),
+            clarification_answer=clean_case_text(
+                req_obj.clarification_answer.model_dump(exclude_none=True)
+            )
+            if req_obj.clarification_answer
+            else None,
+        )
+    return arguments, was_anonymized
 
 
 def _stream_response(
