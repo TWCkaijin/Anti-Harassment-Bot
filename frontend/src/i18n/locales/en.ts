@@ -55,6 +55,25 @@ const en = {
   ragSourceRemedy: "Remedies",
   ragSourceUnknown: "Other Sources",
   anonymizedLabel: "Some text identifiers were masked",
+  processingTraceTitle: "Processing steps",
+  processingTraceCaption: "Shows system processing steps, not complete internal reasoning or verification of legal accuracy.",
+  processingTraceSteps: "Observed processing steps",
+  processingSeconds: (value: string) => `${value} s`,
+  processingAttempt: (value: number) => `Request attempt ${value}`,
+  processingOutcomes: {
+    running: "Processing", complete: "Response complete", cancelled: "Stopped", error: "Interrupted",
+  },
+  processingPhases: {
+    connecting: "Connecting",
+    retrying: "Retrying request",
+    anonymizing: "Applying text masking",
+    preparing: "Preparing response",
+    waiting_model: "Waiting for the model",
+    retrieving: "Retrieving sources",
+    generating: "Receiving response content",
+    guidance: "Preparing follow-up guidance",
+    validating: "Checking response format and citations",
+  },
 
   // ── EmergencyFab ──
   emergency113: "113 Protection Hotline",

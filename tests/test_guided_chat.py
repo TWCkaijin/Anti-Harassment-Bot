@@ -102,12 +102,63 @@ def test_health_advertises_supported_contracts():
 @pytest.mark.asyncio
 async def test_known_missing_fact_uses_no_model_or_retrieval():
     agent = agent_for([])
-    result = await agent.run("我在公司被騷擾，要怎麼申訴", contract_version=2)
+    events = []
+
+    async def progress(event):
+        events.append(event["phase"])
+
+    async def delta(text):
+        events.append("delta")
+
+    result = await agent.run(
+        "我在公司被騷擾，要怎麼申訴",
+        contract_version=2,
+        on_progress=progress,
+        on_reply_delta=delta,
+    )
     assert result.guidance["execution"]["route"] == "short_clarify"
     assert result.guidance["execution"]["model_calls"] == 0
     assert result.guidance["clarification"]["fact_key"] == "other_role"
     assert agent.rag.calls == []
     assert agent.client.chat.completions.calls == []
+    assert events[:2] == ["preparing", "validating"]
+    assert events[2:] and set(events[2:]) == {"delta"}
+
+
+@pytest.mark.asyncio
+async def test_processing_reports_actual_steps_without_provider_reasoning(monkeypatch):
+    monkeypatch.setattr(
+        guided, "get_runtime_config", lambda: fake_runtime_config(reasoning_effort="high")
+    )
+    message = FakeMessage(json.dumps(answer(), ensure_ascii=False))
+    message.reasoning_content = "PRIVATE_REASONING_CANARY"
+    message.reasoning_details = [{"text": "PRIVATE_REASONING_CANARY"}]
+    agent = agent_for([FakeResponse(message)])
+    events = []
+
+    async def progress(event):
+        events.append(event)
+
+    async def delta(text):
+        events.append({"text": text})
+
+    result = await agent.run(
+        "請介紹一般性騷擾法律",
+        contract_version=2,
+        on_progress=progress,
+        on_reply_delta=delta,
+    )
+    assert [event.get("phase") for event in events[:4]] == [
+        "preparing",
+        "retrieving",
+        "waiting_model",
+        "validating",
+    ]
+    assert all(set(event) == {"text"} for event in events[4:])
+    assert events[4:]
+    assert "PRIVATE_REASONING_CANARY" not in json.dumps(events)
+    assert "PRIVATE_REASONING_CANARY" not in result.reply
+    assert agent.client.chat.completions.calls[0]["extra_body"]["reasoning"]["exclude"] is True
 
 
 @pytest.mark.asyncio
@@ -443,3 +494,23 @@ def test_v2_sse_only_publishes_facts_in_done(monkeypatch):
     assert "fact_updates" not in before_done
     assert '"fact_updates"' in done
     assert "event: error" not in body
+
+
+def test_v2_progress_reports_new_field_masking_when_legacy_toggle_is_off(monkeypatch):
+    monkeypatch.setattr(chat_api, "get_agent", lambda: agent_for([]))
+    monkeypatch.setattr(
+        chat_api, "get_runtime_config", lambda: fake_runtime_config(enable_anonymization=False)
+    )
+    response = app.test_client().post(
+        "/api/v1/chat/",
+        json={"message": "我是學生，被騷擾想申訴", "contract_version": 2, "stream": True},
+    )
+    frames = response.get_data(as_text=True).split("\n\n")
+    progress = [
+        json.loads(frame.split("data: ", 1)[1])
+        for frame in frames
+        if frame.startswith("event: progress")
+    ]
+    assert progress[0]["phase"] == "anonymizing"
+    assert progress[1]["phase"] == "preparing"
+    assert all(set(event) == {"phase", "elapsed_ms"} for event in progress)

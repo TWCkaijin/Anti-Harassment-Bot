@@ -246,6 +246,8 @@ async def run_guided(
         if on_progress:
             await on_progress({"phase": phase})
 
+    await progress("preparing")
+
     # Structured selections are user statements; never trust their question ID as authority.
     if clarification_answer:
         fact = CaseFact.model_validate(
@@ -571,6 +573,8 @@ async def run_guided(
     from backend.app.core.chat_response import AssistantChatResponse
 
     try:
+        if answer is None:
+            await progress("validating")
         AssistantChatResponse.model_validate(payload)
     except ValidationError:
         raise AgentContractError("Invalid guided response projection") from None

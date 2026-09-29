@@ -1,5 +1,6 @@
 import type { ConversationMessage, ConversationSession } from "./useConversation";
 import { isClarification, isRecord, normalizeCaseContext } from "../services/caseFacts";
+import { sanitizeProcessingTrace } from "../services/processingTrace";
 
 export const STORAGE_KEY = "harass_bot_conversations";
 export type StorageIssue = "unavailable" | "invalid" | "future" | null;
@@ -23,6 +24,9 @@ export function loadConversationStorage(): { sessions: ConversationSession[]; is
         if (typeof message.id !== "string" || !["user", "assistant"].includes(String(message.role)) || typeof message.content !== "string" || typeof message.timestamp !== "number") { invalid = true; continue; }
         const safeMessage = { ...message } as unknown as ConversationMessage;
         delete safeMessage.streamingGuidance;
+        const trace = safeMessage.role === "assistant" ? sanitizeProcessingTrace(safeMessage.processingTrace) : undefined;
+        if (trace) safeMessage.processingTrace = trace;
+        else delete safeMessage.processingTrace;
         if (!isClarification(safeMessage.clarification)) delete safeMessage.clarification;
         if (!Array.isArray(safeMessage.answerSections) || !safeMessage.answerSections.every(section => isRecord(section) && ["direction", "basis", "next_steps"].includes(String(section.kind)) && typeof section.text === "string" && Array.isArray(section.source_ids) && section.source_ids.every(id => typeof id === "string"))) delete safeMessage.answerSections;
         if (!isRecord(safeMessage.ragUsed) || !Array.isArray(safeMessage.ragUsed.sources) || !safeMessage.ragUsed.sources.every(source => typeof source === "string" || (isRecord(source) && typeof source.label === "string"))) delete safeMessage.ragUsed;
@@ -38,7 +42,11 @@ export function loadConversationStorage(): { sessions: ConversationSession[]; is
 
 export function saveConversationStorage(sessions: ConversationSession[]): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.map(session => ({ ...session, schemaVersion: 2, caseFacts: normalizeCaseContext(session.caseFacts) }))));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions.map(session => ({ ...session, schemaVersion: 2, caseFacts: normalizeCaseContext(session.caseFacts), messages: session.messages.map(message => {
+      const { processingTrace, ...rest } = message;
+      const trace = message.role === "assistant" ? sanitizeProcessingTrace(processingTrace) : undefined;
+      return { ...rest, ...(trace ? { processingTrace: trace } : {}) };
+    }) }))));
     return true;
   } catch { return false; }
 }
