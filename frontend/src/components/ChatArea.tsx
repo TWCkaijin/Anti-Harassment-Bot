@@ -4,6 +4,7 @@
  */
 import { useRef, useEffect, useState} from "react";
 import MaterialIcon from "./MaterialIcon";
+import BrandMark from "./BrandMark";
 import { useI18n } from "../i18n";
 import type { ConversationMessage, ReplyContext } from "../hooks/useConversation";
 import MessageItem from "./MessageItem";
@@ -89,12 +90,15 @@ export default function ChatArea({
             <MaterialIcon icon="menu" size={24} className="text-on-surface/70" />
           </button>
           
-          <div className="space-y-1 min-w-0">
-            <h2 className="text-base lg:text-lg font-bold text-on-surface truncate">
-              {t.appTitle}
-            </h2>
-            <div className="flex items-center gap-1.5 lg:gap-2 text-[10px] lg:text-xs text-on-surface/50 truncate">
-              <span className="truncate">{t.appSubtitle}</span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <BrandMark size={32} className="lg:hidden" />
+            <div className="space-y-1 min-w-0">
+              <h2 className="text-base lg:text-lg font-bold text-on-surface truncate">
+                {t.appTitle}
+              </h2>
+              <div className="flex items-center gap-1.5 lg:gap-2 text-[10px] lg:text-xs text-on-surface/50 truncate">
+                <span className="truncate">{t.appSubtitle}</span>
+              </div>
             </div>
           </div>
         </div>

@@ -85,6 +85,7 @@ export default function SettingsPanel({
           </h2>
           <button
             onClick={onClose}
+            aria-label={t.close}
             className="p-1.5 rounded-lg hover:bg-surface-container-high transition-colors cursor-pointer"
           >
             <MaterialIcon icon="close" size={20} className="text-on-surface-variant" />

@@ -1,15 +1,16 @@
 const en = {
   // ── App / General ──
-  appTitle: "Anti-Harassment AI",
-  appSubtitle: "Support · Local history · Legal knowledge",
-  brandName: "Guardian AI",
-  brandSub: "AI Assistant",
+  appTitle: "Warm Support",
+  appSubtitle: "Sexual harassment support and information",
+  brandName: "Warm Support",
+  brandSub: "Sexual harassment support and information",
 
   // ── Sidebar ──
   newChat: "New Chat",
   chatHistory: "Chat History",
   noHistory: "No conversation history",
   deleteChat: "Delete chat",
+  conversationMenu: "Conversation options",
   newConversation: "New conversation",
   messagesCount: (n: number) => `${n} msg${n > 1 ? "s" : ""}`,
   timeJustNow: "Just now",
@@ -19,21 +20,29 @@ const en = {
 
   // Sidebar bottom
   emergencyContacts: "Emergency",
+  emergencyHelp: "Urgent help",
+  admin: "Admin",
   counseling: "Counseling",
   settings: "Settings",
   privacyNote: "Conversation history is saved on this device",
   privacyNoteSub: "Questions are sent to the service for processing",
 
   // ── WelcomeHero ──
-  heroChip: "AI Assistant Ready",
-  heroTitle: "Your peaceful life, ",
-  heroTitleHighlight: "we protect",
-  heroDesc:
-    "Providing immediate, professional integrated support. Whether it's legal counsel, reporting channels, or emotional support — we're here to guide you.",
-  heroInputPlaceholder: "How can I help you?",
-  suggestLaw: "How to apply for legal aid?",
-  suggestReport: "Anonymous reporting channels",
-  suggestSelfCare: "How to take care of myself?",
+  heroTitle: "Start with what you want to share",
+  heroTitleHighlight: "Explore the next step together",
+  heroDesc: "Make sense of your situation, understand your rights, and explore available support.",
+  heroInputPlaceholder: "Share or ask…",
+  heroInputLabel: "Your situation or question",
+  heroSuggestionsLabel: "Start here",
+  heroPrivacyNote: "AI responses are for reference. Content is sent to the service; avoid personal details.",
+  addImage: "Add an image",
+  chooseImage: "Choose an image",
+  removeImage: "Remove image",
+  imagePreview: "Selected image",
+  imageTooLarge: "Choose an image of 5 MB or smaller.",
+  suggestLaw: "I want to understand my rights",
+  suggestReport: "Where can I get help?",
+  suggestSelfCare: "Help me plan a next step",
 
   // ── ChatArea ──
   statusThinking: "AI is thinking…",

@@ -236,6 +236,7 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
               <img src={previewUrl} alt="Preview" className="h-20 w-auto rounded-lg object-cover border border-primary/20 shadow-sm" />
               <button
                 onClick={removeFile}
+                aria-label={t.removeImage}
                 className="absolute -top-2 -right-2 bg-white text-on-surface hover:text-error rounded-full shadow-md p-1 border border-primary/10 transition-colors"
               >
                 <MaterialIcon icon="close" size={16} />
