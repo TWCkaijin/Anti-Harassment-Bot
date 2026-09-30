@@ -1,0 +1,290 @@
+{
+  "stage": "after",
+  "synthetic": true,
+  "live_model_calls": 0,
+  "checks": [
+    {
+      "variant": "desktop-zh-TW",
+      "status": "passed",
+      "copy": "溫暖守護\n性騷擾協助與資訊\n已連線\n目前了解的情況\n先從您想說的開始\n一起釐清下一步\n\n整理處境、了解權益，找到可用的協助。\n\n0 / 2,000\n\n我想了解自己的權益\n我可以向哪裡求助？\n先幫我整理下一步\n\n回覆由 AI 產生，僅供參考；內容會送至服務處理，請避免提供個資。",
+      "document_width": {
+        "client": 1440,
+        "scroll": 1440
+      },
+      "input_width": 902,
+      "header_title_clipped": false,
+      "horizontal_overflow": false,
+      "document_title": "溫暖守護｜性騷擾協助與資訊",
+      "placeholder": {
+        "measured_width": 125.359375,
+        "content_width": 870,
+        "font": "500 16px \"Noto Sans\", \"Noto Sans TC\", system-ui, -apple-system, sans-serif"
+      },
+      "favicon": {
+        "pathname": "/brand-mark.svg",
+        "status": 200,
+        "rendered": true
+      },
+      "chat_requests": 2,
+      "blocked_requests": [
+        {
+          "hostname": "fonts.googleapis.com",
+          "pathname": "/css2",
+          "material_font": false
+        }
+      ],
+      "page_errors": [],
+      "verified": [
+        "new-brand-and-concise-copy",
+        "no-ready-badge",
+        "visible-brand-mark",
+        "svg-favicon-200-and-decode",
+        "no-material-ligatures-or-font-request",
+        "no-horizontal-overflow-or-input-overlap",
+        "placeholder-fits-rendered-font-width",
+        "named-homepage-and-sidebar-buttons",
+        "sidebar-open-close",
+        "settings-keyboard-close",
+        "shift-enter-no-submit",
+        "keyboard-send-synthetic-answer",
+        "keyboard-suggestion"
+      ]
+    },
+    {
+      "variant": "mobile-zh-TW",
+      "status": "passed",
+      "copy": "溫暖守護\n性騷擾協助與資訊\n目前了解的情況\n先從您想說的開始\n一起釐清下一步\n\n整理處境、了解權益，找到可用的協助。\n\n0 / 2,000\n\n我想了解自己的權益\n我可以向哪裡求助？\n先幫我整理下一步\n\n回覆由 AI 產生，僅供參考；內容會送至服務處理，請避免提供個資。",
+      "document_width": {
+        "client": 390,
+        "scroll": 390
+      },
+      "input_width": 236,
+      "header_title_clipped": false,
+      "horizontal_overflow": false,
+      "document_title": "溫暖守護｜性騷擾協助與資訊",
+      "placeholder": {
+        "measured_width": 125.359375,
+        "content_width": 220,
+        "font": "500 16px \"Noto Sans\", \"Noto Sans TC\", system-ui, -apple-system, sans-serif"
+      },
+      "favicon": {
+        "pathname": "/brand-mark.svg",
+        "status": 200,
+        "rendered": true
+      },
+      "chat_requests": 2,
+      "blocked_requests": [
+        {
+          "hostname": "fonts.googleapis.com",
+          "pathname": "/css2",
+          "material_font": false
+        }
+      ],
+      "page_errors": [],
+      "verified": [
+        "new-brand-and-concise-copy",
+        "no-ready-badge",
+        "visible-brand-mark",
+        "svg-favicon-200-and-decode",
+        "no-material-ligatures-or-font-request",
+        "no-horizontal-overflow-or-input-overlap",
+        "placeholder-fits-rendered-font-width",
+        "named-homepage-and-sidebar-buttons",
+        "sidebar-open-close",
+        "settings-keyboard-close",
+        "shift-enter-no-submit",
+        "keyboard-send-synthetic-answer",
+        "keyboard-suggestion"
+      ]
+    },
+    {
+      "variant": "narrow-zh-TW",
+      "status": "passed",
+      "copy": "溫暖守護\n性騷擾協助與資訊\n目前了解的情況\n先從您想說的開始\n一起釐清下一步\n\n整理處境、了解權益，找到可用的協助。\n\n0 / 2,000\n\n我想了解自己的權益\n我可以向哪裡求助？\n先幫我整理下一步\n\n回覆由 AI 產生，僅供參考；內容會送至服務處理，請避免提供個資。",
+      "document_width": {
+        "client": 320,
+        "scroll": 320
+      },
+      "input_width": 166,
+      "header_title_clipped": false,
+      "horizontal_overflow": false,
+      "document_title": "溫暖守護｜性騷擾協助與資訊",
+      "placeholder": {
+        "measured_width": 125.359375,
+        "content_width": 150,
+        "font": "500 16px \"Noto Sans\", \"Noto Sans TC\", system-ui, -apple-system, sans-serif"
+      },
+      "favicon": {
+        "pathname": "/brand-mark.svg",
+        "status": 200,
+        "rendered": true
+      },
+      "chat_requests": 2,
+      "blocked_requests": [
+        {
+          "hostname": "fonts.googleapis.com",
+          "pathname": "/css2",
+          "material_font": false
+        }
+      ],
+      "page_errors": [],
+      "verified": [
+        "new-brand-and-concise-copy",
+        "no-ready-badge",
+        "visible-brand-mark",
+        "svg-favicon-200-and-decode",
+        "no-material-ligatures-or-font-request",
+        "no-horizontal-overflow-or-input-overlap",
+        "placeholder-fits-rendered-font-width",
+        "named-homepage-and-sidebar-buttons",
+        "sidebar-open-close",
+        "settings-keyboard-close",
+        "shift-enter-no-submit",
+        "keyboard-send-synthetic-answer",
+        "keyboard-suggestion"
+      ]
+    },
+    {
+      "variant": "desktop-en",
+      "status": "passed",
+      "copy": "Warm Support\nSexual harassment support and information\nConnected\nCurrent situation summary\nStart with what you want to share\nExplore the next step together\n\nMake sense of your situation, understand your rights, and explore available support.\n\n0 / 2,000\n\nI want to understand my rights\nWhere can I get help?\nHelp me plan a next step\n\nAI responses are for reference. Content is sent to the service; avoid personal details.",
+      "document_width": {
+        "client": 1440,
+        "scroll": 1440
+      },
+      "input_width": 902,
+      "header_title_clipped": false,
+      "horizontal_overflow": false,
+      "document_title": "Warm Support｜Sexual harassment support and information",
+      "placeholder": {
+        "measured_width": 105.52082824707031,
+        "content_width": 870,
+        "font": "500 16px \"Noto Sans\", \"Noto Sans TC\", system-ui, -apple-system, sans-serif"
+      },
+      "favicon": {
+        "pathname": "/brand-mark.svg",
+        "status": 200,
+        "rendered": true
+      },
+      "chat_requests": 2,
+      "blocked_requests": [
+        {
+          "hostname": "fonts.googleapis.com",
+          "pathname": "/css2",
+          "material_font": false
+        }
+      ],
+      "page_errors": [],
+      "verified": [
+        "new-brand-and-concise-copy",
+        "no-ready-badge",
+        "visible-brand-mark",
+        "svg-favicon-200-and-decode",
+        "no-material-ligatures-or-font-request",
+        "no-horizontal-overflow-or-input-overlap",
+        "placeholder-fits-rendered-font-width",
+        "named-homepage-and-sidebar-buttons",
+        "sidebar-open-close",
+        "settings-keyboard-close",
+        "shift-enter-no-submit",
+        "keyboard-send-synthetic-answer",
+        "keyboard-suggestion"
+      ]
+    },
+    {
+      "variant": "mobile-en",
+      "status": "passed",
+      "copy": "Warm Support\nSexual harassment support and information\nCurrent situation summary\nStart with what you want to share\nExplore the next step together\n\nMake sense of your situation, understand your rights, and explore available support.\n\n0 / 2,000\n\nI want to understand my rights\nWhere can I get help?\nHelp me plan a next step\n\nAI responses are for reference. Content is sent to the service; avoid personal details.",
+      "document_width": {
+        "client": 390,
+        "scroll": 390
+      },
+      "input_width": 236,
+      "header_title_clipped": false,
+      "horizontal_overflow": false,
+      "document_title": "Warm Support｜Sexual harassment support and information",
+      "placeholder": {
+        "measured_width": 105.52082824707031,
+        "content_width": 220,
+        "font": "500 16px \"Noto Sans\", \"Noto Sans TC\", system-ui, -apple-system, sans-serif"
+      },
+      "favicon": {
+        "pathname": "/brand-mark.svg",
+        "status": 200,
+        "rendered": true
+      },
+      "chat_requests": 2,
+      "blocked_requests": [
+        {
+          "hostname": "fonts.googleapis.com",
+          "pathname": "/css2",
+          "material_font": false
+        }
+      ],
+      "page_errors": [],
+      "verified": [
+        "new-brand-and-concise-copy",
+        "no-ready-badge",
+        "visible-brand-mark",
+        "svg-favicon-200-and-decode",
+        "no-material-ligatures-or-font-request",
+        "no-horizontal-overflow-or-input-overlap",
+        "placeholder-fits-rendered-font-width",
+        "named-homepage-and-sidebar-buttons",
+        "sidebar-open-close",
+        "settings-keyboard-close",
+        "shift-enter-no-submit",
+        "keyboard-send-synthetic-answer",
+        "keyboard-suggestion"
+      ]
+    },
+    {
+      "variant": "narrow-en",
+      "status": "passed",
+      "copy": "Warm Support\nSexual harassment support and information\nCurrent situation summary\nStart with what you want to share\nExplore the next step together\n\nMake sense of your situation, understand your rights, and explore available support.\n\n0 / 2,000\n\nI want to understand my rights\nWhere can I get help?\nHelp me plan a next step\n\nAI responses are for reference. Content is sent to the service; avoid personal details.",
+      "document_width": {
+        "client": 320,
+        "scroll": 320
+      },
+      "input_width": 166,
+      "header_title_clipped": false,
+      "horizontal_overflow": false,
+      "document_title": "Warm Support｜Sexual harassment support and information",
+      "placeholder": {
+        "measured_width": 105.52082824707031,
+        "content_width": 150,
+        "font": "500 16px \"Noto Sans\", \"Noto Sans TC\", system-ui, -apple-system, sans-serif"
+      },
+      "favicon": {
+        "pathname": "/brand-mark.svg",
+        "status": 200,
+        "rendered": true
+      },
+      "chat_requests": 2,
+      "blocked_requests": [
+        {
+          "hostname": "fonts.googleapis.com",
+          "pathname": "/css2",
+          "material_font": false
+        }
+      ],
+      "page_errors": [],
+      "verified": [
+        "new-brand-and-concise-copy",
+        "no-ready-badge",
+        "visible-brand-mark",
+        "svg-favicon-200-and-decode",
+        "no-material-ligatures-or-font-request",
+        "no-horizontal-overflow-or-input-overlap",
+        "placeholder-fits-rendered-font-width",
+        "named-homepage-and-sidebar-buttons",
+        "sidebar-open-close",
+        "settings-keyboard-close",
+        "shift-enter-no-submit",
+        "keyboard-send-synthetic-answer",
+        "keyboard-suggestion"
+      ]
+    }
+  ],
+  "status": "passed"
+}

@@ -1,15 +1,16 @@
 const zhTW = {
   // ── App / 通用 ──
-  appTitle: "性騷擾防治智能 AI",
-  appSubtitle: "溫暖守護 · 本地紀錄 · 法律知識庫",
-  brandName: "溫暖守護 AI",
-  brandSub: "屏東縣政府性騷擾治理政策Agent",
+  appTitle: "溫暖守護",
+  appSubtitle: "性騷擾協助與資訊",
+  brandName: "溫暖守護",
+  brandSub: "性騷擾協助與資訊",
 
   // ── Sidebar ──
   newChat: "開啟新對話",
   chatHistory: "對話紀錄",
   noHistory: "尚無對話紀錄",
   deleteChat: "刪除對話",
+  conversationMenu: "對話選項",
   newConversation: "新的對話",
   messagesCount: (n: number) => `${n} 則`,
   timeJustNow: "剛剛",
@@ -19,21 +20,29 @@ const zhTW = {
 
   // Sidebar 底部
   emergencyContacts: "緊急聯絡",
+  emergencyHelp: "緊急協助",
+  admin: "管理",
   counseling: "心理諮商",
   settings: "設定",
   privacyNote: "對話紀錄保存在此裝置",
   privacyNoteSub: "提問內容會傳至服務處理",
 
   // ── WelcomeHero ──
-  heroChip: "AI 助理已就緒",
-  heroTitle: "您的平靜生活，",
-  heroTitleHighlight: "我們守護",
-  heroDesc:
-    "提供即時、專業的整合性協助。不論是法律諮詢、通報管道或情緒支持，我們都在這裡為您引路。",
-  heroInputPlaceholder: "我有什麼可以幫您的？",
-  suggestLaw: "如何申請法律扶助？",
-  suggestReport: "匿名通報的管道",
-  suggestSelfCare: "如何照顧自己身心？",
+  heroTitle: "先從您想說的開始",
+  heroTitleHighlight: "一起釐清下一步",
+  heroDesc: "整理處境、了解權益，找到可用的協助。",
+  heroInputPlaceholder: "描述情況或提問…",
+  heroInputLabel: "想說的情況或問題",
+  heroSuggestionsLabel: "可以從這裡開始",
+  heroPrivacyNote: "回覆由 AI 產生，僅供參考；內容會送至服務處理，請避免提供個資。",
+  addImage: "加入圖片",
+  chooseImage: "選擇圖片",
+  removeImage: "移除圖片",
+  imagePreview: "已選擇的圖片",
+  imageTooLarge: "請選擇 5 MB 以下的圖片。",
+  suggestLaw: "我想了解自己的權益",
+  suggestReport: "我可以向哪裡求助？",
+  suggestSelfCare: "先幫我整理下一步",
 
   // ── ChatArea ──
   statusThinking: "AI 正在思考中…",

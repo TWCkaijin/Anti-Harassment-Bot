@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import MaterialIcon from "./MaterialIcon";
+import BrandMark from "./BrandMark";
 import { useI18n } from "../i18n";
 import type { ConversationSession } from "../hooks/useConversation";
 import { formatConversationText } from "../services/conversationExport";
@@ -157,9 +158,7 @@ export default function Sidebar({
         {/* 頂部 Logo */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center shadow-sm">
-              <MaterialIcon icon="shield" size={24} filled className="text-white" />
-            </div>
+            <BrandMark size={48} />
             <div>
               <h1 className="text-lg font-bold text-primary leading-tight">{t.brandName}</h1>
               <p className="text-xs text-on-surface/60">{t.brandSub}</p>
@@ -261,6 +260,8 @@ export default function Sidebar({
                     : "opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100"
                 }`}>
                   <button
+                    aria-label={`${t.conversationMenu}：${session.title || getSessionPreview(session, t)}`}
+                    aria-expanded={menuOpenId === session.id}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (menuOpenId === session.id) {
@@ -303,7 +304,7 @@ export default function Sidebar({
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-secondary px-3 py-3 text-sm font-bold text-white shadow-sm transition-opacity hover:opacity-90"
             >
               <MaterialIcon icon="call" size={20} />
-              <span>專人緊急協助</span>
+              <span>{t.emergencyHelp}</span>
               <MaterialIcon icon="expand_less" size={20} className={`ml-auto transition-transform ${isEmergencyMenuOpen ? 'rotate-180' : ''}`} />
             </button>
             {/* 展開選單 (往上展開，避免超出畫面) */}
@@ -357,7 +358,7 @@ export default function Sidebar({
             >
               <MaterialIcon icon="admin_panel_settings" size={20} />
               <span className="text-xs font-medium">
-                Admin
+                {t.admin}
               </span>
             </button>
           </div>

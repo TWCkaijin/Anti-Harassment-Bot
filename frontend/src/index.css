@@ -91,17 +91,6 @@ body {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
 
-/* ── Material Symbols ────────────────────────────────────────────────── */
-
-.material-symbols-outlined {
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  vertical-align: middle;
-  user-select: none;
-}
-
 /* ── 滾動條美化 ──────────────────────────────────────────────────────── */
 
 ::-webkit-scrollbar {

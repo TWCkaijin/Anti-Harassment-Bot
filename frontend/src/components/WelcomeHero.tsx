@@ -1,6 +1,5 @@
 /**
- * WelcomeHero — Stitch 風格 Hero Section
- * Mesh gradient 背景 + AI Ready 提示 chip + 大字標題 + Gemini 漸變輸入框 + 建議 Chips。
+ * WelcomeHero — 首頁標題、問題輸入與建議入口。
  */
 import { useRef, useState, type KeyboardEvent, type ChangeEvent } from "react";
 import MaterialIcon from "./MaterialIcon";
@@ -28,7 +27,7 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
-        alert("圖片大小不能超過 5MB");
+        alert(t.imageTooLarge);
         return;
       }
       setSelectedFile(file);
@@ -91,14 +90,6 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
   return (
     <div className="flex-1 flex flex-col hero-mesh-gradient overflow-y-auto">
       <section className="w-full px-5 lg:px-10 py-12 lg:py-24 flex flex-col items-center text-center flex-1 justify-center">
-        {/* AI Ready Chip */}
-        <div className="mb-8 inline-flex items-center gap-2 px-4 py-2 bg-secondary-container/20 text-secondary border border-secondary/20 rounded-full animate-pulse">
-          <MaterialIcon icon="auto_awesome" size={18} />
-          <span className="text-xs font-semibold tracking-wide">
-            {t.heroChip}
-          </span>
-        </div>
-
         {/* 大字標題 */}
         <h2 className="text-3xl lg:text-4xl font-bold tracking-tight text-on-surface max-w-4xl mb-6 leading-tight">
           {t.heroTitle}
@@ -114,9 +105,11 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
         <div className="w-full relative mt-4">
           {previewUrl && (
             <div className="mb-3 relative inline-block animate-fade-in text-left">
-              <img src={previewUrl} alt="Preview" className="h-20 w-auto rounded-lg object-cover border border-outline/20 shadow-sm" />
+              <img src={previewUrl} alt={t.imagePreview} className="h-20 w-auto rounded-lg object-cover border border-outline/20 shadow-sm" />
               <button 
+                type="button"
                 onClick={removeFile}
+                aria-label={t.removeImage}
                 className="absolute -top-2 -right-2 bg-surface text-on-surface hover:text-error rounded-full shadow-md p-1 border border-outline/10 transition-colors"
               >
                 <MaterialIcon icon="close" size={16} />
@@ -128,8 +121,11 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
             onClick={() => textareaRef.current?.focus()}
             className="relative bg-white border border-primary/30 rounded-3xl shadow-lg flex items-end px-4 lg:px-6 py-2 transition-shadow focus-within:shadow-float focus-within:border-primary/50 text-left cursor-text"
           >
-            {/* 左側視覺裝飾 Icon */}
+            {/* 圖片附件 */}
             <button 
+              type="button"
+              aria-label={t.addImage}
+              title={t.addImage}
               className="p-2 text-on-surface/40 hover:text-primary transition-colors cursor-pointer mb-0.5 shrink-0" 
               onClick={(e) => {
                 e.stopPropagation();
@@ -140,6 +136,7 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
             </button>
             <input 
               type="file" 
+              aria-label={t.chooseImage}
               accept="image/*" 
               className="hidden" 
               ref={fileInputRef} 
@@ -150,6 +147,7 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
+              aria-label={t.heroInputLabel}
               aria-invalid={Boolean(messageValidationError)}
               aria-describedby="welcome-message-length"
               placeholder={t.heroInputPlaceholder}
@@ -187,7 +185,7 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
           </p>
 
           {/* 建議 Chips */}
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <div role="group" aria-label={t.heroSuggestionsLabel} className="mt-4 flex flex-wrap justify-center gap-2">
             {suggestions.map((suggestion) => (
               <button
                 key={suggestion}
@@ -199,6 +197,9 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
               </button>
             ))}
           </div>
+          <p className="mt-4 mx-auto max-w-xl text-[11px] leading-relaxed text-on-surface/50">
+            {t.heroPrivacyNote}
+          </p>
         </div>
       </section>
     </div>
