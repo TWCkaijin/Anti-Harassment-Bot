@@ -12,10 +12,10 @@ echo "=============================================="
 
 if [ "$1" == "--fix" ]; then
     echo "1. [Backend] 執行 Ruff Check (自動修復)..."
-    uv run ruff check --fix backend/ tests/ || true
+    uv run ruff check --fix main.py backend/ scripts/ tests/ || true
 
     echo "2. [Backend] 執行 Ruff Format (自動格式化)..."
-    uv run ruff format backend/ tests/
+    uv run ruff format main.py backend/ scripts/ tests/
 
     echo "3. [Frontend] 執行 ESLint (自動修復)..."
     cd frontend
@@ -27,10 +27,10 @@ if [ "$1" == "--fix" ]; then
     echo "=============================================="
 else
     echo "1. [Backend] 執行 Ruff Check (僅檢查)..."
-    uv run ruff check backend/ tests/
+    uv run ruff check main.py backend/ scripts/ tests/
 
     echo "2. [Backend] 執行 Ruff Format (僅檢查)..."
-    uv run ruff format --check backend/ tests/
+    uv run ruff format --check main.py backend/ scripts/ tests/
 
     echo "3. [Frontend] 執行 ESLint (僅檢查)..."
     cd frontend
