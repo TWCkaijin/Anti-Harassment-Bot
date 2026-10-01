@@ -4,7 +4,10 @@ Agent.md
 USAGE.md
 TODO.md
 !/TODO.md
-docs/
+docs/*
+!docs/implementation/
+docs/implementation/*
+!docs/implementation/chat-v3.md
 
 # ===== Python =====
 __pycache__/

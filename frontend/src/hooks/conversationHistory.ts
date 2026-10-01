@@ -132,14 +132,17 @@ export function createChatRequest(
   messages: readonly HistoryCandidate[],
   userInput: string,
   imageBase64?: string,
-  contractVersion?: 2,
+  contractVersion?: 2 | 3 | 4,
 ): ChatRequest {
   const validationError = getUserMessageValidationError(userInput);
   if (validationError) throw new RangeError(validationError);
 
   return {
     message: userInput.trim(),
-    history: contractVersion === 2 ? buildChatHistory(messages) : buildChatHistory(messages, LEGACY_HISTORY_CHARACTERS, LEGACY_HISTORY_MESSAGES, LEGACY_HISTORY_MESSAGES),
+    // v3 lets the server apply the current environment or temporary diagnostic
+    // policy. Transport bounds still protect the request itself.
+    history: contractVersion === 3 || contractVersion === 4 ? buildChatHistory(messages, 120_000, 200, 200)
+      : contractVersion === 2 ? buildChatHistory(messages) : buildChatHistory(messages, LEGACY_HISTORY_CHARACTERS, LEGACY_HISTORY_MESSAGES, LEGACY_HISTORY_MESSAGES),
     use_rag: true,
     image_base64: imageBase64,
   };

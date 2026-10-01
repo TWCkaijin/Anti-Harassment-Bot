@@ -26,11 +26,11 @@ describe("ProcessingTrace", () => {
     expect(screen.getByText("顯示系統處理步驟，不代表完整內部推理或法律正確性驗證。")).toBeVisible();
     const steps = screen.getAllByRole("listitem");
     expect(steps.map(step => step.textContent)).toEqual([
-      "正在連線0.0 秒", "正在等待模型回應0.8 秒", "正在檢索資料庫1.3 秒", "正在等待模型回應2.2 秒",
+      "正在連線", "正在等待模型回應", "正在檢索資料庫", "正在等待模型回應",
     ]);
     expect(steps[3]).toHaveAttribute("aria-current", "step");
     expect(steps.slice(0, 3).every(step => !step.hasAttribute("aria-current"))).toBe(true);
-    expect(screen.getByText("2.5 秒")).toBeVisible();
+    expect(screen.queryByText(/\d+\.\d+ 秒/)).not.toBeInTheDocument();
     expect(screen.queryByText("檢查回覆格式與引用")).not.toBeInTheDocument();
   });
 
@@ -123,4 +123,44 @@ describe("ProcessingTrace", () => {
     expect(screen.getByRole("status")).toHaveTextContent("處理中斷");
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
+  it("shows public analysis summaries, facts, sources and limits instead of timing rows", () => {
+    render(<ProcessingTrace trace={running} analysis={[{ stage: "sources", summary: "找到兩個可供參考的條文", facts: ["與工作場合有關"], source_labels: ["測試法第1條"], limitations: ["尚未確認事發時間"] }]} />, { wrapper: I18nProvider });
+    expect(screen.getByRole("button", { name: "分析摘要與依據" })).toBeVisible();
+    expect(screen.getByText("找到兩個可供參考的條文")).toBeVisible();
+    expect(screen.getByText("與工作場合有關")).toBeVisible();
+    expect(screen.getByText("測試法第1條")).toBeVisible();
+    expect(screen.getByText("尚未確認事發時間")).toBeVisible();
+    expect(screen.queryByText("正在連線")).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+\.\d+ 秒/)).not.toBeInTheDocument();
+  });
+  it.each([
+    ["zh-TW", "回答重點：", "已知條件："],
+    ["en", "Answer highlights：", "Confirmed details："],
+  ])("labels answer facts separately from known conditions in %s", (locale, highlights, knownFacts) => {
+    localStorage.setItem("harass_bot_locale", locale);
+    render(<ProcessingTrace trace={running} analysis={[
+      { stage: "understanding", summary: "條件整理", facts: ["合成情境"], source_labels: [], limitations: [] },
+      { stage: "answer", summary: "答案整理", facts: ["合成法律分析"], source_labels: [], limitations: [] },
+    ]} />, { wrapper: I18nProvider });
+    const steps = screen.getAllByRole("listitem");
+    expect(steps[0]).toHaveTextContent(knownFacts);
+    expect(steps[0]).not.toHaveTextContent(highlights);
+    expect(steps[1]).toHaveTextContent(highlights);
+    expect(steps[1]).not.toHaveTextContent(knownFacts);
+  });
+});
+
+it("separates transient provider explanations from observed analysis and collapses on completion", () => {
+  localStorage.clear();
+  const trace = { steps: [], duration_ms: 0, outcome: "running" as const };
+  const reasoning = [{ text: "供應商公開回傳的簡短說明。", kind: "summary" as const, stage: "understanding" as const }];
+  const view = (complete: boolean) => <I18nProvider><ProcessingTrace trace={{ ...trace, outcome: complete ? "complete" : "running" }} reasoning={reasoning} /></I18nProvider>;
+  const { rerender } = render(view(false));
+  expect(screen.getByRole("region", { name: "模型提供的推理說明" })).toBeVisible();
+  expect(screen.getByText(reasoning[0].text)).toBeVisible();
+  expect(screen.getByText(/並非已驗證答案/)).toBeVisible();
+  rerender(view(true));
+  expect(screen.getByText(reasoning[0].text)).not.toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "處理過程" }));
+  expect(screen.getByText(reasoning[0].text)).toBeVisible();
 });

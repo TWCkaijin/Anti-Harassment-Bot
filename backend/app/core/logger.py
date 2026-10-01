@@ -12,6 +12,29 @@ _TRACE_CONTEXT_PATTERN = re.compile(
     r"(?P<trace>[0-9a-fA-F]{32})(?:/(?P<span>[0-9]{1,20}))?(?:;o=(?P<sampled>[01]))?"
 )
 _STANDARD_RECORD_KEYS = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
+CLIENT_LOGGER_NAMES = (
+    "openai",
+    "httpx",
+    "httpcore",
+    "urllib3",
+    "requests",
+    "google.auth",
+    "google.api_core",
+    "google.cloud.firestore",
+    "google.cloud.firestore_v1",
+    "grpc",
+)
+
+
+def _is_client_logger(name: str) -> bool:
+    return any(name == prefix or name.startswith(prefix + ".") for prefix in CLIENT_LOGGER_NAMES)
+
+
+class ClientLogPrivacyFilter(logging.Filter):
+    """SDK debug records may contain full prompts, request bodies, and headers."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno >= logging.WARNING or not _is_client_logger(record.name)
 
 
 def _cloud_project_id() -> str | None:
@@ -180,11 +203,23 @@ def setup_logging() -> None:
     # 建立一個統一輸出到 stdout 的 handler
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setFormatter(formatter)
+    # A descendant can later set its own DEBUG level, bypassing its parent
+    # logger's level. Filter the output handler as well as setting SDK levels.
+    stdout_handler.addFilter(ClientLogPrivacyFilter())
     root_logger.addHandler(stdout_handler)
 
     # 設定全域與相關框架的日誌等級
     log_level = logging.DEBUG if local_development else logging.INFO
     root_logger.setLevel(log_level)
+
+    client_names = set(CLIENT_LOGGER_NAMES) | {
+        name for name in logging.Logger.manager.loggerDict if _is_client_logger(name)
+    }
+    for name in client_names:
+        target_logger = logging.getLogger(name)
+        target_logger.setLevel(logging.WARNING)
+        target_logger.handlers = []
+        target_logger.propagate = True
 
     # 接管 Uvicorn/FastAPI 的日誌，使其格式統一
     for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):

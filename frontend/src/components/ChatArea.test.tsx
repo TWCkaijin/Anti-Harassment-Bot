@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,6 +47,7 @@ function chat(messages: ConversationMessage[], onSend = vi.fn(), isLoading = fal
         retryStatus={retryStatus}
         onOpenSidebar={vi.fn()}
         onStop={vi.fn()}
+        backendConnected
       />
     </I18nProvider>
   );
@@ -76,6 +78,46 @@ beforeEach(() => {
 });
 
 describe("ChatArea follow-up integration", () => {
+  it.each([null, false])("blocks the first send while connection is %s and preserves the typed draft", connected => {
+    const onSend = vi.fn();
+    const props = { messages: [], onSend, onOpenSidebar: vi.fn(), onStop: vi.fn(), isLoading: false };
+    const { rerender } = render(<I18nProvider><ChatArea {...props} backendConnected={connected} /></I18nProvider>);
+    const composer = screen.getByRole("textbox");
+    fireEvent.change(composer, { target: { value: "第一個問題" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(composer).toHaveValue("第一個問題");
+    rerender(<I18nProvider><ChatArea {...props} backendConnected contractVersion={4} /></I18nProvider>);
+    expect(composer).toHaveValue("第一個問題");
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("第一個問題", undefined, undefined);
+  });
+  it("offers connection recovery without sending chat and keeps a saved summary safe while checking", () => {
+    const onSend = vi.fn();
+    const onReconnect = vi.fn();
+    const props = { messages: [assistantMessage({ interactionMode: "answer", clarifyingQuestions: [], actionButtons: [] })], onSend, onReconnect, onOpenSidebar: vi.fn(), onStop: vi.fn(), isLoading: false };
+    const { rerender } = render(<I18nProvider><ChatArea {...props} backendConnected={false} summaryRequiresConnection /></I18nProvider>);
+    expect(screen.getByRole("status")).toHaveTextContent("無法連線到服務");
+    expect(screen.queryByText(/目前服務尚未支援這份情境摘要/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("請描述您的狀況或提出問題…"), { target: { value: "接續原本的問題" } });
+    expect(screen.getByRole("button", { name: "傳送訊息" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "重新連線" }));
+    expect(onReconnect).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+
+    rerender(<I18nProvider><ChatArea {...props} backendConnected={null} summaryRequiresConnection /></I18nProvider>);
+    expect(screen.getByRole("status")).toHaveTextContent("正在確認服務連線");
+    expect(screen.queryByRole("button", { name: "重新連線" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "傳送訊息" })).toBeDisabled();
+
+    rerender(<I18nProvider><ChatArea {...props} backendConnected /></I18nProvider>);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "傳送訊息" })).toBeEnabled();
+    expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toHaveValue("接續原本的問題");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("explains an incompatible saved summary and disables sending without exposing its editor", () => {
     render(<I18nProvider><ChatArea messages={[assistantMessage({ interactionMode: "answer", clarifyingQuestions: [], actionButtons: [] })]} onSend={vi.fn()} onOpenSidebar={vi.fn()} onStop={vi.fn()} isLoading={false} backendConnected incompatibleSummary /></I18nProvider>);
     expect(screen.getByRole("alert")).toHaveTextContent("目前服務尚未支援這份情境摘要");
@@ -110,7 +152,7 @@ describe("ChatArea follow-up integration", () => {
     expect(within(messageArea!).queryByText(nextStep.title)).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    fireEvent.click(controls.getByRole("button", { name: "隱藏" }));
+    fireEvent.click(controls.getByRole("button", { name: "隱藏選項" }));
     expect(phone).toBeVisible();
     expect(controls.queryByRole("link")).not.toBeInTheDocument();
     expect(composer).toBeVisible();
@@ -178,7 +220,7 @@ describe("ChatArea follow-up integration", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /其他/ }), {
       target: { value: "只屬於上一個問題的草稿" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "隱藏" }));
+    fireEvent.click(screen.getByRole("button", { name: "隱藏選項" }));
     expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeVisible();
     rerender(chat([previous, assistantMessage({ id: "assistant-2" })], onSend));
 
@@ -320,7 +362,7 @@ describe("ChatArea streaming presentation", () => {
     expect(screen.getByRole("textbox", { name: "其他補充" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "送出回覆" })).toBeDisabled();
     expect(screen.getByText("正在產生問題與選項…")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "隱藏" }));
+    fireEvent.click(screen.getByRole("button", { name: "隱藏選項" }));
     expect(screen.getByPlaceholderText("請描述您的狀況或提出問題…")).toBeVisible();
     expect(screen.getByRole("button", { name: "停止回覆" })).toBeEnabled();
     expect(screen.queryByRole("region", { name: "下一步建議" })).not.toBeInTheDocument();
@@ -384,4 +426,54 @@ describe("ChatArea streaming presentation", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     await screen.findByText("已連線");
   });
+});
+
+describe("ChatArea v4 layout and current summary", () => {
+  it("shows the brand only before the first message and keeps compact connection controls", () => {
+    const { rerender } = render(chat([]));
+    const title = screen.getByRole("heading", { name: "溫暖守護" }).textContent!;
+    rerender(chat([{ id: "u", role: "user", content: "請陪我整理", timestamp: 1 }]));
+    expect(screen.queryByRole("heading", { name: title })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "開啟側邊欄" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "傳送訊息" })).toBeVisible();
+  });
+
+  it("offers one current summary beneath the latest valid avatar, then keeps edits reachable", () => {
+    const stop = vi.fn(), save = vi.fn();
+    const first = assistantMessage({ id: "a1", content: "第一則", interactionMode: "answer", clarifyingQuestions: [], actionButtons: [] });
+    const second = { ...first, id: "a2", content: "第二則" };
+    const caseFacts = { schema_version: 3 as const, revision: 2, facts: {}, summary: "第三人稱例題：甲在公車上遭碰觸。", summary_origin: "user" as const };
+    const view = (messages: ConversationMessage[]) => <I18nProvider><ChatArea messages={messages} caseFacts={caseFacts} onSaveCaseFacts={save} onSend={vi.fn()} onOpenSidebar={vi.fn()} onStop={stop} isLoading={false} backendConnected /></I18nProvider>;
+    const { rerender } = render(view([first, second]));
+    const button = screen.getByRole("button", { name: "查看目前摘要" });
+    expect(screen.queryByText(caseFacts.summary)).not.toBeInTheDocument();
+    button.focus();
+    fireEvent.click(button);
+    expect(screen.getByRole("dialog")).toHaveTextContent(caseFacts.summary);
+    expect(stop).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "修改摘要" }));
+    expect(stop).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "儲存摘要" }));
+    expect(save).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(button).toHaveFocus();
+    rerender(view([{ ...first, superseded: true }, { ...second, superseded: true }]));
+    fireEvent.click(screen.getByRole("button", { name: "查看目前摘要" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent(caseFacts.summary);
+  });
+});
+
+
+it("returns summary focus to the replacement control when saving supersedes the avatar", () => {
+  function Harness() {
+    const [saved, setSaved] = useState(false);
+    return <I18nProvider><ChatArea messages={[assistantMessage({ interactionMode: "answer", clarifyingQuestions: [], actionButtons: [], superseded: saved })]} caseFacts={{ schema_version: 3, revision: 0, facts: {}, summary: "甲是同事", summary_origin: "user" }} onSaveCaseFacts={() => setSaved(true)} onSend={vi.fn()} onOpenSidebar={vi.fn()} onStop={vi.fn()} isLoading={false} backendConnected /></I18nProvider>;
+  }
+  render(<Harness />);
+  const avatarTrigger = screen.getByRole("button", { name: "查看目前摘要" });
+  avatarTrigger.focus(); fireEvent.click(avatarTrigger);
+  fireEvent.click(screen.getByRole("button", { name: "修改摘要" }));
+  fireEvent.click(screen.getByRole("button", { name: "儲存摘要" }));
+  expect(avatarTrigger).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "查看目前摘要" })).toHaveFocus();
 });

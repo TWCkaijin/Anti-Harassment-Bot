@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 
 from flask import Blueprint, jsonify
 
+from backend.app.core.runtime_config import client_settings, get_runtime_config
+
 health_bp = Blueprint("health", __name__, url_prefix="/health")
 
 
@@ -20,6 +22,7 @@ def health_check():
             "timestamp": datetime.now(tz=UTC).isoformat(),
             "version": os.getenv("APP_VERSION", "0.1.0"),
             "environment": os.getenv("ENVIRONMENT", "development"),
-            "capabilities": {"chat_contract_versions": [1, 2]},
+            "capabilities": {"chat_contract_versions": [1, 2, 3, 4]},
+            "client_settings": client_settings(get_runtime_config()),
         }
     )

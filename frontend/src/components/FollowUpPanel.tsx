@@ -6,6 +6,8 @@ import type { ReplyContext } from "../hooks/useConversation";
 import type { ActionButton, ActionOption } from "../services/api";
 import { getFollowUpData } from "./actionButtonValidation";
 import MaterialIcon from "./MaterialIcon";
+import HideOptionsButton from "./HideOptionsButton";
+import { settleSendOutcome, type SendOutcome } from "../services/sendOutcome";
 
 interface FollowUpPanelProps {
   suggestedReplies?: string[];
@@ -14,7 +16,7 @@ interface FollowUpPanelProps {
   interactionMode?: "answer" | "clarify";
   isLoading?: boolean;
   isStreaming?: boolean;
-  onSend: (message: string, replyContext?: ReplyContext) => void;
+  onSend: (message: string, replyContext?: ReplyContext) => SendOutcome;
   onHide?: () => void;
   onSent?: () => void;
 }
@@ -93,20 +95,21 @@ export default function FollowUpPanel({
     submitted.current = true;
     setSubmitError(null);
     try {
-      onSend(reply, {
+      settleSendOutcome(onSend(reply, {
         answers: groups.map((group) => ({ question: group.context ?? group.title, answer: getAnswer(group) })),
-      });
+      }), () => {
+        trackAnalytics("clarification_submitted", {
+          question_count: groups.length,
+          used_other: groups.some(group => answers[group.key]?.selected === "other"),
+        });
+        setSent(true);
+        onSent?.();
+      }, () => { submitted.current = false; });
     } catch {
       submitted.current = false;
       setSubmitError("回覆未能送出，請再試一次。");
       return;
     }
-    trackAnalytics("clarification_submitted", {
-      question_count: groups.length,
-      used_other: groups.some(group => answers[group.key]?.selected === "other"),
-    });
-    setSent(true);
-    onSent?.();
   };
 
   const handlePanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -134,7 +137,7 @@ export default function FollowUpPanel({
         <h2 id={`${panelId}-heading`} className="text-sm font-semibold text-on-surface">{heading}</h2>
         <div className="flex shrink-0 items-center gap-2">
           {groups.length > 1 && <span className="text-xs tabular-nums text-on-surface/50" aria-live="polite">{groupIndex + 1} / {groups.length} 題</span>}
-          {onHide && <button type="button" onClick={onHide} className={navigationClassName}>隱藏</button>}
+          {onHide && <HideOptionsButton onHide={onHide} />}
         </div>
       </div>
       <div className="max-h-[min(34dvh,18rem)] overflow-y-auto overscroll-contain px-4 py-2">
@@ -146,11 +149,11 @@ export default function FollowUpPanel({
         {currentGroup && (
           <fieldset disabled={isLoading} className="min-w-0">
             <legend className={currentGroup.title === heading ? "sr-only" : "mb-3 text-sm font-medium text-on-surface"}>{currentGroup.title}</legend>
-            <div className="space-y-1.5">
+            <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
               {currentGroup.options.map((option, index) => (
                 <label
                   key={`${currentGroup.key}-${index}`}
-                  className={`flex min-h-10 cursor-pointer items-start gap-3 rounded-xl border px-3 py-2 text-sm leading-5 transition-colors sm:min-h-9 ${currentAnswer?.selected === index ? "border-primary/40 bg-primary/5" : "border-outline/10 hover:bg-surface-container-low"} ${isLoading ? "cursor-not-allowed opacity-50" : ""}`}
+                  className={`flex min-h-11 min-w-0 cursor-pointer items-start gap-3 rounded-xl border px-3 py-2 text-sm leading-5 transition-colors ${currentAnswer?.selected === index ? "border-primary/40 bg-primary/5" : "border-outline/10 hover:bg-surface-container-low"} ${isLoading ? "cursor-not-allowed opacity-50" : ""}`}
                 >
                   <input
                     type="radio"
@@ -162,7 +165,7 @@ export default function FollowUpPanel({
                   <span className="min-w-0 break-words">{option.label}</span>
                 </label>
               ))}
-              <div className={`rounded-xl border px-3 py-2 transition-colors ${currentAnswer?.selected === "other" ? "border-primary/40 bg-primary/5" : "border-outline/10"} ${isLoading ? "opacity-50" : ""}`}>
+              <div className={`min-w-0 rounded-xl border px-3 py-2 transition-colors min-[360px]:col-span-2 ${currentAnswer?.selected === "other" ? "border-primary/40 bg-primary/5" : "border-outline/10"} ${isLoading ? "opacity-50" : ""}`}>
                 <label className="flex cursor-pointer items-center gap-3 text-sm font-medium">
                   <input
                     type="radio"

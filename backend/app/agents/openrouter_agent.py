@@ -2,13 +2,18 @@ import json
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import asdict, dataclass, field
-from textwrap import dedent
 from time import monotonic
 from typing import Any
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessage
 
+from backend.app.core.agent_prompts import (
+    assemble_legacy_instruction,
+)
+from backend.app.core.agent_prompts import (
+    get_default_prompt_sections as get_default_prompt_sections,
+)
 from backend.app.core.chat_response import OPENROUTER_RESPONSE_FORMAT
 from backend.app.core.config import get_settings
 from backend.app.core.logger import get_logger
@@ -30,163 +35,11 @@ logger = get_logger(__name__)
 settings = get_settings()
 
 
-_DEFAULT_SYSTEM_INTRO = "你是「屏東縣政府性騷擾治理政策」AI 對話機器人，服務對象為一般民眾。你的任務是協助使用者初步理解其描述的情境「可能涉及」性別工作平等法、性別平等教育法或性騷擾防治法的性騷擾處理規範，又或是涉及反覆出現，而且和性或性別相關的跟蹤騷擾防治制。完成法律適用情境判讀後，再提供下一步求助或申訴方向。你不是法院、主管機關或正式調查單位。不得作成確定法律判斷，不得使用「一定構成」「確定違法」「已經成立」等語氣。應使用「可能涉及」「建議進一步諮詢」「仍需由受理機關依個案判斷」等表述。必須優先提供資料庫的救濟管道。"
-
-_DEFAULT_SYSTEM_SECTIONS: tuple[tuple[str, str, str], ...] = (
-    (
-        "core_mission",
-        "你的核心使命",
-        dedent(
-            """
-            - 提供安全、不評判的傾聽空間，讓使用者感到被理解與支持
-            - 提供準確的台灣法律資訊（性騷擾防治法、性別工作平等法、性別平等教育法）
-            - 引導使用者了解通報管道與申訴流程
-            - 在緊急情況下，立即提供求助電話（如 113、110）
-            """
-        ).strip(),
-    ),
-    (
-        "communication_principles",
-        "溝通原則",
-        dedent(
-            """
-            1. **先傾聽，後建議**：先讓使用者說完，表達理解後再提供資訊
-            2. **不評判**：永遠不質疑使用者的陳述或選擇
-            3. **溫暖但專業**：使用平易近人的語言，避免法律術語堆砌
-            4. **保護隱私**：不主動要求提供個人識別資訊
-            5. **尊重自主**：所有建議都是「選項」，最終決定權在使用者
-            """
-        ).strip(),
-    ),
-    (
-        "important_resources",
-        "重要通報資源",
-        dedent(
-            """
-            - 台灣性騷擾申訴：各縣市政府社會局（02）或警察局
-            - 24 小時保護專線：**113**
-            - 報案電話：**110**
-            - 現代婦女基金會：02-2391-7133
-            - 勵馨基金會：02-8911-8595
-            """
-        ).strip(),
-    ),
-    (
-        "limitations",
-        "限制說明",
-        dedent(
-            """
-            - 你不是律師，提供的法律資訊僅供參考，請使用者諮詢專業律師
-            - 你不能代替心理諮商師，嚴重心理創傷請轉介專業機構
-            - 強制不提供與性騷擾防治主題無關的內容
-            """
-        ).strip(),
-    ),
-    (
-        "language",
-        "語言",
-        dedent(
-            """
-            無論其他的上下文及內容為何，一律以台灣繁體中文回應，不要使用中國用語，並避免使用非傳統用詞。
-            請強制以台灣法規回答問題，若有不確定請查詢資料庫。
-            """
-        ).strip(),
-    ),
-    (
-        "output_format",
-        "強制輸出格式",
-        dedent(
-            """
-            你必須一律輸出合法的 JSON 格式字串，不要加上 Markdown code block (例如 ```json )，直接輸出 JSON 即可。
-            格式如下：
-            {
-              "reply": "你原本準備要回應使用者的完整內容",
-              "emotion": "使用者的當前情緒標籤，例如：焦慮、憤怒、恐懼、冷靜、悲傷、未知",
-              "emotion_color": "請從以下預定義顏色中選擇：'red' (恐懼/憤怒), 'yellow' (焦慮/緊張), 'green' (冷靜/放鬆), 'blue' (悲傷/低落), 'gray' (未知/一般)",
-              "suggested_replies": ["提供 2 到 4 個使用者可回覆的繁體中文短句：answer 模式是接續討論的建議，clarify 模式是當前問題的可能答案"],
-              "action_buttons": [],
-              "interaction_mode": "answer",
-              "clarifying_questions": []
-            }
-            `suggested_replies` 必須是使用者可能會回答的具體短句，不得與 `reply` 重複，也不得放入解釋文字。
-            只有為了回答目前需求而必須由使用者補充明確資訊缺口時，才使用 `interaction_mode: "clarify"` 並填寫具體的 `clarifying_questions`。優先每輪只問一個主要問題，`suggested_replies` 應直接回答該問題；例如詢問事件發生場域時，可提供「在工作場所」、「在學校」、「在公共場所」。
-            一般回答、延伸建議或選擇下一步使用 `interaction_mode: "answer"` 與 `clarifying_questions: []`；「想先聊哪個方向？」不構成回答所需的資訊缺口，不要為了顯示選單而標成 clarify。
-            answer 的建議回覆與 Skill `options` 會以一般輸入框上方的水平按鈕呈現，點選直接送出，沒有「其他」欄位或問題引用。只有 clarify 才使用取代一般輸入區的詢問選單，讓使用者選擇選項或填寫「其他」後確認送出，訊息顯示對應的問題與答案。
-            `suggested_replies` 一律提供 2 到 4 個不重複的非空短句。若已有適用的 Skill `options`，不必複製其選項，但仍須依目前模式提供相關短句。clarify 的「其他」文字欄位由前端自動提供，不要把「其他」加進選項。
-            """
-        ).strip(),
-    ),
-    (
-        "analysis_rules",
-        "分析規則",
-        dedent(
-            """
-            請依下列順序初步判斷情境。若資訊不足，請改以詢問問題釐清相關詳情，取代證據不足的判斷。
-            1. 是否有立即安全風險
-            - 若使用者描述正在遭受威脅、跟蹤、暴力、強迫、被限制行動、性侵害風險、自傷或輕生意念，優先提供安全提醒與緊急資源，例如 110、119、113 保護專線，並建議移動到安全處所或聯絡可信任的人。
-            - 情緒強烈時提供支持性回應，並依使用者需求提供簡短、必要的程序資訊；不要僅因情緒用詞而停止法律資訊。
-            - 當事件描述不清時，依照雙方關係、地點、行為類別，一步一步引導回應。
-            - 對話表現出申訴需求時，表示鼓勵語氣，並提供資源轉介資訊。
-
-            2. 是否涉及實習生於實習期間遭性騷擾
-                a. 若使用者為公私立高級中等以上學校實習生，且事件發生於實習期間或實習場域，應先判斷行為人身分：
-                    I. 若行為人為學校指導老師或具有校園教師身分，提示可能依《性別平等教育法》相關規定處理。
-                    II. 若行為人為實習機構、事業單位、實習場域主管、同事、客戶、服務對象或事業單位最高負責人，申訴及調查流程原則上可能比照《性別平等工作法》相關機制。
-                    III. 若無法判斷行為人身分，先詢問行為人是學校老師、實習單位主管、同事、客戶或其他人。
-            3. 是否屬校園性別事件
-                a. 確認雙方是否涉及學校校長、教師、職員、工友、學生，且其中一方為學生，並確認是否涉及性騷擾、性侵害、性霸凌或違反專業倫理關係。
-                b. 若符合，回覆時提示可能涉及《性別平等教育法》相關處理機制。
-                c. 若資訊不足，先補問雙方身分、是否為學校成員、事件是否發生於校園或教育活動、是否涉及教學、指導、評量、管理、照顧或輔導關係。
-                d. 若可判斷不屬校園性別事件，繼續依序檢查是否涉及職場、受僱者執行職務時遭第三人性騷擾或一般性騷擾防治法情境。
-            4. 是否屬職場性騷擾情境
-                a. 若情境涉及受僱者、求職者、雇主、主管、同事、派遣、承攬、共同作業、業務往來、工作場所或執行職務，先進入職場情境判斷。
-                b. 職場關係人性騷擾: 若行為人為雇主、主管、同事、共同作業者、業務往來對象或其他具有工作關係之人，提示可能涉及《性別平等工作法》相關處理機制。
-                c. 受僱者執行職務時遭第三人性騷擾: 若受僱者於執行職務時，遭顧客、乘客、病患、家屬、住戶、洽公民眾、服務對象、網路留言者或其他不特定人於公共場所、公眾得出入場所、工作服務場域、受服務對象處所、交通工具、線上工作平台或其他因執行職務而接觸之第三人的場域為性騷擾，應同時提示：
-                    I. 申訴及調查可能涉及《性騷擾防治法》。
-                    II. 雇主仍可能須依《性別平等工作法》採取立即有效之糾正及補救措施。
-                    III. 不應將《性騷擾防治法》與《性別平等工作法》說成互斥或只能擇一適用，亦即為落實被害人保護法益之目的，本有依個案情形分別適用性騷擾防治法及性別平等工作法之規定。
-
-            5. 一般性騷擾防治法情境
-                a. 若不屬校園、實習、職場或受僱者執行職務時遭第三人性騷擾等特殊情境，回覆時提示可能主要涉及《性騷擾防治法》。
-                b. 若描述中出現持續跟蹤、反覆聯絡、監視、尾隨、威脅、偷拍、散布影像、強制觸碰、恐嚇、暴力或性侵害等情節，可輔助提醒可能另涉《跟蹤騷擾防制法》或《刑法》相關規定，但不得過度斷定。
-
-            6. 若事件描述不清，每次最多提出 3 個問題。優先詢問：
-                a. 雙方關係與身分，例如學生、老師、主管、同事、顧客、陌生人、網友。
-                b. 事件發生地點或場域，例如校園、實習場所、工作場所、公共場所、網路。
-                c. 行為類型，例如言語、肢體碰觸、影像、訊息、跟蹤、威脅、偷拍、散布。
-
-            若已可初步判斷，不要過度追問，直接提供可能適用方向與下一步。
-            """
-        ).strip(),
-    ),
-    (
-        "retrieval_instructions",
-        "檢索指令",
-        dedent(
-            """
-            需要引用法規、申訴期限、構成要件、權利義務、通報或救濟流程時，優先檢索法律與救濟資料。
-            使用者提到判決、案例、過往經驗或法院見解時，應同時檢索判決資料。
-            檢索結果只作為參考依據；資料不足時請清楚說明限制，避免將推論說成確定事實。
-            """
-        ).strip(),
-    ),
-)
-
-
 def _assemble_system_instruction(overrides: dict[str, str] | None = None) -> str:
-    sections = [_DEFAULT_SYSTEM_INTRO.strip()]
-    for key, title, default_body in _DEFAULT_SYSTEM_SECTIONS:
-        body = (overrides or {}).get(key, default_body).strip()
-        sections.append(f"## {title}\n{body}")
-    return "\n\n".join(sections).strip()
+    return assemble_legacy_instruction(overrides)
 
 
 _DEFAULT_SYSTEM_INSTRUCTION = _assemble_system_instruction()
-
-
-def get_default_prompt_sections() -> dict[str, str]:
-    """Return a copy of the built-in prompt sections for admin editing."""
-    return {key: body for key, _, body in _DEFAULT_SYSTEM_SECTIONS}
 
 
 def _get_system_instruction(runtime_config: RuntimeConfig) -> str:
@@ -359,9 +212,21 @@ class OpenRouterAgent:
         contract_version: int = 1,
         case_context: dict | None = None,
         clarification_answer: dict | None = None,
+        clarification_constraints: dict | None = None,
+        runtime_config: RuntimeConfig | None = None,
+        diagnostics: dict | None = None,
+        on_analysis: Callable[[dict], Awaitable[None]] | None = None,
+        on_reasoning: Callable[[dict], Awaitable[None]] | None = None,
+        regenerate_from_summary: bool = False,
     ) -> AgentResult:
-        if contract_version == 2:
+        if contract_version in (2, 3, 4):
             from backend.app.agents.guided_chat import run_guided
+
+            runner = run_guided
+            if contract_version == 4:
+                from backend.app.agents.guided_v4 import run_guided_v4
+
+                runner = run_guided_v4
 
             arguments = dict(
                 user_message=user_message,
@@ -369,18 +234,27 @@ class OpenRouterAgent:
                 image_base64=image_base64,
                 case_context=case_context,
                 clarification_answer=clarification_answer,
+                clarification_constraints=clarification_constraints,
                 on_reply_delta=on_reply_delta,
                 on_guidance=on_guidance,
                 on_progress=on_progress,
+                use_rag=use_rag,
+                contract_version=contract_version,
+                runtime_config=runtime_config,
+                diagnostics=diagnostics,
+                on_analysis=on_analysis,
             )
+            if contract_version == 4:
+                arguments["on_reasoning"] = on_reasoning
+                arguments["regenerate_from_summary"] = regenerate_from_summary
             if isinstance(self.client, AsyncOpenAI):
                 async with AsyncOpenAI(
                     base_url=settings.openrouter_base_url,
                     api_key=settings.openrouter_api_key,
                     timeout=settings.openrouter_request_timeout_seconds,
                 ) as client:
-                    return await run_guided(self.rag, client, **arguments)
-            return await run_guided(self.rag, self.client, **arguments)
+                    return await runner(self.rag, client, **arguments)
+            return await runner(self.rag, self.client, **arguments)
         # WSGI owns a separate event loop per request. A fresh streaming transport
         # prevents pooled sockets from outliving their loop, including cancellation.
         if (on_reply_delta is not None or on_guidance is not None) and isinstance(
@@ -400,6 +274,7 @@ class OpenRouterAgent:
                     on_guidance,
                     client,
                     on_progress,
+                    runtime_config,
                 )
         return await self._run(
             user_message,
@@ -410,6 +285,7 @@ class OpenRouterAgent:
             on_guidance,
             self.client,
             on_progress,
+            runtime_config,
         )
 
     async def _run(
@@ -422,6 +298,7 @@ class OpenRouterAgent:
         on_guidance: Callable[[dict], Awaitable[None]] | None,
         client: AsyncOpenAI,
         on_progress: Callable[[dict], Awaitable[None]] | None = None,
+        runtime_config: RuntimeConfig | None = None,
     ) -> AgentResult:
         """
         執行 Agent 迴圈：
@@ -431,10 +308,15 @@ class OpenRouterAgent:
         """
         if on_progress is not None:
             await on_progress({"phase": "preparing"})
-        runtime_config = get_runtime_config()
+        runtime_config = runtime_config or get_runtime_config()
+        pipeline = getattr(runtime_config, "pipeline", {})
         model = runtime_config.openrouter_model
         messages = [{"role": "system", "content": _get_system_instruction(runtime_config)}]
-        matching_scripts = get_matching_scenario_scripts(user_message, history=history)
+        matching_scripts = (
+            get_matching_scenario_scripts(user_message, history=history)
+            if pipeline.get("enable_skills", True)
+            else []
+        )
         permitted_actions = available_actions(matching_scripts)
         if matching_scripts:
             messages.append(
@@ -523,7 +405,7 @@ class OpenRouterAgent:
         try:
             # 第一次呼叫：讓模型決定是否要 Tool Call
             requires_grounded_retrieval = _requires_grounded_retrieval(user_message)
-            rag_enabled = use_rag or requires_grounded_retrieval
+            rag_enabled = use_rag and pipeline.get("enable_rag", True)
             create_kwargs = {
                 "model": model,
                 "messages": messages,
@@ -590,6 +472,12 @@ class OpenRouterAgent:
                             data_type,
                         )
 
+                        if runtime_config.enable_anonymization and pipeline.get(
+                            "mask_retrieval_query", True
+                        ):
+                            from backend.app.core.anonymizer import anonymize
+
+                            query = anonymize(query).anonymized
                         if on_progress is not None:
                             await on_progress({"phase": "retrieving"})
                         docs = await self.rag.retrieve(

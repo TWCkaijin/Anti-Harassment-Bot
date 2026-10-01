@@ -2,6 +2,7 @@
 
 import base64
 import json
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
@@ -16,6 +17,13 @@ from backend.app.rag.base import RAGVectorSearchError
 VALID_PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(
     b"\x89PNG\r\n\x1a\nminimal-test-payload"
 ).decode("ascii")
+
+
+@pytest.fixture(autouse=True)
+def isolate_endpoint_tests_from_process_rate_limits(monkeypatch):
+    # These tests exercise payloads and responses; dedicated security tests
+    # cover rate limits without counters leaking between endpoint test cases.
+    monkeypatch.setattr(app.extensions["chat_request_security"], "rate_limit_enabled", False)
 
 
 def fake_runtime_config(**overrides):
@@ -37,7 +45,10 @@ def fake_runtime_config(**overrides):
     return RuntimeConfig(**data)
 
 
-def test_health_check():
+def test_health_check(monkeypatch):
+    from backend.app.api import health
+
+    monkeypatch.setattr(health, "get_runtime_config", fake_runtime_config)
     client = app.test_client()
     response = client.get("/api/v1/health/")
     assert response.status_code == 200
@@ -474,30 +485,61 @@ def test_chat_returns_retryable_503_for_typed_rag_failure(monkeypatch):
     }
 
 
-def test_chat_accepts_image_only_request(monkeypatch):
-    captured = {}
+@pytest.mark.parametrize("path", ["/api/v1/chat/", "/v1/chat/"])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("stream", [False, True])
+def test_chat_passes_enabled_images_to_agent_for_every_contract(monkeypatch, path, version, stream):
+    captured = []
 
     class FakeAgent:
         async def run(self, **kwargs):
-            captured.update(kwargs)
+            captured.append(kwargs)
+            guidance = {}
+            if version == 4:
+                guidance = {
+                    "contract_version": 4,
+                    "context_revision": 0,
+                    "summary_update": None,
+                    "clarification": None,
+                }
+            elif version in (2, 3):
+                guidance = {
+                    "contract_version": version,
+                    "facts_revision": 0,
+                    "fact_updates": [],
+                    "clarification": None,
+                    "answer_sections": [],
+                }
             return AgentResult(
-                reply=(
-                    '{"emotion":"未知","emotion_color":"gray","reply":"我已收到圖片。",'
-                    '"suggested_replies":["我想補充背景","請協助我整理"]}'
-                )
+                reply='{"emotion":"未知","emotion_color":"gray","reply":"已收到測試圖片。","suggested_replies":["整理圖片內容","了解下一步"]}',
+                guidance=guidance,
             )
 
-    monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
-    monkeypatch.setattr(chat_module, "get_runtime_config", lambda: fake_runtime_config())
+    monkeypatch.setattr(chat_module, "get_runtime_config", fake_runtime_config)
+    monkeypatch.setattr(chat_module, "get_agent", FakeAgent)
 
     response = app.test_client().post(
-        "/api/v1/chat/",
-        json={"message": "", "history": [], "image_base64": VALID_PNG_DATA_URL},
+        path,
+        json={
+            "message": "",
+            "history": [],
+            "image_base64": VALID_PNG_DATA_URL,
+            "contract_version": version,
+            "stream": stream,
+        },
     )
 
     assert response.status_code == 200
-    assert captured["user_message"] == ""
-    assert captured["image_base64"] == VALID_PNG_DATA_URL
+    if stream:
+        body = response.get_data(as_text=True)
+        assert "event: done\n" in body
+        assert "event: error\n" not in body
+    else:
+        assert response.json["reply"] == "已收到測試圖片。"
+    assert len(captured) == 1
+    assert captured[0]["user_message"] == ""
+    assert captured[0]["image_base64"] == VALID_PNG_DATA_URL
+    assert captured[0]["runtime_config"].enable_image_upload is True
 
 
 def test_chat_requires_message_or_image():
@@ -514,13 +556,20 @@ def test_chat_requires_message_or_image():
 @pytest.mark.parametrize(
     "image_data_url",
     [
+        "",
+        False,
+        {"url": "https://example.test/private.png"},
         "not-a-data-url",
         "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
         "data:image/png;base64,bm90LWEtcG5n",
         "data:image/png;base64,***",
     ],
 )
-def test_chat_rejects_invalid_image_data(image_data_url):
+def test_chat_rejects_invalid_image_data(monkeypatch, image_data_url):
+    get_config = Mock(side_effect=AssertionError("invalid image must not load config"))
+    get_agent = Mock(side_effect=AssertionError("invalid image must not reach agent"))
+    monkeypatch.setattr(chat_module, "get_runtime_config", get_config)
+    monkeypatch.setattr(chat_module, "get_agent", get_agent)
     response = app.test_client().post(
         "/api/v1/chat/",
         json={"message": "", "history": [], "image_base64": image_data_url},
@@ -528,21 +577,36 @@ def test_chat_rejects_invalid_image_data(image_data_url):
 
     assert response.status_code == 422
     assert response.get_json()["code"] == "invalid_request"
+    get_config.assert_not_called()
+    get_agent.assert_not_called()
 
 
-def test_image_validation_rejects_decoded_payload_over_limit():
-    oversized = b"\x89PNG\r\n\x1a\n" + b"x" * chat_module.MAX_IMAGE_BYTES
-    data_url = "data:image/png;base64," + base64.b64encode(oversized).decode("ascii")
+def test_chat_schema_accepts_optional_image_string_and_forbids_extra_history_fields():
+    schema = chat_module.ChatRequest.model_json_schema()
+    assert schema["properties"]["image_base64"]["anyOf"] == [
+        {"type": "string"},
+        {"type": "null"},
+    ]
+    assert "image_base64" not in schema.get("required", [])
+    assert schema["additionalProperties"] is False
+    assert schema["$defs"]["MessageItem"]["additionalProperties"] is False
 
-    with pytest.raises(ValueError, match="decoded size"):
-        chat_module._validate_image_data_url(data_url)
 
-
-def test_chat_rejects_image_when_runtime_upload_is_disabled(monkeypatch):
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("client_privacy_review", [False, True])
+def test_chat_rejects_disabled_images_independently_of_review_and_text_masking(
+    monkeypatch, version, stream, client_privacy_review
+):
     monkeypatch.setattr(
         chat_module,
         "get_runtime_config",
-        lambda: fake_runtime_config(enable_image_upload=False),
+        lambda: fake_runtime_config(
+            enable_image_upload=False,
+            enable_client_privacy_review=client_privacy_review,
+            enable_anonymization=False,
+            pipeline={"mask_message": False, "mask_case_context": False},
+        ),
     )
     monkeypatch.setattr(
         chat_module,
@@ -552,11 +616,82 @@ def test_chat_rejects_image_when_runtime_upload_is_disabled(monkeypatch):
 
     response = app.test_client().post(
         "/api/v1/chat/",
-        json={"message": "圖片內容", "history": [], "image_base64": VALID_PNG_DATA_URL},
+        json={
+            "message": "圖片內容",
+            "history": [],
+            "image_base64": VALID_PNG_DATA_URL,
+            "contract_version": version,
+            "stream": stream,
+        },
     )
 
     assert response.status_code == 422
+    assert response.is_json
+    assert response.get_json()["code"] == "image_upload_disabled"
     assert response.get_json()["retryable"] is False
+
+
+@pytest.mark.parametrize(
+    ("mime", "signature"),
+    [
+        ("image/jpeg", b"\xff\xd8\xff"),
+        ("image/png", b"\x89PNG\r\n\x1a\n"),
+        ("image/gif", b"GIF87a"),
+        ("image/gif", b"GIF89a"),
+        ("image/webp", b"RIFF\x00\x00\x00\x00WEBP"),
+    ],
+)
+def test_image_validator_checks_supported_mime_signatures(mime, signature):
+    value = f"data:{mime};base64," + base64.b64encode(signature + b"synthetic").decode("ascii")
+    request = chat_module.ChatRequest(image_base64=value)
+    assert request.image_base64 == value
+    mismatched = f"data:{mime};base64," + base64.b64encode(b"not-an-image").decode("ascii")
+    with pytest.raises(ValidationError, match="does not match its MIME type"):
+        chat_module.ChatRequest(image_base64=mismatched)
+
+
+def test_image_validator_accepts_five_mib_and_rejects_larger_decoded_image():
+    content = b"\x89PNG\r\n\x1a\n" + b"x" * (chat_module.MAX_IMAGE_BYTES - 8)
+    value = "data:image/png;base64," + base64.b64encode(content).decode("ascii")
+    assert chat_module.ChatRequest(image_base64=value).image_base64 == value
+    oversized = "data:image/png;base64," + base64.b64encode(content + b"x").decode("ascii")
+    with pytest.raises(ValidationError, match="decoded size must be at most"):
+        chat_module.ChatRequest(image_base64=oversized)
+
+
+def test_request_body_limit_accepts_five_mib_image_with_maximum_text_message(monkeypatch):
+    content = b"\x89PNG\r\n\x1a\n" + b"x" * (chat_module.MAX_IMAGE_BYTES - 8)
+    image = "data:image/png;base64," + base64.b64encode(content).decode("ascii")
+    payload = {"message": "合" * chat_module.USER_MESSAGE_MAX_LENGTH, "image_base64": image}
+    assert len(json.dumps(payload).encode("utf-8")) < app.config["MAX_CONTENT_LENGTH"]
+    captured = []
+
+    class FakeAgent:
+        async def run(self, **kwargs):
+            captured.append(kwargs)
+            return AgentResult(
+                reply='{"emotion":"未知","emotion_color":"gray","reply":"已收到測試圖片。","suggested_replies":["整理圖片內容","了解下一步"]}'
+            )
+
+    monkeypatch.setattr(chat_module, "get_runtime_config", fake_runtime_config)
+    monkeypatch.setattr(chat_module, "get_agent", FakeAgent)
+    response = app.test_client().post("/api/v1/chat/", json=payload)
+    assert response.status_code == 200
+    assert captured[0]["image_base64"] == image
+    assert captured[0]["user_message"] == payload["message"]
+
+
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("image_field", [{}, {"image_base64": None}])
+def test_text_only_versions_keep_omitted_or_null_image_compatibility(version, image_field):
+    request_model = chat_module.ChatRequest(
+        message="合成文字需求", contract_version=version, **image_field
+    )
+    arguments, _ = chat_module._prepare_agent_input(
+        request_model, fake_runtime_config(enable_image_upload=True)
+    )
+    assert arguments["user_message"] == "合成文字需求"
+    assert arguments["image_base64"] is None
 
 
 @pytest.mark.parametrize("path", ["/api/v1/chat/", "/v1/chat/"])
@@ -621,12 +756,8 @@ def test_chat_rejects_history_over_total_character_budget():
         json={
             "message": "下一步",
             "history": [
-                {"role": "assistant", "content": "a" * 6000},
-                {"role": "assistant", "content": "b" * 6000},
-                {"role": "assistant", "content": "c" * 6000},
-                {"role": "assistant", "content": "d" * 6000},
-                {"role": "assistant", "content": "e" * 6000},
-                {"role": "assistant", "content": "f"},
+                {"role": "assistant", "content": "a" * 6000}
+                for _ in range(chat_module.MAX_HISTORY_CHARACTERS // 6000 + 1)
             ],
         },
     )

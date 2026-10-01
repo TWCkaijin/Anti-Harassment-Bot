@@ -5,7 +5,11 @@ The first version uses an admin API key header. It is intentionally small and
 server-side only; do not expose secrets through this route.
 """
 
+import asyncio
+import uuid
+
 from flask import Blueprint, jsonify, request
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.app.agents.openrouter_agent import get_default_prompt_sections
 from backend.app.core.config import get_settings
@@ -13,6 +17,7 @@ from backend.app.core.logger import get_logger
 from backend.app.core.runtime_config import (
     get_runtime_config,
     reset_runtime_config,
+    resolve_runtime_config,
     seed_runtime_config_if_missing,
     update_runtime_config,
 )
@@ -79,6 +84,50 @@ def get_config():
     if error:
         return error
     return jsonify(_public_config())
+
+
+@admin_bp.route("/chat-test", methods=["POST"])
+def chat_test():
+    """Run an authenticated, ephemeral comparison using an isolated settings snapshot."""
+    _, error = _require_admin()
+    if error:
+        return error
+    # Keep imports local: ordinary chat never imports or accepts admin overrides.
+    from backend.app.api import chat as chat_api
+
+    class ChatTestRequest(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        chat_request: chat_api.ChatRequest = Field(alias="request")
+        overrides: dict = Field(default_factory=dict)
+
+    try:
+        data = ChatTestRequest.model_validate(request.get_json(silent=True))
+        if data.chat_request.stream:
+            return jsonify({"detail": "Admin chat tests return JSON; stream must be false"}), 422
+        config = resolve_runtime_config(get_runtime_config(), data.overrides)
+    except ValidationError as exc:
+        return chat_api._request_validation_error(exc)
+    except ValueError as exc:
+        return jsonify({"detail": str(exc)}), 422
+    if data.chat_request.image_base64 and not config.enable_image_upload:
+        return chat_api._image_upload_disabled_error()
+    diagnostics = {"effective_config": config.public_dict()}
+    try:
+        arguments, was_anonymized = chat_api._prepare_agent_input(
+            data.chat_request, config, diagnostics, include_input_stages=True
+        )
+        result = asyncio.run(chat_api.get_agent().run(**arguments))
+    except Exception as exc:
+        return chat_api._agent_error(config, exc)
+    try:
+        response = chat_api._response_payload(
+            result, str(uuid.uuid4()), was_anonymized, config, data.chat_request
+        )
+    except Exception as exc:
+        return chat_api._retryable_error(config, exc)
+    payload = jsonify({"response": response, "diagnostics": diagnostics})
+    payload.headers["Cache-Control"] = "no-store"
+    return payload
 
 
 @admin_bp.route("/config", methods=["PUT"])

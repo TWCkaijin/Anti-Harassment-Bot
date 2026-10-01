@@ -11,6 +11,7 @@ import pytest
 from flask import Flask, Request
 
 from backend.app.core.logger import (
+    CLIENT_LOGGER_NAMES,
     ColoredFormatter,
     GCPJsonFormatter,
     get_request_log_context,
@@ -19,6 +20,16 @@ from backend.app.core.logger import (
 
 TRACE_ID = "105445aa7843bc8bf206b12000100000"
 MANAGED_LOGGERS = ("", "uvicorn", "uvicorn.error", "uvicorn.access", "fastapi")
+CLIENT_TEST_LOGGERS = (
+    "openai._base_client",
+    "httpx",
+    "httpcore.connection",
+    "urllib3.connectionpool",
+    "requests",
+    "google.auth.transport.requests",
+    "google.api_core.retry",
+    "openai.review_test",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -34,9 +45,16 @@ def isolated_logging_environment(monkeypatch):
         "FIREBASE_CONFIG",
     ):
         monkeypatch.delenv(name, raising=False)
+    for name in (*CLIENT_LOGGER_NAMES, *CLIENT_TEST_LOGGERS):
+        logging.getLogger(name)
+    names = set(MANAGED_LOGGERS) | {
+        name
+        for name in logging.Logger.manager.loggerDict
+        if any(name == prefix or name.startswith(prefix + ".") for prefix in CLIENT_LOGGER_NAMES)
+    }
     original = {
         name: (logger.handlers[:], logger.level, logger.propagate)
-        for name in MANAGED_LOGGERS
+        for name in names
         for logger in [logging.getLogger(name)]
     }
     yield
@@ -99,6 +117,37 @@ def test_local_development_keeps_colored_debug_logging(monkeypatch):
     assert "local failure" in output.getvalue()
     assert logging.getLogger().level == logging.DEBUG
     assert isinstance(logging.getLogger().handlers[0].formatter, ColoredFormatter)
+
+
+@pytest.mark.parametrize("environment", ["development", "production"])
+def test_sdk_logs_never_inherit_verbose_application_level(monkeypatch, environment):
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setenv("ENVIRONMENT", environment)
+    # SDK environment flags or an earlier client may have explicitly enabled DEBUG.
+    for name in CLIENT_TEST_LOGGERS:
+        logging.getLogger(name).setLevel(logging.DEBUG)
+    setup_logging()
+    for name in CLIENT_TEST_LOGGERS:
+        client_logger = logging.getLogger(name)
+        assert client_logger.getEffectiveLevel() == logging.WARNING
+        client_logger.debug("PRIVATE_PROMPT_AND_HEADERS_CANARY")
+        client_logger.info("PRIVATE_SDK_RESPONSE_CANARY")
+    logging.getLogger("openai._base_client").warning("SDK connection unavailable")
+    assert "PRIVATE_" not in output.getvalue()
+    assert "SDK connection unavailable" in output.getvalue()
+
+
+def test_output_filter_blocks_sdk_child_reenabled_after_setup(monkeypatch):
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    setup_logging()
+    logging.getLogger("openai.review_test").setLevel(logging.DEBUG)
+    logging.getLogger("openai.review_test").debug("PRIVATE_LATE_SDK_PROMPT_CANARY")
+    logging.getLogger("backend.test").debug("application timing diagnostic")
+    assert "PRIVATE_LATE" not in output.getvalue()
+    assert "application timing diagnostic" in output.getvalue()
 
 
 def test_setup_reads_environment_at_call_time_and_retains_single_root_handler(monkeypatch):

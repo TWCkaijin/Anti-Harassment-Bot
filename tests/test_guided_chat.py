@@ -74,6 +74,38 @@ def model_answer(data=None):
     return FakeResponse(FakeMessage(json.dumps(data or answer(), ensure_ascii=False)))
 
 
+def test_guided_schema_accepts_action_unions_in_provider_strict_subset():
+    # The live provider rejected action_buttons.items.oneOf with HTTP 400.
+    # Check the actual outbound schema, including every referenced definition.
+    schema = guided.GUIDED_RESPONSE_FORMAT["json_schema"]["schema"]
+    action_items = schema["properties"]["action_buttons"]["items"]
+    variants = [schema["$defs"][branch["$ref"].split("/")[-1]] for branch in action_items["anyOf"]]
+    assert {variant["properties"]["action"]["const"] for variant in variants} == {
+        "tel",
+        "url",
+        "options",
+    }
+
+    def check(node):
+        if isinstance(node, dict):
+            assert not {"oneOf", "discriminator", "default"}.intersection(node)
+            if node.get("type") == "object":
+                assert node["additionalProperties"] is False
+                assert set(node["required"]) == set(node["properties"])
+            for value in node.values():
+                check(value)
+        elif isinstance(node, list):
+            for value in node:
+                check(value)
+
+    check(schema)
+    # Transformation must not weaken or mutate the application's own contract.
+    local_items = guided.GuidedAnswer.model_json_schema()["properties"]["action_buttons"]["items"]
+    assert "oneOf" in local_items and "discriminator" in local_items
+    with pytest.raises(ValidationError):
+        guided.GuidedAnswer.model_validate(answer(action_buttons=[{"action": "unapproved"}]))
+
+
 @pytest.mark.parametrize(
     "facts",
     [
@@ -96,7 +128,7 @@ def test_local_facts_cannot_be_silently_sent_to_legacy_contract():
 def test_health_advertises_supported_contracts():
     assert app.test_client().get("/api/v1/health/").json["capabilities"][
         "chat_contract_versions"
-    ] == [1, 2]
+    ] == [1, 2, 3, 4]
 
 
 @pytest.mark.asyncio
@@ -181,7 +213,7 @@ async def test_general_law_question_direct_retrieval_one_generation():
     assert result.guidance["execution"]["model_calls"] == 1
     assert "tools" not in agent.client.chat.completions.calls[0]
     assert agent.rag.calls[0][1]["selected_data_types"] == ["law"]
-    assert result.sources[0]["version"] is None
+    assert result.sources == []  # Retrieval is not the same as a citation.
 
 
 @pytest.mark.asyncio
@@ -321,7 +353,7 @@ async def test_unknown_version_deadline_replaced_before_streaming(claim):
     result = await agent.run("一般申訴期限", contract_version=2, on_reply_delta=delta)
     assert "一年內" not in "".join(emitted)
     assert claim not in "".join(emitted)
-    assert guided.LIMITATION in "".join(emitted)
+    assert "期限待核對" in "".join(emitted)
     assert "自行決定" in "".join(emitted)
     assert json.loads(result.reply)["reply"] == "".join(emitted)
 
@@ -335,7 +367,9 @@ def test_known_old_version_does_not_establish_current_law_or_deadline():
     }
     sources = [{"doc_id": "law/old", "version": "2009"}]
     sections = guided._legal_sections(guided.GuidedAnswer.model_validate(data), sources, "申訴")
-    assert sections[1]["text"] == guided.LIMITATION
+    assert "一年" not in sections[1]["text"]
+    assert "版本待核對" in sections[1]["text"]
+    assert "期限待核對" in sections[1]["text"]
 
 
 @pytest.mark.parametrize(
@@ -389,7 +423,7 @@ def test_facts_require_user_evidence_and_cannot_overwrite_corrections():
     assert validate_fact_updates([update], context, ["對方是主管"])[0]["kind"] == "confirmation"
 
 
-def test_new_case_text_redacted_even_with_legacy_toggle_off():
+def test_explicit_masking_master_toggle_controls_case_text():
     request = chat_api.ChatRequest(
         message="想了解程序",
         contract_version=2,
@@ -400,8 +434,8 @@ def test_new_case_text_redacted_even_with_legacy_toggle_off():
     kwargs, modified = chat_api._prepare_agent_input(
         request, fake_runtime_config(enable_anonymization=False)
     )
-    assert modified
-    assert "0912345678" not in json.dumps(kwargs["case_context"])
+    assert not modified
+    assert "0912345678" in json.dumps(kwargs["case_context"])
 
 
 def test_v2_provider_error_never_logs_case_canary(monkeypatch, caplog):
@@ -511,6 +545,5 @@ def test_v2_progress_reports_new_field_masking_when_legacy_toggle_is_off(monkeyp
         for frame in frames
         if frame.startswith("event: progress")
     ]
-    assert progress[0]["phase"] == "anonymizing"
-    assert progress[1]["phase"] == "preparing"
+    assert progress[0]["phase"] == "preparing"
     assert all(set(event) == {"phase", "elapsed_ms"} for event in progress)

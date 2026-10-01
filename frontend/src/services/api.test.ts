@@ -1,13 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  checkHealth,
   getRuntimeConfig,
   normalizeApiErrorDetail,
-  sendChat,
+  sendChat as sendApprovedChat,
   parseChatResponse,
   updateRuntimeConfig,
+  runAdminChatTest as runApprovedAdminChatTest,
   type RuntimeConfig,
 } from "./api";
+import { approvePrivacyDraft, createPrivacyDraft } from "./clientPrivacy";
+
+// These protocol tests start after the explicit privacy confirmation. The separate
+// clientPrivacy tests exercise the actual unapproved/approved transport boundary.
+const sendChat = (...args: Parameters<typeof sendApprovedChat>) => sendApprovedChat(approvePrivacyDraft(createPrivacyDraft(args[0])), ...args.slice(1) as Tail<Parameters<typeof sendApprovedChat>>);
+type Tail<T extends unknown[]> = T extends [unknown, ...infer Rest] ? Rest : never;
+const runAdminChatTest = (...args: Parameters<typeof runApprovedAdminChatTest>) => runApprovedAdminChatTest(args[0], approvePrivacyDraft(createPrivacyDraft(args[1])), args[2], args[3]);
 
 const runtimeConfig: RuntimeConfig = {
   openrouter_model: "test/model",
@@ -27,6 +36,7 @@ const runtimeConfig: RuntimeConfig = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -149,7 +159,189 @@ it("accepts nullable optional source metadata from older APIs", () => {
   expect(parseChatResponse({ ...chatResponse, rag_used: { status: true, sources: [source] } }).rag_used.sources).toEqual([source]);
 });
 const encoder = new TextEncoder();
+
+describe("negotiated response versions", () => {
+  const responseFor = (version: 1 | 2 | 3 | 4 | 5) => version === 1 ? chatResponse : {
+    ...chatResponse, contract_version: version, facts_revision: 0, fact_updates: [], clarification: null,
+    answer_sections: [], execution: { route: "direct_retrieval", model_calls: 1 }, analysis: [], context_revision: 0, summary_update: null,
+  };
+  it.each([1, 2, 3, 4] as const)("accepts matching version %i via JSON", async version => {
+    const response = responseFor(version);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json" } })));
+    expect(await sendChat({ ...chatRequest, ...(version === 1 ? {} : { contract_version: version }) })).toEqual(response);
+  });
+  it.each([1, 2, 3, 5] as const)("rejects a v4 JSON response with version %i without retry permission", async version => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(responseFor(version)), { headers: { "Content-Type": "application/json" } })));
+    await expect(sendChat({ ...chatRequest, contract_version: 4 })).rejects.toMatchObject({ status: 502, retryable: false, message: "回覆協定版本不符" });
+  });
+  it.each([1, 2, 3, 5] as const)("rejects a v4 SSE done with version %i while retaining already received text", async version => {
+    const { controller } = streamResponse();
+    const onDelta = vi.fn();
+    const request = sendChat({ ...chatRequest, contract_version: 4 }, undefined, onDelta);
+    controller.enqueue(encoder.encode(eventText("delta", { text: "尚未完成" }) + eventText("done", responseFor(version))));
+    await expect(request).rejects.toMatchObject({ status: 502, retryable: false, message: "回覆協定版本不符" });
+    expect(onDelta).toHaveBeenCalledExactlyOnceWith("尚未完成");
+  });
+  it("rejects a versioned response to an unversioned v1 request", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(responseFor(2)), { headers: { "Content-Type": "application/json" } })));
+    await expect(sendChat(chatRequest)).rejects.toMatchObject({ status: 502, retryable: false });
+  });
+});
+
+describe("v4 summary and reasoning protocol", () => {
+  const response = { ...chatResponse, contract_version: 4, context_revision: 2, summary_update: { base_revision: 2, summary: "使用者為學生。", evidence: ["我是學生"] }, clarification: null, analysis: [], execution: { route: "direct_retrieval", model_calls: 1 } };
+  it("accepts text summary output without legacy fact fields, and binds open questions to a revision", () => {
+    expect(parseChatResponse(response)).toEqual(response);
+    const question = { question_id: "open.3", context_revision: 3, reason: "需要釐清場合", question: "事情發生在哪種場合？", options: [{ label: "校外", value: "校外" }], selection_mode: "single", max_selections: 1, validation_token: "signed" };
+    expect(parseChatResponse({ ...response, interaction_mode: "clarify", clarification: question }).clarification).toEqual(question);
+    expect(() => parseChatResponse({ ...response, interaction_mode: "clarify", clarification: { ...question, context_revision: undefined } })).toThrow();
+    expect(() => parseChatResponse({ ...response, interaction_mode: "clarify", clarification: { ...question, fact_key: "city" } })).toThrow();
+    expect(() => parseChatResponse({ ...response, summary_update: { ...response.summary_update, summary: "x".repeat(4001) } })).toThrow();
+  });
+  it("delivers successive provider text chunks without turning them into reply text", async () => {
+    const { controller } = streamResponse();
+    const onReasoning = vi.fn(); const onDelta = vi.fn();
+    const request = sendChat({ ...chatRequest, contract_version: 4 }, undefined, onDelta, undefined, undefined, undefined, onReasoning);
+    const first = { text: "公開片段一", kind: "summary", stage: "understanding" };
+    const second = { text: "公開片段二", kind: "text", stage: "answer" };
+    controller.enqueue(encoder.encode(eventText("reasoning", first) + eventText("reasoning", second) + eventText("done", response)));
+    expect(await request).toEqual(response);
+    expect(onReasoning.mock.calls).toEqual([[first], [second]]);
+    expect(onDelta).not.toHaveBeenCalled();
+  });
+  it("rejects unrecognized provider metadata in a reasoning event", async () => {
+    const { controller } = streamResponse();
+    const request = sendChat({ ...chatRequest, contract_version: 4 });
+    controller.enqueue(encoder.encode(eventText("reasoning", { text: "公開片段", kind: "text", stage: "answer", encrypted_content: "private" })));
+    await expect(request).rejects.toMatchObject({ status: 502 });
+  });
+});
+
+describe("v3 protocol and isolated admin requests", () => {
+  const analysis = { stage: "sources", summary: "已檢查引用來源", facts: [], source_labels: ["測試法第1條"], limitations: ["尚未确认適用關係"] };
+  const v3Response = { ...chatResponse, contract_version: 3, facts_revision: 2, fact_updates: [], clarification: null, answer_sections: [], execution: { route: "direct_retrieval", model_calls: 1 }, analysis: [analysis] };
+  it("accepts official law metadata and array facts without dropping their structure", () => {
+    const source = { label: "測試法第1條", type: "law", law_name: "測試法", article_number: "1", checked_at: "2026-09-30", effective_date: "2024-03-08", promulgated_date: "2023-08-16", effective_note: "日期屬法規版本資料", promulgated_date_scope: "law_latest_amendment_not_article_specific", effective_date_scope: "law_version_not_article_specific", source_url: "https://law.moj.gov.tw/", article: "合成測試條文" };
+    const response = { ...v3Response, fact_updates: [{ fact_key: "subject_role", status: "provided", value: ["學生", "員工"], evidence: "我是學生也是員工", kind: "explicit" }], rag_used: { status: true, sources: [source] } };
+    expect(parseChatResponse(response)).toEqual(response);
+    expect(() => parseChatResponse({ ...response, contract_version: 2 })).toThrow();
+  });
+  it("only displays typed questions for clarify responses while preserving signed scenario metadata", () => {
+    const clarification = { question_id: "scenario.role.2", fact_key: "subject_role", reason: "釐清情境", question: "朋友的身分？", options: [{ label: "學生", value: "學生" }], selection_mode: "multiple", max_selections: 2, validation_token: "signed", context_scope: "scenario" };
+    expect(parseChatResponse({ ...v3Response, interaction_mode: "clarify", clarification }).clarification).toEqual(clarification);
+    expect(parseChatResponse({ ...v3Response, clarification }).clarification).toBeNull();
+  });
+  it("rejects invalid analysis rather than exposing arbitrary model metadata", () => {
+    expect(() => parseChatResponse({ ...v3Response, analysis: [{ ...analysis, reasoning: "private" }] })).toThrow();
+    expect(() => parseChatResponse({ ...v3Response, analysis: [{ ...analysis, facts: "invalid" }] })).toThrow();
+    expect(() => parseChatResponse({ ...v3Response, analysis: undefined })).toThrow();
+  });
+  it("delivers validated analysis events and final analysis through the same stream", async () => {
+    const { controller } = streamResponse();
+    const onAnalysis = vi.fn();
+    const request = sendChat({ ...chatRequest, contract_version: 3 }, undefined, undefined, undefined, undefined, onAnalysis);
+    controller.enqueue(encoder.encode(eventText("analysis", analysis) + eventText("done", v3Response)));
+    expect(await request).toEqual(v3Response);
+    expect(onAnalysis).toHaveBeenCalledExactlyOnceWith(analysis);
+  });
+  it("uses only the authenticated diagnostic endpoint for one-request partial overrides", async () => {
+    const response = { response: v3Response, diagnostics: { history: { removed_messages: 2 }, effective_config: { pipeline: { trim_history: false } } } };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(response), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const overrides = { pipeline: { trim_history: false } };
+    expect(await runAdminChatTest("admin-token", { ...chatRequest, contract_version: 3 }, overrides)).toEqual(response);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/v1/admin/chat-test"), expect.objectContaining({ method: "POST", headers: expect.objectContaining({ Authorization: "Bearer admin-token" }), body: JSON.stringify({ request: { ...chatRequest, contract_version: 3 }, overrides }) }));
+  });
+});
 const eventText = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+
+function pendingFetch() {
+  let signal!: AbortSignal;
+  vi.stubGlobal("fetch", vi.fn((_url: string, options: RequestInit) => {
+    signal = options.signal!;
+    return new Promise<Response>((_resolve, reject) => {
+      if (signal.aborted) reject(signal.reason);
+      else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+  }));
+  return () => signal;
+}
+
+describe("request deadlines", () => {
+  it("aborts a health request that never returns and clears the deadline", async () => {
+    vi.useFakeTimers();
+    const getSignal = pendingFetch();
+    const request = checkHealth();
+    const rejected = expect(request).rejects.toMatchObject({ status: 504, retryable: false });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejected;
+    expect(getSignal().aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cancels health checks on caller cleanup without calling it a timeout", async () => {
+    vi.useFakeTimers();
+    const getSignal = pendingFetch();
+    const controller = new AbortController();
+    const request = checkHealth(controller.signal);
+    const rejected = expect(request).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await rejected;
+    expect(getSignal().aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ends a chat with no response headers instead of remaining in connecting", async () => {
+    vi.useFakeTimers();
+    const getSignal = pendingFetch();
+    const rejected = expect(sendChat(chatRequest)).rejects.toMatchObject({ status: 504, retryable: false });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejected;
+    expect(getSignal().aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ends a silent stream, cancels its reader, and does not auto-resend", async () => {
+    vi.useFakeTimers();
+    const { cancel, fetchMock } = streamResponse();
+    const rejected = expect(sendChat(chatRequest)).rejects.toMatchObject({ status: 504, retryable: false });
+    await vi.advanceTimersByTimeAsync(45_000);
+    await rejected;
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps a live stream open across heartbeats and clears timers when done", async () => {
+    vi.useFakeTimers();
+    const { controller } = streamResponse();
+    const request = sendChat(chatRequest);
+    for (let i = 0; i < 3; i += 1) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      controller.enqueue(encoder.encode(": keep-alive\n\n"));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    controller.enqueue(encoder.encode(eventText("done", chatResponse)));
+    await expect(request).resolves.toEqual(chatResponse);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds total duration even when a server sends heartbeats forever", async () => {
+    vi.useFakeTimers();
+    const { controller, cancel } = streamResponse();
+    const rejected = expect(sendChat(chatRequest)).rejects.toMatchObject({ status: 504, retryable: false });
+    for (let i = 0; i < 6; i += 1) {
+      await vi.advanceTimersByTimeAsync(30_000);
+      controller.enqueue(encoder.encode(": keep-alive\n\n"));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejected;
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 function streamResponse() {
   let controller!: ReadableStreamDefaultController<Uint8Array>;

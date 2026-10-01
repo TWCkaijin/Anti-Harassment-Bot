@@ -1,76 +1,61 @@
 /**
  * WelcomeHero — 首頁標題、問題輸入與建議入口。
  */
-import { useRef, useState, type KeyboardEvent, type ChangeEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type ClipboardEvent } from "react";
 import MaterialIcon from "./MaterialIcon";
+import { settleSendOutcome, type SendOutcome } from "../services/sendOutcome";
+import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE } from "../services/imageUpload";
 import { useI18n } from "../i18n";
+import { useImageAttachment } from "../hooks/useImageAttachment";
+import { useAutosizeTextarea } from "../hooks/useAutosizeTextarea";
 import {
   getUserMessageValidationError,
   MAX_USER_MESSAGE_CHARACTERS,
 } from "../hooks/conversationHistory";
 
 interface WelcomeHeroProps {
-  onSuggest: (message: string, imageBase64?: string, imageUrl?: string) => void;
+  onSuggest: (message: string, imageBase64?: string, imageUrl?: string) => SendOutcome;
   disabled?: boolean;
+  allowImageUpload?: boolean;
 }
 
-export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHeroProps) {
+export default function WelcomeHero({ onSuggest, disabled = false, allowImageUpload = true }: WelcomeHeroProps) {
   const { t } = useI18n();
   const [inputValue, setInputValue] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  
+  const { attachment, isReading, error, selectFile, removeImage, setError } = useImageAttachment();
+  const pendingSend = useRef(false);
+  const [sendPending, setSendPending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  useAutosizeTextarea(textareaRef, inputValue);
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert(t.imageTooLarge);
-        return;
-      }
-      setSelectedFile(file);
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
-    }
-  };
+  const effectiveAttachment = allowImageUpload ? attachment : null;
+  const attachmentBlocked = Boolean(attachment && !allowImageUpload);
+  const imageError = attachmentBlocked ? "圖片上傳目前已停用，請移除圖片後再傳送。" : error;
 
-  const removeFile = () => {
-    setSelectedFile(null);
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-    }
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  const handleSend = async () => {
-    if (disabled) return;
+  const handleSend = () => {
+    if (disabled || pendingSend.current || isReading || attachmentBlocked) return;
     const trimmed = inputValue.trim();
-    if (!trimmed && !selectedFile) return;
-    if (getUserMessageValidationError(inputValue)) return;
-
-    let base64: string | undefined;
-    if (selectedFile) {
-      base64 = await fileToBase64(selectedFile);
+    if ((!trimmed && !effectiveAttachment) || getUserMessageValidationError(inputValue)) return;
+    pendingSend.current = true;
+    setSendPending(true);
+    const finish = () => { pendingSend.current = false; setSendPending(false); };
+    try { settleSendOutcome(onSuggest(trimmed || IMAGE_ONLY_MESSAGE, effectiveAttachment?.dataUrl, effectiveAttachment?.dataUrl), () => {
+      finish();
+      setInputValue(previous => previous.trim() === trimmed ? "" : previous);
+      if (effectiveAttachment) removeImage(effectiveAttachment);
+    }, finish); } catch { finish(); }
+  };
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const image = Array.from(event.clipboardData.files).find(file => file.type.startsWith("image/"));
+    if (!image) return;
+    event.preventDefault();
+    if (disabled || pendingSend.current) return;
+    if (!allowImageUpload) {
+      setError("圖片上傳目前已停用，請改用文字描述。");
+      return;
     }
-
-    onSuggest(trimmed, base64, previewUrl || undefined);
-    
-    setInputValue("");
-    removeFile();
+    selectFile(image);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -85,7 +70,8 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
   const suggestions = [t.suggestLaw, t.suggestReport, t.suggestSelfCare];
   const messageLength = inputValue.trim().length;
   const messageValidationError = getUserMessageValidationError(inputValue);
-  const hasContent = messageLength > 0 || selectedFile !== null;
+  const hasContent = messageLength > 0 || effectiveAttachment !== null;
+  const canSend = !disabled && !sendPending && !isReading && !attachmentBlocked && hasContent && !messageValidationError;
 
   return (
     <div className="flex-1 flex flex-col hero-mesh-gradient overflow-y-auto">
@@ -103,66 +89,49 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
 
         {/* Stitch v0.1 輸入框 */}
         <div className="w-full relative mt-4">
-          {previewUrl && (
-            <div className="mb-3 relative inline-block animate-fade-in text-left">
-              <img src={previewUrl} alt={t.imagePreview} className="h-20 w-auto rounded-lg object-cover border border-outline/20 shadow-sm" />
-              <button 
-                type="button"
-                onClick={removeFile}
-                aria-label={t.removeImage}
-                className="absolute -top-2 -right-2 bg-surface text-on-surface hover:text-error rounded-full shadow-md p-1 border border-outline/10 transition-colors"
-              >
-                <MaterialIcon icon="close" size={16} />
-              </button>
-            </div>
-          )}
-          
+          {attachment && <div className="relative mb-3 inline-block">
+            <img src={attachment.dataUrl} alt={t.imagePreview} className="h-20 max-w-full rounded-xl border border-primary/20 object-contain" />
+            <button type="button" aria-label={t.removeImage} onClick={() => removeImage()} disabled={disabled || sendPending} className="absolute -right-2 -top-2 flex h-8 w-8 items-center justify-center rounded-full border border-primary/20 bg-white text-on-surface shadow-sm disabled:opacity-40">
+              <MaterialIcon icon="close" size={16} />
+            </button>
+          </div>}
+          {imageError && <p role="alert" className="mb-3 text-xs leading-relaxed text-error">{imageError}</p>}
           <div 
             onClick={() => textareaRef.current?.focus()}
             className="relative bg-white border border-primary/30 rounded-3xl shadow-lg flex items-end px-4 lg:px-6 py-2 transition-shadow focus-within:shadow-float focus-within:border-primary/50 text-left cursor-text"
           >
-            {/* 圖片附件 */}
-            <button 
-              type="button"
-              aria-label={t.addImage}
-              title={t.addImage}
-              className="p-2 text-on-surface/40 hover:text-primary transition-colors cursor-pointer mb-0.5 shrink-0" 
-              onClick={(e) => {
-                e.stopPropagation();
-                fileInputRef.current?.click();
-              }}
-            >
-              <MaterialIcon icon="image" size={24} />
-            </button>
-            <input 
-              type="file" 
-              aria-label={t.chooseImage}
-              accept="image/*" 
-              className="hidden" 
-              ref={fileInputRef} 
-              onChange={handleFileChange} 
-            />
+            {allowImageUpload && <>
+              <button type="button" aria-label={t.addImage} disabled={disabled || sendPending || isReading} onClick={event => { event.stopPropagation(); fileInputRef.current?.click(); }} className="mb-0.5 shrink-0 p-2 text-on-surface/50 transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-40">
+                <MaterialIcon icon="image" size={24} />
+              </button>
+              <input ref={fileInputRef} type="file" accept={IMAGE_ACCEPT} aria-label={t.chooseImage} className="hidden" disabled={disabled || sendPending || isReading} onChange={event => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file && !disabled && !pendingSend.current && allowImageUpload) selectFile(file);
+              }} />
+            </>}
             <textarea
               ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               aria-label={t.heroInputLabel}
               aria-invalid={Boolean(messageValidationError)}
               aria-describedby="welcome-message-length"
               placeholder={t.heroInputPlaceholder}
               rows={1}
-              className="flex-1 bg-transparent border-none focus:ring-0 px-2 lg:px-4 py-2.5 text-on-surface placeholder:text-on-surface/30 font-medium resize-none leading-relaxed"
-              style={{ maxHeight: "160px" }}
+              className="min-w-0 flex-1 bg-transparent border-none focus:border-none focus:ring-0 outline-none focus:outline-none focus-visible:outline-none focus:shadow-none px-2 lg:px-4 py-2.5 text-on-surface placeholder:text-on-surface/30 font-medium resize-none leading-relaxed"
+              style={{ border: 0, outline: "none", boxShadow: "none" }}
             />
             <button
               onClick={handleSend}
-              disabled={disabled || !hasContent || Boolean(messageValidationError)}
+              disabled={!canSend}
               aria-label={t.sendMessage}
               className={`
                 w-10 h-10 lg:w-12 lg:h-12 rounded-full flex items-center justify-center text-white transition-all group shrink-0 mb-0.5 cursor-pointer
                 ${
-                  (hasContent && !messageValidationError)
+                  canSend
                     ? "bg-primary hover:bg-primary/90 shadow-md"
                     : "bg-primary/40 cursor-not-allowed"
                 }
@@ -171,7 +140,7 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
               <MaterialIcon 
                 icon="arrow_forward" 
                 size={24} 
-                className={(hasContent && !messageValidationError) ? "group-hover:translate-x-0.5 transition-transform" : ""}
+                className={canSend ? "group-hover:translate-x-0.5 transition-transform" : ""}
               />
             </button>
           </div>
@@ -189,8 +158,8 @@ export default function WelcomeHero({ onSuggest, disabled = false }: WelcomeHero
             {suggestions.map((suggestion) => (
               <button
                 key={suggestion}
-                disabled={disabled}
-                onClick={() => onSuggest(suggestion)}
+                disabled={disabled || sendPending || isReading || attachmentBlocked}
+                onClick={() => { if (!disabled && !pendingSend.current && !isReading && !attachmentBlocked) onSuggest(suggestion); }}
                 className="px-3 py-1.5 bg-surface-container rounded-full text-xs font-semibold text-on-surface-variant cursor-pointer hover:bg-surface-container-high transition-colors tracking-wide"
               >
                 {suggestion}
