@@ -6,6 +6,7 @@ import pytest
 
 import backend.app.agents.openrouter_agent as agent_module
 from backend.app.agents.openrouter_agent import OpenRouterAgent
+from backend.app.core.agent_prompts import assemble_service_instruction, get_default_prompt_sections
 from backend.app.core.chat_response import ASSISTANT_REPLY_MAX_LENGTH
 from backend.app.core.runtime_config import RuntimeConfig
 from backend.app.core.scenario_scripts import _builtin_scenario_documents, _parse_script
@@ -388,6 +389,33 @@ def test_missing_firestore_sections_use_built_in_prompt():
     assert instruction == agent_module._DEFAULT_SYSTEM_INSTRUCTION
 
 
+def test_service_defaults_and_admin_overrides_are_shared_without_legacy_contract():
+    overrides = {
+        "communication_principles": "先理解目前需求，再自然地回答。",
+        "analysis_rules": "保留管理端領域參考規則。",
+        "output_format": "LEGACY_ONLY_FORMAT",
+    }
+    original = dict(overrides)
+    service = assemble_service_instruction(overrides)
+    defaults = get_default_prompt_sections()
+    assert overrides == original
+    assert defaults["core_mission"] in service
+    assert defaults["retrieval_instructions"] in service
+    assert overrides["communication_principles"] in service
+    assert overrides["analysis_rules"] in service
+    assert "按情境參考" in service
+    assert "LEGACY_ONLY_FORMAT" not in service
+    legacy = agent_module._assemble_system_instruction(overrides)
+    assert legacy.startswith(service)
+    assert legacy.count("LEGACY_ONLY_FORMAT") == 1
+
+
+def test_admin_default_section_copy_does_not_mutate_future_service_prompts():
+    defaults = agent_module.get_default_prompt_sections()
+    defaults["communication_principles"] = "MUTATED"
+    assert "MUTATED" not in assemble_service_instruction()
+
+
 @pytest.mark.asyncio
 async def test_agent_tool_call_returns_sources(monkeypatch):
     completions = FakeCompletions(
@@ -606,25 +634,23 @@ async def test_agent_use_rag_false_does_not_send_tools(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_agent_forces_grounding_for_legal_question_when_client_disables_rag(monkeypatch):
+async def test_agent_respects_disabled_rag_even_for_legal_question(monkeypatch):
     completions = FakeCompletions(
         [
-            FakeResponse(FakeMessage(tool_calls=[FakeToolCall("申訴期限")])),
             FakeResponse(
                 FakeMessage(
-                    content='{"emotion":"冷靜","emotion_color":"green","reply":"找到資料。"}',
-                    tool_calls=None,
+                    content='{"emotion":"冷靜","emotion_color":"green","reply":"本輪未檢索法源，無法核對期限。"}'
                 )
-            ),
+            )
         ]
     )
     agent = make_agent(completions)
     monkeypatch.setattr(agent_module, "get_runtime_config", lambda: fake_runtime_config())
-
     result = await agent.run("請問申訴期限？", use_rag=False)
-
-    assert completions.calls[0]["tool_choice"] == "required"
-    assert result.rag_used is True
+    assert "tools" not in completions.calls[0]
+    assert "tool_choice" not in completions.calls[0]
+    assert result.rag_used is False
+    assert agent.rag.calls == []
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ from google.cloud.firestore_v1 import SERVER_TIMESTAMP
 
 from backend.app.core.config import get_settings
 from backend.app.core.logger import get_logger
+from backend.app.core.pipeline_config import PIPELINE_DEFAULTS, validate_pipeline_update
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -29,6 +30,7 @@ AGENT_PROMPT_SECTIONS = (
     "retrieval_instructions",
 )
 PROMPT_MAX_LENGTH = 20000
+FIRESTORE_READ_TIMEOUT_SECONDS = 5.0
 WRITABLE_FIELDS = {
     "openrouter_model",
     "temperature",
@@ -42,7 +44,9 @@ WRITABLE_FIELDS = {
     "rag_collections",
     "maintenance_message",
     "enable_image_upload",
+    "enable_client_privacy_review",
     "development_mode",
+    "pipeline",
 }
 
 
@@ -61,17 +65,58 @@ class RuntimeConfig:
     rag_collections: dict[str, str] = field(default_factory=dict)
     maintenance_message: str | None = None
     enable_image_upload: bool = True
+    enable_client_privacy_review: bool = True
     development_mode: bool = False
     rag_distance_threshold: float | None = None
     source: str = "defaults"
     updated_at: str | None = None
     updated_by: str | None = None
+    pipeline: dict[str, Any] = field(default_factory=lambda: dict(PIPELINE_DEFAULTS))
+
+    def __post_init__(self):
+        object.__setattr__(
+            self, "pipeline", {**PIPELINE_DEFAULTS, **validate_pipeline_update(self.pipeline)}
+        )
 
     def public_dict(self) -> dict[str, Any]:
         result = asdict(self)
         # The client needs to show exactly which per-environment document it edits.
         result["environment_document_id"] = settings.runtime_config_document_id
         return result
+
+
+def client_settings(config: RuntimeConfig) -> dict[str, Any]:
+    """Expose only controls needed to negotiate and render the public chat UI."""
+    return {
+        "contract_version": 4,
+        "enable_image_upload": config.enable_image_upload,
+        "enable_client_privacy_review": config.enable_client_privacy_review,
+        "pipeline": {
+            key: config.pipeline[key]
+            for key in (
+                "trim_history",
+                "history_max_messages",
+                "history_max_chars",
+                "model_selection_mode",
+                "enable_analysis",
+            )
+        },
+    }
+
+
+def resolve_runtime_config(
+    base: RuntimeConfig, overrides: dict[str, Any] | None = None
+) -> RuntimeConfig:
+    """Create an isolated request snapshot; this function never reads or writes Firestore."""
+    if overrides is not None and (
+        not isinstance(overrides, dict) or set(overrides) - WRITABLE_FIELDS
+    ):
+        raise ValueError("overrides must contain only supported runtime settings")
+    data = asdict(base)
+    cleaned = validate_runtime_config_update(overrides or {})
+    for key, value in cleaned.items():
+        data[key] = {**data[key], **value} if isinstance(value, dict) else value
+    return _build_config(data, source="request_override" if overrides else base.source)
 
 
 _cached_config: RuntimeConfig | None = None
@@ -172,6 +217,7 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
             if "enable_image_upload" in invalid_fields
             else validated.get("enable_image_upload", True)
         ),
+        enable_client_privacy_review=validated.get("enable_client_privacy_review", True),
         development_mode=(
             False
             if settings.environment == "production"
@@ -181,6 +227,7 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
         source=source,
         updated_at=_timestamp_to_iso(data.get("updated_at")),
         updated_by=data.get("updated_by") if isinstance(data.get("updated_by"), str) else None,
+        pipeline={**PIPELINE_DEFAULTS, **validated.get("pipeline", {})},
     )
 
 
@@ -199,7 +246,8 @@ def get_runtime_config(force_refresh: bool = False) -> RuntimeConfig:
         snapshot = (
             db.collection(settings.runtime_config_collection_name)
             .document(settings.runtime_config_document_id)
-            .get()
+            # This read precedes the SSE response; avoid the SDK's long retry budget.
+            .get(timeout=FIRESTORE_READ_TIMEOUT_SECONDS, retry=None)
         )
         if snapshot.exists:
             doc_data = snapshot.to_dict() or {}
@@ -212,6 +260,14 @@ def get_runtime_config(force_refresh: bool = False) -> RuntimeConfig:
             enable_anonymization=True,
             development_mode=False,
             enable_image_upload=False,
+            enable_client_privacy_review=True,
+            pipeline={
+                **fallback.pipeline,
+                "mask_message": True,
+                "mask_case_context": True,
+                "mask_retrieval_query": True,
+                "content_policy": "repair",
+            },
             source="last_known_good" if _last_known_good_config is not None else "safe_defaults",
         )
         _cached_config = safe_fallback
@@ -306,7 +362,12 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
             if not isfinite(threshold) or not 0 <= threshold <= 2:
                 raise ValueError("rag_distance_threshold must be between 0 and 2")
             cleaned[key] = threshold
-        elif key in {"enable_anonymization", "enable_image_upload", "development_mode"}:
+        elif key in {
+            "enable_anonymization",
+            "enable_image_upload",
+            "enable_client_privacy_review",
+            "development_mode",
+        }:
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be a boolean")
             cleaned[key] = value
@@ -314,6 +375,8 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
             cleaned[key] = _clean_rag_collections(value)
         elif key == "agent_prompt_sections":
             cleaned[key] = _validate_prompt_sections(value)
+        elif key == "pipeline":
+            cleaned[key] = validate_pipeline_update(value)
     return cleaned
 
 
@@ -335,7 +398,9 @@ def _default_runtime_document() -> dict[str, Any]:
         "rag_collections": _default_rag_collections(),
         "maintenance_message": "",
         "enable_image_upload": True,
+        "enable_client_privacy_review": True,
         "development_mode": False,
+        "pipeline": dict(PIPELINE_DEFAULTS),
     }
 
 

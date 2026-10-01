@@ -3,8 +3,15 @@
  * 所有與後端通訊皆透過此模組，方便統一管理 base URL 與錯誤處理。
  */
 
-import { isClarification, isFactUpdate, type CaseContext, type Clarification, type ClarificationAnswer, type FactUpdate } from "./caseFacts";
-export type { CaseContext, Clarification, ClarificationAnswer, FactUpdate, FactKey, CaseFact } from "./caseFacts";
+import { isClarification, isFactUpdate, isSummaryUpdate, type SummaryUpdate, type CaseContext, type Clarification, type ClarificationAnswer, type FactUpdate } from "./caseFacts";
+import { isAnalysisEntry, sanitizeAnalysis, type AnalysisEntry } from "./analysis";
+import { isReasoningEntry, type ReasoningEntry } from "./reasoning";
+import type { ClientSettings, PipelineSettings } from "./pipeline";
+import { reviewedRequestBody } from "./clientPrivacy";
+export type { AnalysisEntry } from "./analysis";
+export type { ReasoningEntry } from "./reasoning";
+export type { ClientSettings, PipelineSettings } from "./pipeline";
+export type { CaseContext, LegacyCaseContext, SummaryCaseContext, SummaryUpdate, Clarification, ClarificationAnswer, FactUpdate, FactKey, CaseFact } from "./caseFacts";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
@@ -21,9 +28,10 @@ export interface ChatRequest {
   history: MessageItem[];
   use_rag: boolean;
   image_base64?: string;
-  contract_version?: 2;
+  contract_version?: 2 | 3 | 4;
   case_context?: CaseContext;
   clarification_answer?: ClarificationAnswer;
+  regenerate_from_summary?: boolean;
 }
 
 export type RagSourceType = "law" | "judgment" | "remedy" | "unknown";
@@ -37,6 +45,15 @@ export interface RagSource {
   source_url?: string | null;
   article?: string | null;
   version?: string | null;
+  law_name?: string | null;
+  article_number?: string | null;
+  checked_at?: string | null;
+  effective_date?: string | null;
+  promulgation_date?: string | null;
+  promulgated_date?: string | null;
+  promulgated_date_scope?: string | null;
+  effective_date_scope?: string | null;
+  effective_note?: string | null;
 }
 
 export interface RagInfo {
@@ -62,12 +79,15 @@ export interface ChatResponse {
   interaction_mode: "answer" | "clarify";
   clarifying_questions: string[];
   debug_tool_calls?: DebugToolCall[];
-  contract_version?: 2;
+  contract_version?: 2 | 3 | 4;
+  context_revision?: number;
+  summary_update?: SummaryUpdate | null;
   facts_revision?: number;
   fact_updates?: FactUpdate[];
   clarification?: Clarification | null;
   answer_sections?: Array<{ kind: "direction" | "basis" | "next_steps"; text: string; source_ids: string[] }>;
   execution?: { route: string; model_calls: number };
+  analysis?: AnalysisEntry[];
 }
 
 /** Cumulative, display-only preview. Trusted actions arrive in the final response. */
@@ -132,9 +152,11 @@ export interface HealthResponse {
   version: string;
   environment: string;
   capabilities?: { chat_contract_versions: number[] };
+  client_settings?: ClientSettings;
 }
 
 export interface RuntimeConfig {
+  pipeline?: PipelineSettings;
   openrouter_model: string;
   rag_retrieval_top_k: number;
   rag_distance_threshold: number | null;
@@ -151,6 +173,7 @@ export interface RuntimeConfig {
   };
   maintenance_message?: string;
   enable_image_upload: boolean;
+  enable_client_privacy_review?: boolean;
   development_mode: boolean;
   source: string;
   environment_document_id?: string;
@@ -173,9 +196,12 @@ export type RuntimeConfigUpdate = Partial<
     | "rag_collections"
     | "maintenance_message"
     | "enable_image_upload"
+    | "enable_client_privacy_review"
     | "development_mode"
   >
->;
+> & { pipeline?: Partial<PipelineSettings> };
+
+export interface AdminChatTestResult { response: ChatResponse; diagnostics: Record<string, unknown> }
 
 // ── API 錯誤類別 ─────────────────────────────────────────────────────────
 
@@ -244,6 +270,31 @@ export function normalizeApiErrorDetail(value: unknown): string | undefined {
 
 // ── 共用 fetch 包裝 ──────────────────────────────────────────────────────
 
+function requestGuard(timeoutMs: number, detail: string, parent?: AbortSignal) {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const abort = () => controller.abort(parent?.reason);
+  const timeOut = (message: string) => controller.abort(
+    new ApiError(504, "連線逾時", message, false),
+  );
+  const reset = (milliseconds: number, message: string) => {
+    clearTimeout(timer);
+    if (!controller.signal.aborted) timer = setTimeout(() => timeOut(message), milliseconds);
+  };
+  if (parent?.aborted) abort();
+  else parent?.addEventListener("abort", abort, { once: true });
+  reset(timeoutMs, detail);
+  return {
+    signal: controller.signal,
+    reset,
+    timeOut,
+    dispose() {
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", abort);
+    },
+  };
+}
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -296,32 +347,51 @@ function invalidStream(): ApiError {
   return new ApiError(502, "回覆串流中斷", "回覆未完整接收，請重新送出訊息", true);
 }
 
-export function parseChatResponse(payload: unknown): ChatResponse {
+export function assertResponseContract(request: ChatRequest, response: ChatResponse): void {
+  if ((response.contract_version ?? 1) !== (request.contract_version ?? 1)) {
+    throw new ApiError(502, "回覆協定版本不符", "服務回覆與本次要求的版本不符，請重新連線後再試。", false);
+  }
+}
+
+export function parseChatResponse(payload: unknown, expectedContractVersion?: number): ChatResponse {
+  if (expectedContractVersion !== undefined && isRecord(payload) && (payload.contract_version ?? 1) !== expectedContractVersion) {
+    throw new ApiError(502, "回覆協定版本不符", "服務回覆與本次要求的版本不符，請重新連線後再試。", false);
+  }
   if (!isRecord(payload) || typeof payload.reply !== "string" || !Array.isArray(payload.suggested_replies)
     || !Array.isArray(payload.action_buttons) || !Array.isArray(payload.clarifying_questions)
     || !isRecord(payload.rag_used) || typeof payload.rag_used.status !== "boolean"
     || !Array.isArray(payload.rag_used.sources) || payload.rag_used.sources.length > 100 || !payload.rag_used.sources.every(isRagSource)
     || !["answer", "clarify"].includes(String(payload.interaction_mode))) throw invalidStream();
-  if (payload.contract_version !== undefined && payload.contract_version !== 2) throw invalidStream();
-  if (payload.contract_version === 2) {
+  if (payload.contract_version !== undefined && payload.contract_version !== 2 && payload.contract_version !== 3 && payload.contract_version !== 4) throw invalidStream();
+  if (payload.contract_version === 2 || payload.contract_version === 3) {
     if (!Number.isSafeInteger(payload.facts_revision) || Number(payload.facts_revision) < 0
       || !Array.isArray(payload.fact_updates) || payload.fact_updates.length > 13 || !payload.fact_updates.every(isFactUpdate)
-      || (payload.clarification !== null && !isClarification(payload.clarification))
+      || (payload.clarification !== null && !isClarification(payload.clarification, payload.contract_version))
       || !Array.isArray(payload.answer_sections) || payload.answer_sections.length > 6
       || !payload.answer_sections.every(section => isRecord(section) && ["direction", "basis", "next_steps"].includes(String(section.kind))
         && typeof section.text === "string" && Array.isArray(section.source_ids) && section.source_ids.every(id => typeof id === "string"))
       || !isRecord(payload.execution) || typeof payload.execution.route !== "string" || !Number.isSafeInteger(payload.execution.model_calls)
       || Number(payload.execution.model_calls) < 0) throw invalidStream();
+    if (payload.contract_version === 2 && payload.fact_updates.some(update => Array.isArray(update.value))) throw invalidStream();
   }
-  return payload as unknown as ChatResponse;
+  if (payload.contract_version === 4) {
+    if (!Number.isSafeInteger(payload.context_revision) || Number(payload.context_revision) < 0
+      || (payload.summary_update !== null && !isSummaryUpdate(payload.summary_update))
+      || (payload.clarification !== null && !isClarification(payload.clarification, 4))
+      || !isRecord(payload.execution) || typeof payload.execution.route !== "string" || !Number.isSafeInteger(payload.execution.model_calls)
+      || Number(payload.execution.model_calls) < 0) throw invalidStream();
+  }
+  if ((payload.contract_version === 3 || payload.contract_version === 4) && sanitizeAnalysis(payload.analysis) === undefined) throw invalidStream();
+  if (payload.analysis !== undefined && sanitizeAnalysis(payload.analysis) === undefined) throw invalidStream();
+  return { ...payload, ...(payload.interaction_mode === "answer" && payload.clarification !== undefined ? { clarification: null } : {}) } as unknown as ChatResponse;
 }
 
 function isRagSource(value: unknown): value is RagSource | string {
   if (typeof value === "string") return value.trim().length > 0 && value.length <= 4000;
   if (!isRecord(value) || typeof value.label !== "string" || !value.label.trim() || value.label.length > 4000) return false;
-  if (Object.keys(value).some(key => !["label", "type", "collection", "doc_id", "distance", "source_url", "article", "version"].includes(key))) return false;
+  if (Object.keys(value).some(key => !["label", "type", "collection", "doc_id", "distance", "source_url", "article", "version", "law_name", "article_number", "checked_at", "effective_date", "promulgation_date", "promulgated_date", "promulgated_date_scope", "effective_date_scope", "effective_note"].includes(key))) return false;
   if (value.type !== undefined && !["law", "judgment", "remedy", "unknown"].includes(String(value.type))) return false;
-  if (["collection", "doc_id", "source_url", "article", "version"].some(key => value[key] != null && (typeof value[key] !== "string" || value[key].length > 4000))) return false;
+  if (["collection", "doc_id", "source_url", "article", "version", "law_name", "article_number", "checked_at", "effective_date", "promulgation_date", "promulgated_date", "promulgated_date_scope", "effective_date_scope", "effective_note"].some(key => value[key] != null && (typeof value[key] !== "string" || value[key].length > 4000))) return false;
   return value.distance == null || (typeof value.distance === "number" && Number.isFinite(value.distance));
 }
 
@@ -332,6 +402,10 @@ async function readChatStream(
   onDelta?: (text: string) => void,
   onGuidance?: (guidance: ChatGuidance) => void,
   onProgress?: (progress: ChatProgress) => void,
+  onActivity?: () => void,
+  onAnalysis?: (analysis: AnalysisEntry) => void,
+  onReasoning?: (reasoning: ReasoningEntry) => void,
+  expectedContractVersion?: number,
 ): Promise<ChatResponse> {
   if (!response.body) throw invalidStream();
   const reader = response.body.getReader();
@@ -349,11 +423,17 @@ async function readChatStream(
       const eventData = data.join("\n");
       event = "";
       data = [];
-      if (!eventData || !["delta", "guidance", "progress", "done", "error"].includes(eventName)) return;
+      if (!eventData || !["delta", "guidance", "progress", "analysis", "reasoning", "done", "error"].includes(eventName)) return;
       let payload: unknown;
       try { payload = JSON.parse(eventData); } catch { throw invalidStream(); }
       if (!isRecord(payload)) throw invalidStream();
-      if (eventName === "progress") {
+      if (eventName === "reasoning") {
+        if (!isReasoningEntry(payload)) throw invalidStream();
+        onReasoning?.(payload);
+      } else if (eventName === "analysis") {
+        if (!isAnalysisEntry(payload)) throw invalidStream();
+        onAnalysis?.(payload);
+      } else if (eventName === "progress") {
         if (!CHAT_PROGRESS_PHASES.some(phase => phase === payload.phase)
           || typeof payload.elapsed_ms !== "number" || !Number.isFinite(payload.elapsed_ms)
           || payload.elapsed_ms < 0) throw invalidStream();
@@ -376,7 +456,7 @@ async function readChatStream(
         // Never promote model-generated actions or other unvalidated metadata.
         if (Object.keys(guidance).length > 0) onGuidance?.(guidance);
       } else if (eventName === "done") {
-        result = parseChatResponse(payload);
+        result = parseChatResponse(payload, expectedContractVersion);
       } else {
         throw new ApiError(
           typeof payload.status === "number" ? payload.status : 502,
@@ -402,6 +482,7 @@ async function readChatStream(
       signal?.throwIfAborted();
       const { value, done } = await reader.read();
       signal?.throwIfAborted();
+      if (value?.byteLength) onActivity?.();
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
       // Hold a trailing CR until the next read so a split CRLF is one newline.
       while (true) {
@@ -435,26 +516,53 @@ export async function sendChat(
   onDelta?: (text: string) => void,
   onGuidance?: (guidance: ChatGuidance) => void,
   onProgress?: (progress: ChatProgress) => void,
+  onAnalysis?: (analysis: AnalysisEntry) => void,
+  onReasoning?: (reasoning: ReasoningEntry) => void,
 ): Promise<ChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/v1/chat/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({ ...request, stream: true }),
-    signal,
-  });
-  if (!response.ok) await throwResponseError(response);
-  // Allow the new client to work during a rolling backend deployment.
-  if (!response.headers.get("content-type")?.includes("text/event-stream")) {
-    return parseChatResponse(await response.json());
+  const reviewedBody = reviewedRequestBody(request);
+  const guard = requestGuard(30_000, "後端尚未開始回應，請確認服務已啟動後再試。", signal);
+  // Match the Functions 180-second limit with a small allowance for transport.
+  // Heartbeats prove the connection is alive, but must not keep a turn pending forever.
+  const deadline = setTimeout(() => guard.timeOut("回覆等待逾時，請稍後再試。"), 190_000);
+  try {
+    const response = await fetch(`${API_BASE_URL}/v1/chat/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: `${reviewedBody.slice(0, -1)},"stream":true}`,
+      signal: guard.signal,
+    });
+    const receivedActivity = () => guard.reset(45_000, "回覆連線已中斷，請稍後再試。");
+    receivedActivity();
+    if (!response.ok) await throwResponseError(response);
+    const result = !response.headers.get("content-type")?.includes("text/event-stream")
+      ? parseChatResponse(await response.json(), request.contract_version ?? 1)
+      : await readChatStream(response, guard.signal, onDelta, onGuidance, onProgress, receivedActivity, onAnalysis, onReasoning, request.contract_version ?? 1);
+    assertResponseContract(request, result);
+    return result;
+  } catch (error) {
+    // Some transports reject with AbortError instead of the supplied reason.
+    // Keep timeouts distinct from the user's Stop action and never auto-resend.
+    if (guard.signal.aborted) throw guard.signal.reason;
+    throw error;
+  } finally {
+    clearTimeout(deadline);
+    guard.dispose();
   }
-  return readChatStream(response, signal, onDelta, onGuidance, onProgress);
 }
 
 /**
  * 健康狀態檢查。
  */
-export async function checkHealth(): Promise<HealthResponse> {
-  return apiFetch<HealthResponse>("/v1/health/");
+export async function checkHealth(signal?: AbortSignal): Promise<HealthResponse> {
+  const guard = requestGuard(10_000, "後端連線逾時，請稍後重新連線。", signal);
+  try {
+    return await apiFetch<HealthResponse>("/v1/health/", { signal: guard.signal, cache: "no-store" });
+  } catch (error) {
+    if (guard.signal.aborted) throw guard.signal.reason;
+    throw error;
+  } finally {
+    guard.dispose();
+  }
 }
 
 export async function getRuntimeConfig(adminToken: string): Promise<RuntimeConfig> {
@@ -463,6 +571,20 @@ export async function getRuntimeConfig(adminToken: string): Promise<RuntimeConfi
       Authorization: `Bearer ${adminToken}`,
     },
   });
+}
+
+export async function runAdminChatTest(adminToken: string, request: ChatRequest, overrides: RuntimeConfigUpdate, signal?: AbortSignal): Promise<AdminChatTestResult> {
+  const reviewedBody = reviewedRequestBody(request);
+  const guard = requestGuard(190_000, "診斷測試逾時，請檢查服務後再試。", signal);
+  try {
+    const result = await apiFetch<AdminChatTestResult>("/v1/admin/chat-test", {
+      method: "POST", headers: { Authorization: `Bearer ${adminToken}` }, signal: guard.signal,
+      body: `{"request":${reviewedBody},"overrides":${JSON.stringify(overrides)}}`,
+    });
+    if (!isRecord(result.diagnostics)) throw new ApiError(502, "診斷回應格式不正確");
+    return { response: parseChatResponse(result.response, request.contract_version ?? 1), diagnostics: result.diagnostics };
+  } catch (error) { if (guard.signal.aborted) throw guard.signal.reason; throw error; }
+  finally { guard.dispose(); }
 }
 
 export async function updateRuntimeConfig(

@@ -20,6 +20,7 @@ interface MessageItemProps {
   message: ConversationMessage;
   streamingStatus?: string | null;
   showEmotions?: boolean;
+  onOpenSummary?: () => void;
 }
 
 const getEmotionColorClasses = (color?: string) => {
@@ -49,6 +50,7 @@ const normalizeSource = (source: RagSource | string): RagSource => {
     };
   }
   return {
+    ...source,
     label: source.label,
     type: source.type ?? "unknown",
     collection: source.collection,
@@ -88,12 +90,13 @@ const getSourceStyle = (type: RagSourceType) => {
   }
 };
 
-export default function MessageItem({ message, streamingStatus, showEmotions = false }: MessageItemProps) {
+export default function MessageItem({ message, streamingStatus, showEmotions = false, onOpenSummary }: MessageItemProps) {
   const { t } = useI18n();
   const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
   const isUser = message.role === "user";
   const isError = message.isError;
   const isCancelled = message.isCancelled;
+  const sourceLabel = (message.contractVersion ?? 1) >= 3 ? t.citedSources : t.ragLabel;
   const isCompleteAssistant = !isUser && !isError && !isCancelled && !message.isStreaming;
   const resourceActions = isCompleteAssistant ? getSafeResourceActions(message.actionButtons) : [];
   // Older saved conversations have no reply metadata and keep their plain bubble.
@@ -131,11 +134,14 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
   };
 
   const activeSourceGroup = sourceGroups.find(({ type }) => type === activeSourceType);
-  const answerSections = isCompleteAssistant ? message.answerSections?.filter(section => section.text.trim()) : undefined;
+  // Reply text is authoritative across contract versions. Historical section
+  // metadata is only a fallback for an otherwise empty completed response.
+  const content = message.content.trim() || !isCompleteAssistant ? message.content
+    : message.answerSections?.map(section => section.text.trim()).filter(Boolean).join("\n\n") ?? "";
 
   return (
     <div
-      className={`animate-fade-in-up flex gap-4 max-w-4xl ${
+      className={`animate-fade-in-up flex gap-2 sm:gap-4 max-w-4xl ${
         isUser ? "ml-auto flex-row-reverse items-start" : ""
       }`}
     >
@@ -161,6 +167,10 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
             <MaterialIcon icon="shield" size={16} filled />
           )}
         </div>
+        {!isUser && onOpenSummary && <button data-summary-trigger type="button" onClick={onOpenSummary} aria-label={t.caseSummaryOpen} title={t.caseSummaryOpen}
+          className="flex h-11 w-11 items-center justify-center rounded-xl text-on-surface/60 transition-colors hover:bg-primary/10 hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">
+          <MaterialIcon icon="description" size={17} />
+        </button>}
         {/* 情緒標籤 (僅針對使用者訊息顯示) */}
         {isUser && showEmotions && message.emotion && (
           <span
@@ -192,8 +202,6 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
           />
         )}
 
-        {!isUser && message.processingTrace && <ProcessingTrace trace={message.processingTrace} />}
-
         {/* 訊息內容 */}
         {!isCancelled && replyAnswers.length > 0 && (
           <div aria-label="回覆內容" className="space-y-4">
@@ -210,21 +218,9 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
             ))}
           </div>
         )}
-        {answerSections && answerSections.length > 0 && <div className="space-y-4">
-          {answerSections.map((section, index) => <section key={`${section.kind}-${index}`} className="markdown-message break-words">
-            <h3 className="mb-2 text-sm font-semibold">{section.kind === "direction" ? t.answerDirection : section.kind === "basis" ? t.answerBasis : t.answerNextSteps}</h3>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{section.text}</ReactMarkdown>
-            {section.source_ids.length > 0 && <ul className="mt-2 text-xs text-on-surface/60">
-              {section.source_ids.map(id => {
-                const source = message.ragUsed?.sources.find(item => typeof item !== "string" && item.doc_id === id);
-                return source && typeof source !== "string" ? <li key={id}>{source.label}{source.article ? ` · ${source.article}` : ""}</li> : null;
-              })}
-            </ul>}
-          </section>)}
-        </div>}
-        {(!answerSections || answerSections.length === 0) && replyAnswers.length === 0 && message.content && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
+        {replyAnswers.length === 0 && content && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
           {isUser || isError ? (
-            message.content
+            content
           ) : (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -236,7 +232,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
                 ),
               }}
             >
-              {message.content}
+              {content}
             </ReactMarkdown>
           )}
         </div>}
@@ -245,6 +241,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
         {isCancelled && <p className="text-sm font-medium text-on-surface/55">{message.content ? "使用者已終止回覆，以上內容尚未完成" : "使用者已終止回覆"}</p>}
         {message.interruptionReason && <p role="alert" className="text-sm font-medium">{message.interruptionReason}</p>}
         {message.superseded && <p className="text-xs text-on-surface/60">{t.supersededAnswer}</p>}
+        {!isUser && Boolean(message.processingTrace || message.analysis?.length || message.reasoning?.length) && <ProcessingTrace trace={message.processingTrace ?? { steps: [], duration_ms: 0, outcome: message.isStreaming ? "running" : message.isError ? "error" : message.isCancelled ? "cancelled" : "complete" }} analysis={message.analysis} reasoning={message.reasoning} />}
         {!isUser && !isError && !isCancelled && message.debugToolCalls !== undefined && (
           <details className="mt-3 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-xs text-amber-950">
             <summary className="flex cursor-pointer items-center gap-1.5 font-semibold">
@@ -281,7 +278,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
                       onClick={() => setActiveSourceType(isActive ? null : type)}
                       className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${style.className}`}
                       aria-expanded={isActive}
-                      aria-label={`${t.ragLabel}：${getSourceTypeLabel(type)}`}
+                      aria-label={`${sourceLabel}：${getSourceTypeLabel(type)}`}
                     >
                       <MaterialIcon icon={style.icon} size={14} />
                       <span>{getSourceTypeLabel(type)}</span>
@@ -308,6 +305,10 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
                       <span>{src.label}</span>
                       {src.article && <span className="ml-2">{src.article}</span>}
                       {src.version && <span className="ml-2 text-on-surface/60">{src.version}</span>}
+                      {typeof src.promulgated_date === "string" && <p className="mt-1 text-on-surface/60">{t.sourcePromulgatedDate}：{src.promulgated_date}</p>}
+                      {typeof src.effective_date === "string" && <p className="mt-1 text-on-surface/60">{t.sourceEffectiveDate}：{src.effective_date}</p>}
+                      {typeof src.checked_at === "string" && <p className="mt-1 text-on-surface/60">{t.sourceCheckedAt}：{src.checked_at}</p>}
+                      {typeof src.effective_note === "string" && <p className="mt-1 text-on-surface/60">{src.effective_note}</p>}
                       {src.source_url && /^https?:\/\//i.test(src.source_url) && <a href={src.source_url} target="_blank" rel="noreferrer" className="ml-2 text-primary underline">{t.answerBasis}</a>}
                     </li>
                   ))}

@@ -9,7 +9,7 @@ import binascii
 import json
 import uuid
 from time import monotonic
-from typing import Literal
+from typing import Annotated, Literal
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 from openai import (
@@ -23,18 +23,31 @@ from openai import (
     RateLimitError,
     UnprocessableEntityError,
 )
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from backend.app.agents.openrouter_agent import AgentContractError, AgentResult, OpenRouterAgent
-from backend.app.core.anonymizer import anonymize, anonymize_messages
-from backend.app.core.case_context import CaseContext, ClarificationAnswer
+from backend.app.core.agent_errors import ModelOutputLimitError
+from backend.app.core.anonymizer import anonymize
+from backend.app.core.case_context import (
+    MAX_CONTEXT_REVISION,
+    SUMMARY_MAX_LENGTH,
+    CaseContext,
+    ClarificationAnswer,
+    SummaryUpdate,
+)
 from backend.app.core.chat_response import (
     ASSISTANT_REPLY_MAX_LENGTH,
     AssistantChatResponse,
     action_key,
 )
+from backend.app.core.clarification_tokens import validate_clarification_answer
 from backend.app.core.logger import get_logger
-from backend.app.core.runtime_config import get_runtime_config
+from backend.app.core.pipeline_config import (
+    MAX_INPUT_HISTORY_CHARACTERS,
+    MAX_INPUT_HISTORY_MESSAGES,
+    trim_request_history,
+)
+from backend.app.core.runtime_config import get_runtime_config, resolve_runtime_config
 from backend.app.rag.base import RAGUnavailableError
 
 logger = get_logger(__name__)
@@ -42,9 +55,13 @@ logger = get_logger(__name__)
 chat_bp = Blueprint("chat", __name__, url_prefix="/chat")
 
 USER_MESSAGE_MAX_LENGTH = 2000
-MAX_HISTORY_CHARACTERS = 30000
+MAX_HISTORY_CHARACTERS = MAX_INPUT_HISTORY_CHARACTERS
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_MAX_BASE64_LENGTH = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
+_SUPPORTED_IMAGE_MIME_TYPES = {"image/gif", "image/jpeg", "image/png", "image/webp"}
 STREAM_HEARTBEAT_SECONDS = 10
+MAX_REASONING_CHARACTERS = 32000
+MAX_REASONING_ENTRIES = 4096
 _STREAM_PROGRESS_PHASES = {
     "anonymizing",
     "preparing",
@@ -54,8 +71,6 @@ _STREAM_PROGRESS_PHASES = {
     "guidance",
     "validating",
 }
-_MAX_BASE64_LENGTH = 4 * ((MAX_IMAGE_BYTES + 2) // 3)
-_SUPPORTED_IMAGE_MIME_TYPES = {"image/gif", "image/jpeg", "image/png", "image/webp"}
 _TRANSIENT_UPSTREAM_ERRORS = (
     APIConnectionError,
     APITimeoutError,
@@ -146,7 +161,7 @@ def _matches_image_signature(mime_type: str, content: bytes) -> bool:
 
 
 def _validate_image_data_url(value: str | None) -> str | None:
-    """Validate an image data URL without trusting its declared MIME type."""
+    """Validate format and size; the image itself is not anonymized here."""
     if value is None:
         return None
     header, separator, encoded = value.partition(",")
@@ -170,6 +185,19 @@ def _validate_image_data_url(value: str | None) -> str | None:
     if not _matches_image_signature(mime_type, decoded):
         raise ValueError("image_base64 content does not match its MIME type")
     return value
+
+
+def _image_upload_disabled_error():
+    return (
+        jsonify(
+            {
+                "code": "image_upload_disabled",
+                "detail": "Image upload is disabled",
+                "retryable": False,
+            }
+        ),
+        422,
+    )
 
 
 def _service_error(
@@ -198,11 +226,11 @@ def _service_error(
         if isinstance(exc, ValidationError)
         else exc
     )
-    # V2 transports local case facts: provider errors can echo their input.
+    # Guided requests and admin tests can contain private facts in provider errors.
     # Record a category only, including in development, never an upstream body.
     request_payload = request.get_json(silent=True) if request.is_json else None
-    private_case_request = (
-        isinstance(request_payload, dict) and request_payload.get("contract_version") == 2
+    private_case_request = request.path.endswith("/admin/chat-test") or (
+        isinstance(request_payload, dict) and request_payload.get("contract_version") in (2, 3, 4)
     )
     if private_case_request:
         error_message = type(exc).__name__
@@ -272,6 +300,8 @@ def _request_validation_error(exc: ValidationError):
 class MessageItem(BaseModel):
     """單一訊息項目。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     role: Literal["user", "assistant"] = Field(..., description="發訊者角色")
     content: str = Field(
         ...,
@@ -292,6 +322,8 @@ class MessageItem(BaseModel):
 class ChatRequest(BaseModel):
     """聊天請求：包含當前訊息及完整對話歷史。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     message: str = Field(
         default="",
         max_length=USER_MESSAGE_MAX_LENGTH,
@@ -299,13 +331,14 @@ class ChatRequest(BaseModel):
     )
     history: list[MessageItem] = Field(
         default_factory=list,
-        max_length=50,
-        description="對話歷史（最多 50 輪，由前端 localStorage 傳入）",
+        max_length=MAX_INPUT_HISTORY_MESSAGES,
+        description="對話歷史，由後端依本次設定保留完整回合",
     )
     use_rag: bool = Field(default=True, description="是否啟用 RAG 檢索增強")
     stream: bool = Field(default=False, description="以 SSE 串流回覆文字，完成後傳回完整資料")
     image_base64: str | None = Field(default=None, description="使用者上傳的圖片 (base64 data URL)")
-    contract_version: Literal[1, 2] = 1
+    contract_version: Literal[1, 2, 3, 4] = 1
+    regenerate_from_summary: bool = False
     case_context: CaseContext | None = None
     clarification_answer: ClarificationAnswer | None = None
 
@@ -315,11 +348,36 @@ class ChatRequest(BaseModel):
         return _validate_image_data_url(value)
 
     @model_validator(mode="after")
-    def require_message_or_image(self):
-        if self.contract_version != 2 and (
+    def validate_chat_input(self):
+        if self.regenerate_from_summary and self.contract_version != 4:
+            raise ValueError("Regeneration from a text summary requires chat contract version 4")
+        if self.regenerate_from_summary and self.clarification_answer is not None:
+            raise ValueError("Summary regeneration cannot submit a new clarification answer")
+        if self.contract_version == 1 and (
             self.case_context is not None or self.clarification_answer is not None
         ):
-            raise ValueError("Case context requires contract version 2")
+            raise ValueError("Case context requires contract version 2, 3 or 4")
+        expected_schema = {2: 1, 3: 2, 4: 3}.get(self.contract_version, 1)
+        if self.case_context and self.case_context.schema_version != expected_schema:
+            raise ValueError("Case context schema does not match the chat contract")
+        if self.clarification_answer:
+            if self.contract_version == 4:
+                if "fact_key" in self.clarification_answer.model_fields_set:
+                    raise ValueError("V4 clarification answers must not contain a fact key")
+                revision = self.case_context.revision if self.case_context else 0
+                if self.clarification_answer.context_revision != revision:
+                    raise ValueError("Clarification answer does not match the context revision")
+            elif self.clarification_answer.fact_key is None:
+                raise ValueError("Legacy clarification answers require a fact key")
+            elif "context_revision" in self.clarification_answer.model_fields_set:
+                raise ValueError("Clarification context revision requires chat contract version 4")
+            if self.contract_version == 2 and isinstance(self.clarification_answer.value, list):
+                raise ValueError("Multiple answers require chat contract version 3")
+            validate_clarification_answer(
+                self.clarification_answer.model_dump(exclude_none=True),
+                require_token=self.contract_version >= 3,
+                contract_version=4 if self.contract_version == 4 else 3,
+            )
         if not self.message.strip() and not self.image_base64:
             raise ValueError("message or image_base64 is required")
         history_characters = sum(len(item.content) for item in self.history)
@@ -330,8 +388,116 @@ class ChatRequest(BaseModel):
         return self
 
 
+class AnalysisEntry(BaseModel):
+    """Public, evidence-based summary; arbitrary provider metadata is never streamed."""
+
+    model_config = ConfigDict(extra="forbid")
+    stage: Literal["understanding", "sufficiency", "sources", "answer"]
+    summary: str = Field(min_length=1, max_length=1000)
+    facts: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=12)
+    source_labels: list[Annotated[str, Field(max_length=300)]] = Field(
+        default_factory=list, max_length=24
+    )
+    limitations: list[Annotated[str, Field(max_length=500)]] = Field(
+        default_factory=list, max_length=12
+    )
+
+
+class ReasoningEntry(BaseModel):
+    """Only provider-designated public text/summary reaches this transient channel."""
+
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=MAX_REASONING_CHARACTERS)
+    kind: Literal["text", "summary"]
+    stage: Literal["understanding", "answer"]
+
+
+def _public_reasoning_entry(value, remaining: int) -> dict | None:
+    if not isinstance(value, dict) or remaining <= 0 or not isinstance(value.get("text"), str):
+        return None
+    try:
+        # Never serialize a provider object wholesale: encrypted blocks,
+        # signatures and tool metadata are not part of this public channel.
+        return ReasoningEntry.model_validate(
+            {
+                "text": value["text"][:remaining],
+                "kind": value.get("kind"),
+                "stage": value.get("stage"),
+            }
+        ).model_dump()
+    except ValidationError:
+        return None
+
+
+def _public_reasoning_entries(values) -> list[dict]:
+    if not isinstance(values, list):
+        return []
+    entries = []
+    remaining = MAX_REASONING_CHARACTERS
+    for value in values[:MAX_REASONING_ENTRIES]:
+        entry = _public_reasoning_entry(value, remaining)
+        if entry is not None:
+            entries.append(entry)
+            remaining -= len(entry["text"])
+    return entries
+
+
+class _ClarificationOption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(min_length=1, max_length=80)
+    value: str = Field(min_length=1, max_length=300)
+
+
+class ClarificationV4(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question_id: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_.:-]+$")
+    question: str = Field(min_length=1, max_length=300)
+    reason: str = Field(min_length=1, max_length=500)
+    options: list[_ClarificationOption] = Field(default_factory=list, max_length=3)
+    selection_mode: Literal["single", "multiple"]
+    max_selections: int = Field(ge=1, le=4, strict=True)
+    context_scope: Literal["personal", "scenario"]
+    context_revision: int = Field(ge=0, le=MAX_CONTEXT_REVISION, strict=True)
+    validation_token: str = Field(min_length=1, max_length=8192)
+
+    @model_validator(mode="after")
+    def validate_issued_shape(self):
+        if (self.selection_mode == "single" and self.max_selections != 1) or (
+            self.selection_mode == "multiple" and self.max_selections < 2
+        ):
+            raise ValueError("Invalid clarification selection bounds")
+        values = [item.value for item in self.options]
+        if len(set(values)) != len(values):
+            raise ValueError("Clarification choices must be distinct")
+        validate_clarification_answer(
+            {
+                "question_id": self.question_id,
+                "status": "unknown",
+                "selection_mode": self.selection_mode,
+                "max_selections": self.max_selections,
+                "context_scope": self.context_scope,
+                "context_revision": self.context_revision,
+                "allowed_values": values,
+                "validation_token": self.validation_token,
+            },
+            contract_version=4,
+        )
+        return self
+
+
 def _agent_error(runtime_config, exc: Exception):
     """Use the same diagnostic codes for JSON and streaming requests."""
+    if isinstance(exc, ModelOutputLimitError):
+        return _service_error(
+            runtime_config,
+            exc,
+            code="model_output_limit",
+            detail="模型輸出達到長度上限，請提高輸出預算後再測試"
+            if request.path.endswith("/admin/chat-test")
+            else "模型回覆因輸出長度限制而未完成，請縮小問題範圍後再試",
+            retryable=False,
+            status_code=502,
+        )
     if isinstance(exc, RAGUnavailableError):
         return _service_error(
             runtime_config,
@@ -363,7 +529,13 @@ def _agent_error(runtime_config, exc: Exception):
     )
 
 
-def _response_payload(result: AgentResult, session_id: str, was_anonymized: bool, runtime_config):
+def _response_payload(
+    result: AgentResult,
+    session_id: str,
+    was_anonymized: bool,
+    runtime_config,
+    req_obj: ChatRequest | None = None,
+):
     """Only publish metadata after the complete response passes the existing contract."""
     data = parse_agent_json_response(result.reply)
     if not isinstance(data, dict):
@@ -394,8 +566,69 @@ def _response_payload(result: AgentResult, session_id: str, was_anonymized: bool
         "interaction_mode": structured_response.interaction_mode,
         "clarifying_questions": structured_response.clarifying_questions,
     }
-    if result.guidance:
+    if req_obj is not None and req_obj.contract_version == 4:
+        guidance = result.guidance or {}
+        if guidance.get("contract_version") != 4:
+            raise AgentContractError("Invalid v4 response contract")
+        revision = req_obj.case_context.revision if req_obj.case_context else 0
+        returned_revision = guidance.get("context_revision", revision)
+        if (
+            isinstance(returned_revision, bool)
+            or not isinstance(returned_revision, int)
+            or returned_revision != revision
+        ):
+            raise AgentContractError("Response context revision does not match the request")
+        update = (
+            SummaryUpdate.model_validate(guidance["summary_update"])
+            if guidance.get("summary_update") is not None
+            else None
+        )
+        if update is not None and update.base_revision != revision:
+            raise AgentContractError("Summary update does not match the request revision")
+        if update is not None and req_obj.regenerate_from_summary:
+            raise AgentContractError("Regeneration must not replace the authoritative summary")
+        current_summary = req_obj.case_context.summary if req_obj.case_context else ""
+        if update is not None and update.summary == current_summary:
+            update = None
+        if update is not None and revision >= MAX_CONTEXT_REVISION:
+            raise AgentContractError("Summary revision cannot be advanced")
+        question = (
+            ClarificationV4.model_validate(guidance["clarification"])
+            if guidance.get("clarification") is not None
+            else None
+        )
+        if question is not None and question.context_revision != revision + int(update is not None):
+            raise AgentContractError("Clarification does not match the resulting context revision")
+        # v4 has one authoritative text summary and natural reply. Do not expose
+        # stale legacy fact/section fields or arbitrary agent-internal payloads.
+        payload.update(
+            contract_version=4,
+            context_revision=revision,
+            summary_update=update.model_dump() if update is not None else None,
+            clarification=question.model_dump() if question is not None else None,
+        )
+        payload.update(
+            {
+                key: guidance[key]
+                for key in ("execution", "analysis", "reasoning")
+                if key in guidance
+            }
+        )
+    elif result.guidance:
         payload.update(result.guidance)
+    if payload.get("contract_version") in (3, 4):
+        entries = payload.get("analysis", []) if runtime_config.pipeline["enable_analysis"] else []
+        if not isinstance(entries, list) or len(entries) > 4:
+            raise ValueError("Invalid analysis summary")
+        payload["analysis"] = [AnalysisEntry.model_validate(item).model_dump() for item in entries]
+        if len({entry["stage"] for entry in payload["analysis"]}) != len(entries):
+            raise ValueError("Duplicate analysis summary stage")
+    else:
+        payload.pop("analysis", None)
+    if payload.get("contract_version") == 4 and runtime_config.pipeline["enable_analysis"]:
+        payload["reasoning"] = _public_reasoning_entries(payload.get("reasoning", []))
+    else:
+        payload.pop("reasoning", None)
     if runtime_config.development_mode:
         payload["debug_tool_calls"] = result.tool_calls
     return payload
@@ -406,46 +639,139 @@ def _sse_event(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _prepare_agent_input(req_obj: ChatRequest, runtime_config) -> tuple[dict, bool]:
-    history = [{"role": msg.role, "content": msg.content} for msg in req_obj.history]
+def _prepare_agent_input(
+    req_obj: ChatRequest,
+    runtime_config,
+    diagnostics: dict | None = None,
+    *,
+    include_input_stages: bool = False,
+) -> tuple[dict, bool]:
+    original_history = [{"role": msg.role, "content": msg.content} for msg in req_obj.history]
+    history, history_counts = trim_request_history(original_history, runtime_config.pipeline)
+    trimmed_history = history
     message = req_obj.message
     was_anonymized = False
-    if runtime_config.enable_anonymization:
-        anon_result = anonymize(message)
-        message = anon_result.anonymized
-        was_anonymized = anon_result.was_modified
-        history = anonymize_messages(history)
+    mask_message = runtime_config.enable_anonymization and runtime_config.pipeline["mask_message"]
+    mask_case = runtime_config.enable_anonymization and runtime_config.pipeline["mask_case_context"]
+    pii = {
+        stage: {"enabled": enabled, "kinds": set(), "changed_values": 0}
+        for stage, enabled in (("message", mask_message), ("case_context", mask_case))
+    }
+
+    def clean_text(value, stage, case_limit=300):
+        nonlocal was_anonymized
+        if isinstance(value, str) and pii[stage]["enabled"]:
+            result = anonymize(value)
+            was_anonymized = was_anonymized or result.was_modified
+            pii[stage]["kinds"].update(result.detected_types)
+            pii[stage]["changed_values"] += int(result.was_modified)
+            return result.anonymized[:case_limit] if stage == "case_context" else result.anonymized
+        if isinstance(value, dict):
+            # Only case values carry user prose. Signed question metadata must
+            # remain byte-for-byte intact for its downstream signature check.
+            return {
+                key: clean_text(item, stage, SUMMARY_MAX_LENGTH if key == "summary" else case_limit)
+                if key not in {"validation_token", "question_id", "allowed_values"}
+                else item
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            cleaned = [clean_text(item, stage) for item in value]
+            if stage == "case_context" and all(isinstance(item, str) for item in cleaned):
+                # Distinct selections can contain different identifiers which
+                # redact to the same placeholder. Preserve their count and order
+                # without retaining any original identifying text.
+                used = set()
+                for index, item in enumerate(cleaned):
+                    if item in used:
+                        suffix_index = index + 1
+                        while True:
+                            suffix = f"（另一已遮罩值{suffix_index}）"
+                            distinct = item[: 300 - len(suffix)] + suffix
+                            if distinct not in used:
+                                break
+                            suffix_index += 1
+                        cleaned[index] = distinct
+                    used.add(cleaned[index])
+            return cleaned
+        return value
+
+    message = clean_text(message, "message")
+    history = [{**item, "content": clean_text(item["content"], "message")} for item in history]
     arguments = {
         "user_message": message,
         "history": history,
         "image_base64": req_obj.image_base64 if runtime_config.enable_image_upload else None,
-        "use_rag": req_obj.use_rag,
+        "use_rag": req_obj.use_rag and runtime_config.pipeline["enable_rag"],
+        "runtime_config": runtime_config,
     }
-    if req_obj.contract_version == 2:
-
-        def clean_case_text(value):
-            nonlocal was_anonymized
-            if isinstance(value, str):
-                result = anonymize(value)
-                was_anonymized = was_anonymized or result.was_modified
-                return result.anonymized
-            if isinstance(value, dict):
-                return {key: clean_case_text(item) for key, item in value.items()}
-            return value
-
-        # Case facts are always redacted at the outbound boundary, even when a
-        # legacy runtime toggle disables anonymization for the older contract.
+    if req_obj.contract_version in (2, 3, 4):
         arguments.update(
-            contract_version=2,
-            case_context=clean_case_text(
-                (req_obj.case_context or CaseContext()).model_dump(exclude_none=True)
+            contract_version=req_obj.contract_version,
+            case_context=clean_text(
+                (
+                    req_obj.case_context
+                    or CaseContext(schema_version={2: 1, 3: 2, 4: 3}[req_obj.contract_version])
+                ).model_dump(exclude_none=True),
+                "case_context",
             ),
-            clarification_answer=clean_case_text(
-                req_obj.clarification_answer.model_dump(exclude_none=True)
+            clarification_answer=clean_text(
+                req_obj.clarification_answer.model_dump(exclude_none=True), "case_context"
             )
             if req_obj.clarification_answer
             else None,
         )
+        if req_obj.contract_version == 4:
+            arguments["regenerate_from_summary"] = req_obj.regenerate_from_summary
+        if req_obj.contract_version >= 3 and req_obj.clarification_answer:
+            issued = validate_clarification_answer(
+                req_obj.clarification_answer.model_dump(exclude_none=True),
+                contract_version=req_obj.contract_version,
+            )
+            # A typed answer is verified before masking. The internal bounds
+            # prevent rechecking masked values against the original token's
+            # choices; the public request schema never accepts this argument.
+            arguments["clarification_constraints"] = {
+                key: issued[key]
+                for key in (
+                    "question_id",
+                    "fact_key",
+                    "selection_mode",
+                    "max_selections",
+                    "context_scope",
+                    "context_revision",
+                )
+                if key in issued
+            }
+    if diagnostics is not None:
+        diagnostics["history"] = history_counts
+        diagnostics["pii"] = {
+            stage: {**counts, "kinds": sorted(counts["kinds"])} for stage, counts in pii.items()
+        }
+        if include_input_stages:
+            original_summary = req_obj.case_context.summary if req_obj.case_context else ""
+            summary = arguments.get("case_context", {}).get("summary", "")
+            # Only the authenticated, non-persistent admin test opts into raw
+            # before/after views; regular chats never create these snapshots.
+            diagnostics["input_stages"] = {
+                "message": {
+                    "before": req_obj.message,
+                    "after": message,
+                    "changed": req_obj.message != message,
+                },
+                "history": {
+                    "before": original_history,
+                    "after_trim": trimmed_history,
+                    "after": history,
+                    "changed": original_history != history,
+                },
+                "summary": {
+                    "before": original_summary,
+                    "after": summary,
+                    "changed": original_summary != summary,
+                },
+            }
+        arguments["diagnostics"] = diagnostics
     return arguments, was_anonymized
 
 
@@ -469,6 +795,9 @@ def _stream_response(
             )
             sent_output = False
             current_phase: str | None = None
+            analysis_entries: list[dict] = []
+            reasoning_entries: list[dict] = []
+            reasoning_characters = 0
             timings: dict[str, float] = {}
             outcome = "cancelled"
 
@@ -511,9 +840,46 @@ def _stream_response(
                     await emit("guidance", snapshot)
                     await emit_progress({"phase": "guidance"})
 
+            async def emit_analysis(snapshot: dict):
+                nonlocal sent_output
+                if (
+                    req_obj.contract_version not in (3, 4)
+                    or not runtime_config.pipeline["enable_analysis"]
+                ):
+                    return
+                entry = AnalysisEntry.model_validate(snapshot).model_dump()
+                if len(analysis_entries) >= 4 or any(
+                    item["stage"] == entry["stage"] for item in analysis_entries
+                ):
+                    raise AgentContractError("Invalid analysis summary sequence")
+                analysis_entries.append(entry)
+                sent_output = True
+                await emit("analysis", entry)
+
+            async def emit_reasoning(snapshot: dict):
+                nonlocal sent_output, reasoning_characters
+                if (
+                    req_obj.contract_version != 4
+                    or not runtime_config.pipeline["enable_analysis"]
+                    or len(reasoning_entries) >= MAX_REASONING_ENTRIES
+                ):
+                    return
+                entry = _public_reasoning_entry(
+                    snapshot, MAX_REASONING_CHARACTERS - reasoning_characters
+                )
+                if entry is not None:
+                    reasoning_entries.append(entry)
+                    reasoning_characters += len(entry["text"])
+                    sent_output = True
+                    mark("first_reasoning_ready_ms")
+                    await emit("reasoning", entry)
+
             async def produce():
                 try:
-                    if runtime_config.enable_anonymization or req_obj.contract_version == 2:
+                    if runtime_config.enable_anonymization and (
+                        runtime_config.pipeline["mask_message"]
+                        or runtime_config.pipeline["mask_case_context"]
+                    ):
                         await emit_progress({"phase": "anonymizing"})
                     run_kwargs, was_anonymized = _prepare_agent_input(req_obj, runtime_config)
                     result = await get_agent().run(
@@ -521,6 +887,12 @@ def _stream_response(
                         on_reply_delta=emit_delta,
                         on_guidance=emit_guidance,
                         on_progress=emit_progress,
+                        on_analysis=emit_analysis,
+                        **(
+                            {"on_reasoning": emit_reasoning}
+                            if req_obj.contract_version == 4
+                            else {}
+                        ),
                     )
                 except Exception as exc:
                     error_response, status = _agent_error(runtime_config, exc)
@@ -528,8 +900,16 @@ def _stream_response(
                     try:
                         await emit_progress({"phase": "validating"})
                         payload = _response_payload(
-                            result, session_id, was_anonymized, runtime_config
+                            result, session_id, was_anonymized, runtime_config, req_obj
                         )
+                        if req_obj.contract_version in (3, 4) and analysis_entries:
+                            if payload.get("analysis") and payload["analysis"] != analysis_entries:
+                                raise AgentContractError(
+                                    "Analysis summary changed after publication"
+                                )
+                            payload["analysis"] = analysis_entries
+                        if req_obj.contract_version == 4 and reasoning_entries:
+                            payload["reasoning"] = reasoning_entries
                     except Exception as exc:
                         error_response, status = _retryable_error(runtime_config, exc)
                     else:
@@ -560,6 +940,8 @@ def _stream_response(
                             if event == "delta"
                             else "first_guidance_yield_ms"
                         )
+                    elif event == "reasoning":
+                        mark("first_reasoning_yield_ms")
                     elif event in {"done", "error"}:
                         outcome = event
                     yield _sse_event(event, payload)
@@ -613,7 +995,7 @@ def chat():
     except Exception as e:
         return jsonify({"detail": str(e)}), 400
 
-    runtime_config = get_runtime_config()
+    runtime_config = resolve_runtime_config(get_runtime_config())
     if runtime_config.maintenance_message:
         return (
             jsonify(
@@ -626,17 +1008,7 @@ def chat():
             503,
         )
     if req_obj.image_base64 and not runtime_config.enable_image_upload:
-        return (
-            jsonify(
-                {
-                    "code": "image_upload_disabled",
-                    "detail": "Image upload is disabled",
-                    "retryable": False,
-                }
-            ),
-            422,
-        )
-
+        return _image_upload_disabled_error()
     session_id = str(uuid.uuid4())
     if req_obj.stream:
         return _stream_response(
@@ -652,7 +1024,7 @@ def chat():
     except Exception as exc:
         return _agent_error(runtime_config, exc)
     try:
-        payload = _response_payload(result, session_id, was_anonymized, runtime_config)
+        payload = _response_payload(result, session_id, was_anonymized, runtime_config, req_obj)
     except Exception as exc:
         return _retryable_error(runtime_config, exc)
     return jsonify(payload)

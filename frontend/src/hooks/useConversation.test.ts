@@ -8,12 +8,14 @@ import {
   USER_MESSAGE_TOO_LONG_ERROR,
 } from "./conversationHistory";
 import { useConversation } from "./useConversation";
+import { toSummaryContext, type LegacyCaseContext } from "../services/caseFacts";
 
 vi.mock("../services/api", async () => {
   const actual = await vi.importActual<typeof import("../services/api")>("../services/api");
   return { ...actual, sendChat: vi.fn(), checkHealth: vi.fn() };
 });
 
+vi.mock("../services/privacyReview", () => ({ requestPrivacyReview: vi.fn(async request => request) }));
 vi.mock("../services/analytics", () => ({ hasAnalyticsConsent: () => true, trackAnalytics: vi.fn() }));
 
 const successfulResponse: ChatResponse = {
@@ -30,7 +32,7 @@ const successfulResponse: ChatResponse = {
 beforeEach(() => {
   window.localStorage.clear();
   vi.mocked(sendChat).mockReset();
-  vi.mocked(checkHealth).mockResolvedValue({ status: "ok", timestamp: "test", version: "test", environment: "test" });
+  vi.mocked(checkHealth).mockReset().mockResolvedValue({ status: "ok", timestamp: "test", version: "test", environment: "test" });
   vi.mocked(trackAnalytics).mockClear();
   vi.useFakeTimers();
 });
@@ -43,6 +45,172 @@ afterEach(() => {
 const v2Response = (revision: number, extra: Partial<ChatResponse> = {}): ChatResponse => ({ ...successfulResponse, contract_version: 2, facts_revision: revision, fact_updates: [], clarification: null, answer_sections: [], execution: { route: "direct_retrieval", model_calls: 1 }, ...extra });
 const v2Health = { status: "ok", timestamp: "test", version: "test", environment: "test", capabilities: { chat_contract_versions: [1, 2] } };
 
+describe("v3 conversation contracts", () => {
+  const v3Health = { ...v2Health, capabilities: { chat_contract_versions: [1, 2, 3] } };
+  const v3Response = (revision: number, extra: Partial<ChatResponse> = {}): ChatResponse => ({ ...v2Response(revision), contract_version: 3, analysis: [], ...extra });
+  it("selects v3 after health and sends multi-value facts without reducing them", async () => {
+    vi.mocked(checkHealth).mockResolvedValue(v3Health);
+    vi.mocked(sendChat).mockImplementation(async request => v3Response(request.case_context!.revision));
+    const { result } = renderHook(() => useConversation("v3-multi"));
+    await act(async () => { await Promise.resolve(); });
+    const clarificationAnswer = { question_id: "case.subject_role.0", fact_key: "subject_role" as const, status: "provided" as const, value: ["學生", "兼職員工"], selection_mode: "multiple" as const, max_selections: 2, validation_token: "signed", context_scope: "personal" as const };
+    await act(async () => { await result.current.sendMessage("學生、兼職員工", undefined, undefined, { answers: [], factsRevision: 0, clarificationAnswer }); });
+    expect(vi.mocked(sendChat).mock.calls[0][0]).toMatchObject({ contract_version: 3, case_context: { schema_version: 2, revision: 1, facts: { subject_role: { status: "provided", value: ["學生", "兼職員工"] } } }, clarification_answer: clarificationAnswer });
+    expect(result.current.caseFacts.facts.subject_role?.value).toEqual(["學生", "兼職員工"]);
+  });
+  it("keeps a third-person typed answer in history while preserving the personal summary", async () => {
+    const caseFacts: LegacyCaseContext = { schema_version: 2, revision: 1, facts: { subject_role: { status: "provided", value: "學生" } } };
+    vi.mocked(checkHealth).mockResolvedValue(v3Health);
+    vi.mocked(sendChat).mockResolvedValue(v3Response(1));
+    const { result } = renderHook(() => useConversation("v3-scenario"));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await result.current.saveCaseFacts(caseFacts); });
+    const clarificationAnswer = { question_id: "scenario.subject_role.4", fact_key: "subject_role" as const, status: "provided" as const, value: ["員工", "實習生"], selection_mode: "multiple" as const, max_selections: 2, validation_token: "signed-scenario", context_scope: "scenario" as const };
+    await act(async () => { await result.current.sendMessage("朋友是員工、實習生", undefined, undefined, { answers: [{ question: "朋友的身分？", answer: "員工、實習生" }], factsRevision: 1, clarificationAnswer }); });
+    expect(vi.mocked(sendChat).mock.calls[0][0]).toMatchObject({ contract_version: 3, case_context: caseFacts, clarification_answer: clarificationAnswer });
+    expect(result.current.caseFacts).toEqual(caseFacts);
+    expect(result.current.messages.at(-2)).toMatchObject({ role: "user", content: "朋友是員工、實習生", replyContext: { clarificationAnswer } });
+  });
+  it("blocks v2 fallback for saved arrays without rewriting or silently joining their values", async () => {
+    const caseFacts = { schema_version: 2, revision: 4, facts: { subject_role: { status: "provided", value: ["學生", "兼職員工"] } } };
+    localStorage.setItem("harass_bot_conversations", JSON.stringify([{ id: "v3-fallback", createdAt: 1, schemaVersion: 3, caseFacts, messages: [{ id: "u", role: "user", content: "原問題", timestamp: 1 }] }]));
+    vi.mocked(checkHealth).mockResolvedValue(v2Health);
+    const { result } = renderHook(() => useConversation("v3-fallback"));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.incompatibleSummary).toBe(true);
+    await act(async () => { await result.current.sendMessage("繼續"); });
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(result.current.caseFacts).toEqual(toSummaryContext(caseFacts as LegacyCaseContext));
+    expect(JSON.parse(localStorage.getItem("harass_bot_conversations")!)[0]).toMatchObject({ caseFacts: toSummaryContext(caseFacts as LegacyCaseContext), legacyCaseFacts: caseFacts });
+  });
+  it("streams stage explanations but persists only final validated analysis", async () => {
+    vi.mocked(checkHealth).mockResolvedValue(v3Health);
+    const preview = { stage: "understanding" as const, summary: "正在整理", facts: [], source_labels: [], limitations: [] };
+    const final = { ...preview, summary: "已依提供資訊整理", facts: ["學生"] };
+    vi.mocked(sendChat).mockImplementation(async (_request, _signal, _delta, _guidance, _progress, analysis) => { analysis?.(preview); return v3Response(0, { analysis: [final] }); });
+    const { result } = renderHook(() => useConversation("v3-analysis"));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await result.current.sendMessage("我是學生"); });
+    expect(result.current.messages.at(-1)?.analysis).toEqual([final]);
+    expect(localStorage.getItem("harass_bot_conversations")).toContain("已依提供資訊整理");
+    expect(localStorage.getItem("harass_bot_conversations")).not.toContain("正在整理");
+  });
+  it("does not automatically replay a request after analysis has become visible", async () => {
+    vi.mocked(checkHealth).mockResolvedValue(v3Health);
+    const entry = { stage: "understanding" as const, summary: "正在整理已知條件", facts: [], source_labels: [], limitations: [] };
+    vi.mocked(sendChat).mockImplementation(async (_request, _signal, _delta, _guidance, _progress, analysis) => { analysis?.(entry); throw new ApiError(502, "中斷", undefined, true); });
+    const { result } = renderHook(() => useConversation("v3-analysis-error"));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await result.current.sendMessage("合成情境"); });
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(result.current.messages.at(-1)).toMatchObject({ isError: true, analysis: [entry] });
+  });
+});
+
+describe("backend connection recovery", () => {
+  it("checks the latest handshake when an older send callback survives a reconnect", async () => {
+    vi.mocked(checkHealth).mockResolvedValueOnce(v2Health);
+    const { result } = renderHook(() => useConversation("old-send-callback"));
+    await act(async () => { await Promise.resolve(); });
+    const oldSend = result.current.sendMessage;
+    let resolveHealth!: (value: typeof v2Health) => void;
+    vi.mocked(checkHealth).mockReturnValueOnce(new Promise(resolve => { resolveHealth = resolve; }));
+    act(() => { void result.current.reconnectBackend(); });
+    await act(async () => { await oldSend("圖片轉換後才送出"); });
+    expect(sendChat).not.toHaveBeenCalled();
+    await act(async () => { resolveHealth({ ...v2Health, capabilities: { chat_contract_versions: [1, 2, 3, 4] } }); });
+    vi.mocked(sendChat).mockResolvedValueOnce({ ...successfulResponse, contract_version: 4, context_revision: 0, summary_update: null, clarification: null, analysis: [], execution: { route: "direct_retrieval", model_calls: 1 } });
+    await act(async () => { await oldSend("圖片轉換後才送出"); });
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendChat).mock.calls[0][0]).toMatchObject({ contract_version: 4, case_context: { schema_version: 3 } });
+  });
+  it("blocks empty sessions after failed health and during reconnect without replaying a queued send", async () => {
+    vi.mocked(checkHealth).mockRejectedValueOnce(new Error("offline"));
+    const { result } = renderHook(() => useConversation("empty-offline"));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await result.current.sendMessage("第一個問題"); });
+    expect(sendChat).not.toHaveBeenCalled();
+    let resolveHealth!: (value: typeof v2Health) => void;
+    vi.mocked(checkHealth).mockReturnValueOnce(new Promise(resolve => { resolveHealth = resolve; }));
+    act(() => { void result.current.reconnectBackend(); });
+    await act(async () => { await result.current.sendMessage("第一個問題"); });
+    expect(sendChat).not.toHaveBeenCalled();
+    await act(async () => { resolveHealth(v2Health); });
+    expect(result.current.isBackendConnected).toBe(true);
+    expect(result.current.messages).toEqual([]);
+    expect(sendChat).not.toHaveBeenCalled();
+  });
+  it.each([{ versions: [] }, { versions: [5] }])("does not silently select v1 when an explicit capabilities list has no supported versions: $versions", async ({ versions }) => {
+    vi.mocked(checkHealth).mockResolvedValue({ ...v2Health, capabilities: { chat_contract_versions: versions } });
+    const { result } = renderHook(() => useConversation("unsupported-health"));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.isBackendConnected).toBe(false);
+    await act(async () => { await result.current.sendMessage("第一個問題"); });
+    expect(sendChat).not.toHaveBeenCalled();
+  });
+  it.each([undefined, 2, 3] as const)("rejects a v4 response mismatch with version %s without retry or summary updates", async version => {
+    vi.mocked(checkHealth).mockResolvedValue({ ...v2Health, capabilities: { chat_contract_versions: [1, 2, 3, 4] } });
+    vi.mocked(sendChat).mockResolvedValue({ ...v2Response(0), contract_version: version, reply: "不應成為已完成回覆", analysis: [], fact_updates: [{ fact_key: "other_role", status: "provided", value: "主管", kind: "confirmation", evidence: "合成資料" }] });
+    const { result } = renderHook(() => useConversation("contract-mismatch"));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await result.current.sendMessage("第一個問題"); });
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(result.current.messages.at(-1)).toMatchObject({ isError: true });
+    expect(result.current.messages.at(-1)?.content).not.toContain("不應成為已完成回覆");
+    expect(result.current.caseFacts).toMatchObject({ revision: 0, summary: "", facts: {} });
+  });
+  it("preserves a saved summary through a failed health check and reconnects without replaying chat", async () => {
+    const facts = { schema_version: 1, revision: 3, facts: { other_role: { status: "provided", value: "同事" } } };
+    localStorage.setItem("harass_bot_conversations", JSON.stringify([{ id: "reconnect", createdAt: 1, schemaVersion: 2, caseFacts: facts, messages: [{ id: "u", role: "user", content: "原本的問題", timestamp: 1 }] }]));
+    vi.mocked(checkHealth).mockRejectedValueOnce(new ApiError(404, "Not found"));
+    const { result } = renderHook(() => useConversation("reconnect"));
+    expect(result.current.isBackendConnected).toBeNull();
+    expect(result.current.summaryRequiresConnection).toBe(true);
+    expect(result.current.incompatibleSummary).toBe(false);
+    await act(async () => { await result.current.sendMessage("繼續原本的問題"); });
+    expect(result.current.isBackendConnected).toBe(false);
+    expect(result.current.summaryRequiresConnection).toBe(true);
+    expect(result.current.incompatibleSummary).toBe(false);
+    expect(result.current.caseFacts).toEqual(toSummaryContext(facts as LegacyCaseContext));
+    expect(sendChat).not.toHaveBeenCalled();
+
+    vi.mocked(checkHealth).mockResolvedValueOnce({ ...v2Health, capabilities: { chat_contract_versions: [1, 2, 3, 4] } });
+    await act(async () => { await result.current.reconnectBackend(); });
+    expect(result.current.isBackendConnected).toBe(true);
+    expect(result.current.contractV2).toBe(true);
+    expect(result.current.summaryRequiresConnection).toBe(false);
+    expect(result.current.incompatibleSummary).toBe(false);
+    expect(sendChat).not.toHaveBeenCalled();
+    vi.mocked(sendChat).mockResolvedValueOnce({ ...successfulResponse, contract_version: 4, context_revision: 3, summary_update: null, clarification: null, analysis: [], execution: { route: "direct_retrieval", model_calls: 1 } });
+    await act(async () => { await result.current.sendMessage("繼續原本的問題"); });
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendChat).mock.calls[0][0]).toMatchObject({ contract_version: 4, case_context: toSummaryContext(facts as LegacyCaseContext) });
+  });
+
+  it("aborts a health check when the conversation unmounts", async () => {
+    vi.mocked(checkHealth).mockReturnValueOnce(new Promise(() => {}));
+    const { unmount } = renderHook(() => useConversation("unmount-health"));
+    const signal = vi.mocked(checkHealth).mock.calls[0][0];
+    expect(signal?.aborted).toBe(false);
+    unmount();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("aborts the previous check and ignores its late response after reconnection", async () => {
+    let resolveOld!: (value: typeof v2Health) => void;
+    vi.mocked(checkHealth).mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
+    const { result } = renderHook(() => useConversation("stale-health"));
+    const signal = vi.mocked(checkHealth).mock.calls[0][0];
+    vi.mocked(checkHealth).mockResolvedValueOnce(v2Health);
+    await act(async () => { await result.current.reconnectBackend(); });
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { resolveOld({ ...v2Health, capabilities: { chat_contract_versions: [1] } }); });
+    expect(result.current.isBackendConnected).toBe(true);
+    expect(result.current.contractV2).toBe(true);
+    expect(sendChat).not.toHaveBeenCalled();
+  });
+});
+
 describe("local case facts and request ownership", () => {
   it("regenerates the original user request after two typed answers and repeated summary edits", async () => {
     vi.mocked(checkHealth).mockResolvedValue(v2Health);
@@ -53,7 +221,7 @@ describe("local case facts and request ownership", () => {
     const originId = result.current.messages[0].id;
     await act(async () => { await result.current.sendMessage("對方是誰？\n主管", undefined, undefined, { answers: [{ question: "對方是誰？", answer: "主管" }], factsRevision: 0, clarificationAnswer: { question_id: "case.other_role.0", fact_key: "other_role", status: "provided", value: "主管" } }); });
     await act(async () => { await result.current.sendMessage("與工作有關？\n是", undefined, undefined, { answers: [{ question: "與工作有關？", answer: "是" }], factsRevision: 1, clarificationAnswer: { question_id: "case.work_related.1", fact_key: "work_related", status: "provided", value: "是" } }); });
-    await act(async () => { await result.current.saveCaseFacts({ ...result.current.caseFacts, facts: { ...result.current.caseFacts.facts, other_role: { status: "provided", value: "同事" } } }, true); });
+    await act(async () => { await result.current.saveCaseFacts({ schema_version: 1, revision: result.current.caseFacts.revision, facts: { ...result.current.caseFacts.facts, other_role: { status: "provided", value: "同事" } } }, true); });
     expect(vi.mocked(sendChat).mock.calls[3][0].message).toBe("我想知道如何申訴");
     expect(result.current.messages.filter(message => message.role === "user").at(-1)).toMatchObject({ requestKind: "regeneration", originRequestId: originId });
     await act(async () => { await result.current.saveCaseFacts(result.current.caseFacts, true); });
@@ -79,24 +247,27 @@ describe("local case facts and request ownership", () => {
     expect(result.current.incompatibleSummary).toBe(true);
     await act(async () => { await result.current.sendMessage("接續原本的問題"); });
     expect(sendChat).not.toHaveBeenCalled();
-    expect(result.current.caseFacts).toEqual(facts);
+    expect(result.current.caseFacts).toEqual(toSummaryContext(facts as LegacyCaseContext));
     act(() => { result.current.createNewSession(); });
     expect(result.current.incompatibleSummary).toBe(false);
     await act(async () => { await result.current.sendMessage("新的問題"); });
     expect(sendChat).toHaveBeenCalledOnce();
     expect(vi.mocked(sendChat).mock.calls[0][0]).not.toHaveProperty("contract_version");
-    expect(result.current.sessions.find(session => session.id === "v2-existing")?.caseFacts).toEqual(facts);
+    expect(result.current.sessions.find(session => session.id === "v2-existing")?.caseFacts).toEqual(toSummaryContext(facts as LegacyCaseContext));
   });
-  it("does not send v2 fields before a completed capability handshake", async () => {
+  it("waits for a completed capability handshake even for a new empty session", async () => {
     let resolveHealth!: (value: typeof v2Health) => void;
     vi.mocked(checkHealth).mockReturnValueOnce(new Promise(resolve => { resolveHealth = resolve; }));
-    vi.mocked(sendChat).mockResolvedValue(successfulResponse);
+    vi.mocked(sendChat).mockResolvedValue(v2Response(0));
     const { result } = renderHook(() => useConversation("handshake"));
     await act(async () => { await result.current.sendMessage("第一個問題"); });
-    expect(vi.mocked(sendChat).mock.calls[0][0]).not.toHaveProperty("contract_version");
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(result.current.messages).toEqual([]);
     await act(async () => { resolveHealth(v2Health); });
-    await act(async () => { await result.current.sendMessage("下一個問題"); });
-    expect(vi.mocked(sendChat).mock.calls[1][0]).toMatchObject({ contract_version: 2, case_context: { schema_version: 1, revision: 0, facts: {} } });
+    expect(sendChat).not.toHaveBeenCalled();
+    await act(async () => { await result.current.sendMessage("第一個問題"); });
+    expect(sendChat).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendChat).mock.calls[0][0]).toMatchObject({ contract_version: 2, case_context: { schema_version: 1, revision: 0, facts: {} } });
   });
 
   it("applies explicit updates only on done and marks conflicting information pending", async () => {
@@ -104,8 +275,8 @@ describe("local case facts and request ownership", () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("v2-done"));
     await act(async () => { await Promise.resolve(); });
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("我是學生"); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("我是學生"); await Promise.resolve(); });
     act(() => pending.delta("學生"));
     expect(result.current.caseFacts.facts).toEqual({});
     await act(async () => {
@@ -131,11 +302,11 @@ describe("local case facts and request ownership", () => {
     });
     const { result } = renderHook(() => useConversation("replace"));
     await act(async () => { await Promise.resolve(); });
-    let oldRequest!: Promise<void>;
-    act(() => { oldRequest = result.current.sendMessage("原本的問題"); });
+    let oldRequest!: Promise<void | boolean>;
+    await act(async () => { oldRequest = result.current.sendMessage("原本的問題"); await Promise.resolve(); });
     const replacement = deferredResponse();
-    let newRequest!: Promise<void>;
-    act(() => { newRequest = result.current.saveCaseFacts({ schema_version: 1, revision: 0, facts: { other_role: { status: "provided", value: "同事" } } }, true); });
+    let newRequest!: Promise<void | boolean>;
+    await act(async () => { newRequest = result.current.saveCaseFacts({ schema_version: 1, revision: 0, facts: { other_role: { status: "provided", value: "同事" } } }, true); await Promise.resolve(); });
     expect(vi.mocked(sendChat).mock.calls[1][0].case_context).toMatchObject({ revision: 1, facts: { other_role: { value: "同事" } } });
     act(() => replacement.delta("新的回覆"));
     await act(async () => { resolveOld(v2Response(0)); await oldRequest; });
@@ -165,6 +336,7 @@ describe("local case facts and request ownership", () => {
   it("surfaces storage failure without discarding messages", async () => {
     vi.mocked(sendChat).mockResolvedValue(successfulResponse);
     const { result } = renderHook(() => useConversation("full"));
+    await act(async () => { await Promise.resolve(); });
     vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new DOMException("Full", "QuotaExceededError"); });
     await act(async () => { await result.current.sendMessage("留在分頁的問題"); });
     expect(result.current.storageIssue).toBe("unavailable");
@@ -180,10 +352,12 @@ describe("useConversation cancellation", () => {
       })
     );
     const { result } = renderHook(() => useConversation("test-session"));
+    await act(async () => { await Promise.resolve(); });
 
-    let cancelledRequest!: Promise<void>;
-    act(() => {
+    let cancelledRequest!: Promise<void | boolean>;
+    await act(async () => {
       cancelledRequest = result.current.sendMessage("第一個問題");
+      await Promise.resolve();
     });
     act(() => {
       result.current.stopCurrentResponse();
@@ -195,9 +369,10 @@ describe("useConversation cancellation", () => {
     expect(result.current.messages.at(-1)?.isCancelled).toBe(true);
 
     vi.mocked(sendChat).mockResolvedValueOnce(successfulResponse);
-    let nextRequest!: Promise<void>;
-    act(() => {
+    let nextRequest!: Promise<void | boolean>;
+    await act(async () => {
       nextRequest = result.current.sendMessage("下一個問題");
+      await Promise.resolve();
     });
 
     expect(vi.mocked(sendChat).mock.calls[1]?.[0].history).toEqual([
@@ -212,52 +387,33 @@ describe("useConversation cancellation", () => {
 });
 
 describe("useConversation image requests", () => {
-  it("does not orphan an image-only assistant in the next request history", async () => {
-    vi.mocked(sendChat).mockResolvedValueOnce(successfulResponse);
+  it("rejects a preview URL without image data and leaves history unchanged", async () => {
     const { result } = renderHook(() => useConversation("image-session"));
-
-    let request!: Promise<void>;
-    act(() => {
-      request = result.current.sendMessage("", "data:image/png;base64,AAAA");
-    });
-
-    expect(vi.mocked(sendChat).mock.calls[0]?.[0]).toMatchObject({
-      message: "",
-      history: [],
-      image_base64: "data:image/png;base64,AAAA",
-    });
-
-    await act(async () => {
-      await vi.runAllTimersAsync();
-      await request;
-    });
-
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { expect(await result.current.sendMessage("文字", undefined, "blob:missing")).toBe(false); });
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.error).toContain("圖片資料不完整");
     vi.mocked(sendChat).mockResolvedValueOnce(successfulResponse);
-    let nextRequest!: Promise<void>;
-    act(() => {
-      nextRequest = result.current.sendMessage("圖片之後的問題");
-    });
-
-    expect(vi.mocked(sendChat).mock.calls[1]?.[0].history).toEqual([]);
-
-    await act(async () => {
-      await vi.runAllTimersAsync();
-      await nextRequest;
-    });
+    await act(async () => { await result.current.sendMessage("之後的文字問題"); });
+    expect(vi.mocked(sendChat).mock.calls[0][0].history).toEqual([]);
   });
 });
 
 describe("useConversation quoted replies", () => {
-  it("persists reply presentation while sending complete plain-text context to the API", async () => {
+  it("persists only approved plain-text replies, not the original unreviewed presentation metadata", async () => {
     vi.mocked(sendChat).mockResolvedValue(successfulResponse);
     const { result, unmount } = renderHook(() => useConversation("reply-session"));
+    await act(async () => { await Promise.resolve(); });
     const content = "事情發生在哪裡？\n在學校";
     const replyContext = { answers: [{ question: "事情發生在哪裡？", answer: "在學校" }] };
-    let request!: Promise<void>;
-    act(() => {
+    let request!: Promise<void | boolean>;
+    await act(async () => {
       request = result.current.sendMessage(content, undefined, undefined, replyContext);
+      await Promise.resolve();
     });
-    expect(result.current.messages[0]).toMatchObject({ content, replyContext });
+    expect(result.current.messages[0]).toMatchObject({ content });
+    expect(result.current.messages[0]).not.toHaveProperty("replyContext");
     expect(vi.mocked(sendChat).mock.calls[0][0].message).toBe(content);
     expect(vi.mocked(sendChat).mock.calls[0][0]).not.toHaveProperty("replyContext");
     await act(async () => {
@@ -267,9 +423,12 @@ describe("useConversation quoted replies", () => {
     unmount();
 
     const restored = renderHook(() => useConversation("reply-session"));
-    expect(restored.result.current.messages[0]).toMatchObject({ content, replyContext });
-    act(() => {
+    await act(async () => { await Promise.resolve(); });
+    expect(restored.result.current.messages[0]).toMatchObject({ content });
+    expect(restored.result.current.messages[0]).not.toHaveProperty("replyContext");
+    await act(async () => {
       request = restored.result.current.sendMessage("下一步呢？");
+      await Promise.resolve();
     });
     expect(vi.mocked(sendChat).mock.calls[1][0].history[0]).toEqual({ role: "user", content });
     expect(restored.result.current.messages.at(-1)).not.toHaveProperty("replyContext");
@@ -287,10 +446,12 @@ describe("useConversation retries", () => {
       .mockRejectedValueOnce(new ApiError(502, "Bad gateway", "暫時錯誤", true))
       .mockResolvedValueOnce(successfulResponse);
     const { result } = renderHook(() => useConversation("retry-session"));
+    await act(async () => { await Promise.resolve(); });
 
-    let request!: Promise<void>;
-    act(() => {
+    let request!: Promise<void | boolean>;
+    await act(async () => {
       request = result.current.sendMessage("請重試");
+      await Promise.resolve();
     });
 
     await act(async () => {
@@ -310,6 +471,7 @@ describe("useConversation retries", () => {
       new ApiError(400, "Bad request", "請求無效", false),
     );
     const { result } = renderHook(() => useConversation("permanent-error-session"));
+    await act(async () => { await Promise.resolve(); });
 
     await act(async () => {
       await result.current.sendMessage("無效請求");
@@ -328,10 +490,12 @@ describe("useConversation retries", () => {
       new ApiError(429, "Too many requests", "請稍後再試", true),
     );
     const { result } = renderHook(() => useConversation("rate-limit-session"));
+    await act(async () => { await Promise.resolve(); });
 
-    let request!: Promise<void>;
-    act(() => {
+    let request!: Promise<void | boolean>;
+    await act(async () => {
       request = result.current.sendMessage("新的問題");
+      await Promise.resolve();
     });
 
     await act(async () => {
@@ -352,6 +516,7 @@ describe("useConversation message limits", () => {
     const boundary = "x".repeat(MAX_USER_MESSAGE_CHARACTERS);
     const overflow = `${boundary}x`;
     const { result } = renderHook(() => useConversation("message-limit-session"));
+    await act(async () => { await Promise.resolve(); });
 
     await act(async () => {
       await result.current.sendMessage(overflow);
@@ -362,9 +527,10 @@ describe("useConversation message limits", () => {
     expect(result.current.messages).toEqual([]);
 
     vi.mocked(sendChat).mockResolvedValueOnce(successfulResponse);
-    let request!: Promise<void>;
-    act(() => {
+    let request!: Promise<void | boolean>;
+    await act(async () => {
       request = result.current.sendMessage(boundary);
+      await Promise.resolve();
     });
 
     expect(vi.mocked(sendChat).mock.calls[0]?.[0].message).toBe(boundary);
@@ -402,8 +568,9 @@ describe("useConversation actual progress", () => {
   it("changes phases only on observed events, without manufacturing text or advancing with time", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("progress-session"));
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("請幫我了解"); });
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("請幫我了解"); await Promise.resolve(); });
     expect(result.current.retryStatus).toBe("正在等待伺服器回應");
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages.at(-1)).toMatchObject({ content: "", processingTrace: { outcome: "running", steps: [{ phase: "connecting", attempt: 0 }] } });
@@ -441,7 +608,8 @@ describe("useConversation actual progress", () => {
     });
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("progress-retry-session"));
-    let request!: Promise<void>;
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
     await act(async () => { request = result.current.sendMessage("請重試"); await Promise.resolve(); });
     expect(result.current.retryStatus).toBe("伺服器回傳錯誤，正在重試中");
     expect(result.current.messages).toHaveLength(2);
@@ -461,8 +629,9 @@ describe("useConversation actual progress", () => {
   it("clears progress on stop and ignores late callbacks", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("progress-stop-session"));
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("先停下"); });
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("先停下"); await Promise.resolve(); });
     act(() => pending.progress({ phase: "retrieving", elapsed_ms: 70 }));
     await act(async () => { result.current.stopCurrentResponse(); await request; });
     act(() => pending.progress({ phase: "generating", elapsed_ms: 80 }));
@@ -477,8 +646,9 @@ describe("useConversation streamed replies", () => {
   it("updates transient guidance snapshots before completion and only persists final validated metadata", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("guidance-session"));
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("我需要幫忙"); });
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("我需要幫忙"); await Promise.resolve(); });
     act(() => pending.delta("我"));
     expect(result.current.messages.at(-1)?.content).toBe("我");
     const first: ChatGuidance = { interaction_mode: "clarify", clarifying_questions: ["事情"] };
@@ -499,8 +669,9 @@ describe("useConversation streamed replies", () => {
   it("discards guidance and never retries after visible guidance even without reply text", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("guidance-error-session"));
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("我需要幫忙"); });
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("我需要幫忙"); await Promise.resolve(); });
     act(() => pending.guidance({ interaction_mode: "answer", suggested_replies: ["了解"] }));
     expect(result.current.messages.at(-1)?.streamingGuidance?.suggested_replies).toEqual(["了解"]);
     await act(async () => {
@@ -515,9 +686,10 @@ describe("useConversation streamed replies", () => {
   it("updates one transient bubble, persists only done, and applies metadata afterward", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("stream-session"));
+    await act(async () => { await Promise.resolve(); });
     const storageWrite = vi.spyOn(localStorage, "setItem");
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("我需要幫忙"); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("我需要幫忙"); await Promise.resolve(); });
     storageWrite.mockClear();
     act(() => pending.delta("我會"));
     const bubbleId = result.current.messages.at(-1)?.id;
@@ -548,8 +720,9 @@ describe("useConversation streamed replies", () => {
   it("never retries after visible text and excludes incomplete content after reload", async () => {
     const pending = deferredResponse();
     const { result, unmount } = renderHook(() => useConversation("interrupted-session"));
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("第一個問題"); });
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("第一個問題"); await Promise.resolve(); });
     act(() => pending.delta("只收到一半"));
     await act(async () => {
       pending.reject(new ApiError(503, "upstream failed", "請稍後再試", true));
@@ -563,6 +736,7 @@ describe("useConversation streamed replies", () => {
     });
     unmount();
     const restored = renderHook(() => useConversation("interrupted-session"));
+    await act(async () => { await Promise.resolve(); });
     expect(restored.result.current.messages.at(-1)?.isError).toBe(true);
     vi.mocked(sendChat).mockResolvedValueOnce(successfulResponse);
     await act(async () => { await restored.result.current.sendMessage("下一個問題"); });
@@ -572,8 +746,9 @@ describe("useConversation streamed replies", () => {
   it("keeps partial text when stopped and does not add a duplicate assistant bubble", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("cancel-stream-session"));
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("請說明"); });
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("請說明"); await Promise.resolve(); });
     act(() => pending.delta("這是已經收到的文字"));
     act(() => pending.guidance({ interaction_mode: "clarify", clarifying_questions: ["事情發生在"] }));
     const id = result.current.messages.at(-1)?.id;
@@ -591,7 +766,8 @@ describe("useConversation streamed replies", () => {
   it("does not resume a retry after the user stops during its delay", async () => {
     vi.mocked(sendChat).mockRejectedValueOnce(new ApiError(502, "retry", "", true));
     const { result } = renderHook(() => useConversation("retry-stop-session"));
-    let request!: Promise<void>;
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
     await act(async () => { request = result.current.sendMessage("第一個問題"); await Promise.resolve(); });
     expect(result.current.retryStatus).toBe("伺服器回傳錯誤，正在重試中");
     await act(async () => { result.current.stopCurrentResponse(); await request; });
@@ -603,8 +779,9 @@ describe("useConversation streamed replies", () => {
   it("keeps in-flight text and metadata in their original session when switching", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("original-session"));
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("原本的問題"); });
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("原本的問題"); await Promise.resolve(); });
     act(() => pending.delta("原本的回覆"));
     act(() => pending.guidance({ interaction_mode: "answer", suggested_replies: ["原本"] }));
     let otherId!: string;
@@ -629,8 +806,9 @@ describe("useConversation streamed replies", () => {
   it("does not restore a cleared turn when its stream is interrupted", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("clear-stream-session"));
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("請清除我"); });
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("請清除我"); await Promise.resolve(); });
     act(() => pending.delta("部分內容"));
     await act(async () => { result.current.clearCurrentSession(); await request; });
     expect(result.current.messages).toEqual([]);
@@ -643,8 +821,9 @@ describe("chat analytics integration", () => {
   it("records streamed text and completion once without sending content or session IDs", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("private-session-id"));
-    let request!: Promise<void>;
-    act(() => { request = result.current.sendMessage("private-user-text"); });
+    await act(async () => { await Promise.resolve(); });
+    let request!: Promise<void | boolean>;
+    await act(async () => { request = result.current.sendMessage("private-user-text"); await Promise.resolve(); });
     act(() => pending.delta("private-reply"));
     act(() => pending.delta("private-reply-part-two"));
     await act(async () => { pending.resolve(successfulResponse); await request; });

@@ -8,10 +8,12 @@ import {
   getScenarioSkills,
   updateRuntimeConfig,
   updateScenarioSkill,
+  runAdminChatTest,
   type RuntimeConfig,
   type ScenarioSkill,
 } from "../services/api";
 import AdminPanel from "./AdminPanel";
+import PrivacyReviewDialog from "./PrivacyReviewDialog";
 
 vi.mock("../services/api", async () => {
   const actual = await vi.importActual<typeof import("../services/api")>("../services/api");
@@ -22,6 +24,7 @@ vi.mock("../services/api", async () => {
     deleteScenarioSkill: vi.fn(),
     updateRuntimeConfig: vi.fn(),
     updateScenarioSkill: vi.fn(),
+    runAdminChatTest: vi.fn(),
   };
 });
 
@@ -49,6 +52,7 @@ beforeEach(() => {
   vi.mocked(updateRuntimeConfig).mockReset();
   vi.mocked(updateScenarioSkill).mockReset().mockImplementation(async (_token, id, skill) => ({ ...skill, id }));
   vi.mocked(deleteScenarioSkill).mockReset().mockResolvedValue();
+  vi.mocked(runAdminChatTest).mockReset();
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -164,6 +168,100 @@ describe("AdminPanel runtime config", () => {
     fireEvent.click(screen.getByRole("button", { name: /驗證並進入/ }));
     return screen.findByLabelText("維護訊息");
   }
+
+  it("saves the manual review and image switches independently and refreshes the active client after save", async () => {
+    const changed = vi.fn();
+    vi.mocked(updateRuntimeConfig).mockImplementation(async (_token, update) => ({ ...runtimeConfig, ...update, pipeline: runtimeConfig.pipeline }));
+    render(<AdminPanel isOpen onClose={vi.fn()} onRuntimeConfigChanged={changed} />);
+    fireEvent.change(screen.getByPlaceholderText("輸入 ADMIN_API_KEY"), { target: { value: "admin-token" } });
+    fireEvent.click(screen.getByRole("button", { name: /驗證並進入/ }));
+    const review = await screen.findByRole("checkbox", { name: "送出前遮罩確認" });
+    const images = screen.getByRole("checkbox", { name: "允許圖片上傳" });
+    expect(review).toBeChecked(); expect(images).toBeChecked();
+    fireEvent.click(review);
+    expect(updateRuntimeConfig).not.toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(updateRuntimeConfig).toHaveBeenLastCalledWith("admin-token", expect.objectContaining({ enable_client_privacy_review: false, enable_image_upload: true, enable_anonymization: true }));
+    expect(review).not.toBeChecked();
+    fireEvent.click(review); fireEvent.click(images);
+    fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(2));
+    expect(updateRuntimeConfig).toHaveBeenLastCalledWith("admin-token", expect.objectContaining({ enable_client_privacy_review: true, enable_image_upload: false, enable_anonymization: true }));
+  });
+
+  it("runs the real automatic preparation path in admin diagnostics when manual review is disabled", async () => {
+    vi.mocked(getRuntimeConfig).mockResolvedValue({ ...runtimeConfig, enable_client_privacy_review: false });
+    vi.mocked(runAdminChatTest).mockResolvedValue({ response: { reply: "合成診斷回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, interaction_mode: "answer", clarifying_questions: [], suggested_replies: [], action_buttons: [] }, diagnostics: {} });
+    await openSystemSettings(); render(<PrivacyReviewDialog />);
+    fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "synthetic@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
+    expect(await screen.findByText("合成診斷回覆")).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "確認即將送出的內容" })).not.toBeInTheDocument();
+    expect(runAdminChatTest).toHaveBeenCalledWith("admin-token", expect.objectContaining({ message: "[電子郵件]" }), expect.objectContaining({ enable_client_privacy_review: false }), expect.any(AbortSignal));
+    expect(updateRuntimeConfig).not.toHaveBeenCalled();
+  });
+
+  it("loads and saves persistent pipeline settings only when the administrator saves", async () => {
+    vi.mocked(updateRuntimeConfig).mockResolvedValueOnce(runtimeConfig);
+    await openSystemSettings();
+    expect(screen.getByRole("checkbox", { name: "精簡對話歷史" })).toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: "精簡對話歷史" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "遮罩檢索查詢" }));
+    fireEvent.change(screen.getByLabelText("內容處理方式"), { target: { value: "annotate" } });
+    expect(updateRuntimeConfig).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+    await waitFor(() => expect(updateRuntimeConfig).toHaveBeenCalledWith("admin-token", expect.objectContaining({ pipeline: expect.objectContaining({ trim_history: false, mask_retrieval_query: false, content_policy: "annotate", enable_rag: true, history_max_messages: 40 }) })));
+  });
+
+  it("runs temporary overrides without saving config or storing test messages", async () => {
+    vi.mocked(runAdminChatTest).mockResolvedValue({ response: { reply: "合成診斷回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, interaction_mode: "answer", clarifying_questions: [], suggested_replies: [], action_buttons: [] }, diagnostics: { history: { removed_messages: 2 }, pii: { message: { changed_values: 1 } } } });
+    await openSystemSettings();
+    render(<PrivacyReviewDialog />);
+    fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
+    expect(screen.queryByRole("button", { name: "儲存變更" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "synthetic-private-message" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "精簡對話歷史" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "後端 PII 遮罩（第二層）" }));
+    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
+    expect(runAdminChatTest).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "確認並送出" }));
+    expect(await screen.findByText("合成診斷回覆")).toBeVisible();
+    expect(runAdminChatTest).toHaveBeenCalledWith("admin-token", { message: "synthetic-private-message", history: [], use_rag: true, contract_version: 4, case_context: { schema_version: 3, revision: 0, facts: {}, summary: "", summary_origin: "user" } }, expect.objectContaining({ enable_anonymization: false, pipeline: expect.objectContaining({ trim_history: false }) }), expect.any(AbortSignal));
+    expect(updateRuntimeConfig).not.toHaveBeenCalled();
+    expect(JSON.stringify(localStorage)).not.toContain("synthetic-private-message");
+    fireEvent.click(screen.getByRole("button", { name: /系統設定/ }));
+    expect(screen.getByRole("checkbox", { name: "精簡對話歷史" })).toBeChecked();
+  });
+
+  it("rejects malformed diagnostics input before any test request", async () => {
+    await openSystemSettings();
+    fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成案例" } });
+    fireEvent.click(screen.getByText("測試歷史與情境摘要"));
+    fireEvent.change(screen.getByRole("textbox", { name: "歷史 JSON" }), { target: { value: '[{"role":"system","content":"invalid"}]' } });
+    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("歷史必須是 user／assistant");
+    expect(runAdminChatTest).not.toHaveBeenCalled();
+    expect(updateRuntimeConfig).not.toHaveBeenCalled();
+  });
+
+  it("aborts the diagnostic request when leaving its tab without saving overrides", async () => {
+    vi.mocked(runAdminChatTest).mockReturnValue(new Promise(() => {}));
+    await openSystemSettings();
+    render(<PrivacyReviewDialog />);
+    fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成情境" } });
+    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
+    fireEvent.click(screen.getByRole("button", { name: "確認並送出" }));
+    await waitFor(() => expect(runAdminChatTest).toHaveBeenCalled());
+    const signal = vi.mocked(runAdminChatTest).mock.calls[0][3];
+    expect(signal?.aborted).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /系統設定/ }));
+    expect(signal?.aborted).toBe(true);
+    expect(updateRuntimeConfig).not.toHaveBeenCalled();
+  });
 
   it("shows the active maintenance message and resumes only after saving the cleared field", async () => {
     vi.mocked(getRuntimeConfig).mockResolvedValueOnce({

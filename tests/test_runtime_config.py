@@ -1,6 +1,10 @@
 """測試：Firestore runtime config 的可寫欄位與本地 fallback。"""
 
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import pytest
+from google.api_core.exceptions import DeadlineExceeded
 
 import backend.app.core.runtime_config as runtime_config_module
 from backend.app.core.runtime_config import validate_runtime_config_update
@@ -135,6 +139,7 @@ def test_firestore_read_uses_write_validation_and_falls_back_per_invalid_field()
             "agent_prompt_sections": {"language": 123},
             "maintenance_message": 123,
             "enable_image_upload": "false",
+            "enable_client_privacy_review": "false",
             "development_mode": "true",
         },
         source="firestore",
@@ -153,6 +158,7 @@ def test_firestore_read_uses_write_validation_and_falls_back_per_invalid_field()
     assert config.agent_prompt_sections == {}
     assert config.maintenance_message is None
     assert config.enable_image_upload is False
+    assert config.enable_client_privacy_review is True
     assert config.development_mode is False
     assert config.source == "firestore"
 
@@ -171,6 +177,7 @@ def test_firestore_read_matches_normalized_write_contract():
         "agent_prompt_sections": {"language": "第一行\\n第二行"},
         "maintenance_message": " 維護中 ",
         "enable_image_upload": False,
+        "enable_client_privacy_review": False,
         "development_mode": True,
     }
     cleaned = validate_runtime_config_update(payload)
@@ -188,6 +195,7 @@ def test_firestore_read_matches_normalized_write_contract():
     assert config.agent_prompt_sections == cleaned["agent_prompt_sections"]
     assert config.maintenance_message == cleaned["maintenance_message"]
     assert config.enable_image_upload is cleaned["enable_image_upload"]
+    assert config.enable_client_privacy_review is cleaned["enable_client_privacy_review"]
     assert config.development_mode is cleaned["development_mode"]
 
 
@@ -207,6 +215,7 @@ def test_firestore_read_failure_returns_last_known_good_config(monkeypatch):
             "enable_anonymization": False,
             "development_mode": True,
             "enable_image_upload": True,
+            "enable_client_privacy_review": False,
         },
         source="firestore",
     )
@@ -226,6 +235,8 @@ def test_firestore_read_failure_returns_last_known_good_config(monkeypatch):
     assert result.enable_anonymization is True
     assert result.development_mode is False
     assert result.enable_image_upload is False
+    assert result.enable_client_privacy_review is True
+    assert last_known_good.enable_client_privacy_review is False
     assert result.source == "last_known_good"
     assert runtime_config_module._cached_config is result
 
@@ -245,7 +256,40 @@ def test_firestore_read_failure_without_cache_uses_safe_defaults(monkeypatch):
     assert result.enable_anonymization is True
     assert result.development_mode is False
     assert result.enable_image_upload is False
+    assert result.enable_client_privacy_review is True
     assert result.source == "safe_defaults"
+
+
+@pytest.mark.parametrize("has_last_known_good", [False, True])
+def test_firestore_read_deadline_uses_cached_safe_fallback(monkeypatch, has_last_known_good):
+    last_known_good = (
+        runtime_config_module._build_config(
+            {"openrouter_model": "known-good/model"}, source="firestore"
+        )
+        if has_last_known_good
+        else None
+    )
+    client = Mock()
+    document = client.collection.return_value.document.return_value
+    document.get.side_effect = DeadlineExceeded("Runtime config read timed out")
+    monkeypatch.setattr(runtime_config_module.firestore, "client", lambda: client)
+    monkeypatch.setattr(runtime_config_module, "_cached_config", None)
+    monkeypatch.setattr(runtime_config_module, "_cached_at", 0.0)
+    monkeypatch.setattr(runtime_config_module, "_last_known_good_config", last_known_good)
+    monkeypatch.setattr(runtime_config_module, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(runtime_config_module.settings, "runtime_config_cache_ttl_seconds", 30)
+
+    result = runtime_config_module.get_runtime_config(force_refresh=True)
+
+    assert result.source == ("last_known_good" if has_last_known_good else "safe_defaults")
+    assert result.enable_anonymization is True
+    assert result.development_mode is False
+    assert result.enable_image_upload is False
+    assert result.enable_client_privacy_review is True
+    if has_last_known_good:
+        assert result.openrouter_model == "known-good/model"
+    assert runtime_config_module.get_runtime_config() is result
+    document.get.assert_called_once_with(timeout=5.0, retry=None)
 
 
 def test_production_forces_development_mode_off(monkeypatch):
@@ -268,3 +312,140 @@ def test_preview_may_enable_development_mode(monkeypatch):
     )
 
     assert config.development_mode is True
+
+
+def test_request_overrides_merge_pipeline_without_mutating_environment():
+    base = runtime_config_module._build_config(
+        {"pipeline": {"enable_skills": False}}, source="firestore"
+    )
+    effective = runtime_config_module.resolve_runtime_config(
+        base, {"pipeline": {"enable_rag": False, "content_policy": "annotate"}}
+    )
+    assert effective.pipeline["enable_rag"] is False
+    assert effective.pipeline["enable_skills"] is False
+    assert effective.pipeline["content_policy"] == "annotate"
+    assert base.pipeline["enable_rag"] is True
+    assert base.pipeline["content_policy"] == "repair"
+    assert effective.pipeline is not base.pipeline
+    assert effective.source == "request_override"
+    assert runtime_config_module.resolve_runtime_config(base).pipeline == base.pipeline
+
+
+@pytest.mark.parametrize(
+    "pipeline",
+    [
+        {"mask_message": "false"},
+        {"history_max_messages": True},
+        {"history_max_messages": 201},
+        {"history_max_chars": -1},
+        {"history_max_chars": 120001},
+        {"content_policy": "disable_schema"},
+        {"disable_auth": True},
+        {"enable_client_privacy_review": False},
+    ],
+)
+def test_pipeline_rejects_unrecognized_or_ambiguous_values(pipeline):
+    with pytest.raises(ValueError):
+        validate_runtime_config_update({"pipeline": pipeline})
+
+
+def test_request_overrides_reject_nonwritable_fields():
+    base = runtime_config_module._build_config({}, source="defaults")
+    with pytest.raises(ValueError, match="supported runtime"):
+        runtime_config_module.resolve_runtime_config(base, {"admin_api_key": "injected"})
+
+
+@pytest.mark.parametrize("images", [False, True])
+@pytest.mark.parametrize("review", [False, True])
+def test_client_projection_omits_administrative_and_model_settings(images, review):
+    base = runtime_config_module._build_config(
+        {"enable_image_upload": images, "enable_client_privacy_review": review}, source="defaults"
+    )
+    public = runtime_config_module.client_settings(base)
+    assert set(public) == {
+        "contract_version",
+        "enable_image_upload",
+        "enable_client_privacy_review",
+        "pipeline",
+    }
+    assert public["contract_version"] == 4
+    assert public["enable_image_upload"] is images
+    assert public["enable_client_privacy_review"] is review
+    assert set(public["pipeline"]) == {
+        "trim_history",
+        "history_max_messages",
+        "history_max_chars",
+        "model_selection_mode",
+        "enable_analysis",
+    }
+
+
+def test_missing_client_privacy_review_defaults_on_and_backfill_preserves_false():
+    defaults = runtime_config_module._default_runtime_document()
+    assert defaults["enable_client_privacy_review"] is True
+    config = runtime_config_module._build_config({}, source="firestore")
+    assert config.enable_client_privacy_review is True
+    assert config.public_dict()["enable_client_privacy_review"] is True
+    assert runtime_config_module._missing_runtime_defaults(
+        {}, {"enable_client_privacy_review": True}
+    ) == {"enable_client_privacy_review": True}
+    assert (
+        runtime_config_module._missing_runtime_defaults(
+            {"enable_client_privacy_review": False}, {"enable_client_privacy_review": True}
+        )
+        == {}
+    )
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "true", "false", [], {}])
+def test_client_privacy_review_requires_a_strict_boolean_and_invalid_reads_fail_closed(value):
+    with pytest.raises(ValueError, match="enable_client_privacy_review must be a boolean"):
+        validate_runtime_config_update({"enable_client_privacy_review": value})
+    config = runtime_config_module._build_config(
+        {"enable_client_privacy_review": value}, source="firestore"
+    )
+    assert config.enable_client_privacy_review is True
+
+
+@pytest.mark.parametrize("environment", ["development", "preview", "production"])
+def test_client_review_override_is_independent_and_does_not_mutate_environment(
+    environment, monkeypatch
+):
+    monkeypatch.setattr(runtime_config_module.settings, "environment", environment)
+    base = runtime_config_module._build_config(
+        {"enable_client_privacy_review": True, "enable_anonymization": True}, source="firestore"
+    )
+    effective = runtime_config_module.resolve_runtime_config(
+        base, {"enable_client_privacy_review": False}
+    )
+    assert effective.enable_client_privacy_review is False
+    assert effective.enable_anonymization is True
+    assert base.enable_client_privacy_review is True
+    assert effective.public_dict()["enable_client_privacy_review"] is False
+
+
+def test_client_privacy_review_round_trips_through_config_save_without_cloud(monkeypatch):
+    stored = runtime_config_module._default_runtime_document()
+    document = Mock()
+    document.get.side_effect = lambda **kwargs: SimpleNamespace(
+        exists=True, to_dict=lambda: dict(stored)
+    )
+    document.set.side_effect = lambda value, **kwargs: stored.update(value)
+    client = Mock()
+    client.collection.return_value.document.return_value = document
+    monkeypatch.setattr(runtime_config_module.firestore, "client", lambda: client)
+    monkeypatch.setattr(runtime_config_module, "_cached_config", None)
+    monkeypatch.setattr(runtime_config_module, "_cached_at", 0.0)
+    monkeypatch.setattr(runtime_config_module, "_last_known_good_config", None)
+
+    result = runtime_config_module.update_runtime_config(
+        {"enable_client_privacy_review": False}, updated_by="offline-admin"
+    )
+
+    assert stored["enable_client_privacy_review"] is False
+    assert result.enable_client_privacy_review is False
+    assert result.public_dict()["enable_client_privacy_review"] is False
+    assert runtime_config_module.client_settings(result)["enable_client_privacy_review"] is False
+    assert result.updated_by == "offline-admin"
+    assert document.set.call_count == 1
+    assert document.set.call_args.kwargs == {"merge": True}

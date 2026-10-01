@@ -16,10 +16,20 @@
 
 `dev` 分支部署至 Firebase Hosting preview channel，workflow 設定有效期限為 7 天；`main` 分支部署至正式 Firebase Hosting 網址。
 
+## 本機 v4 更新
+
+目前本機已實作 v4 自然段落串流、可編輯文字摘要、暫存推理說明、PII 對照診斷與對話版面收合；v1–v3 相容路徑保留。詳見 [Chat v4 實作與驗收](docs/implementation/chat-v4.md)、[前一輪 v3 紀錄](docs/implementation/chat-v3.md) 及 [法源維護手冊](resource/legal/README.md)。尚未部署或匯入雲端法源；上方網址不代表已上線此版本。
+
+本輪另完成 [自然回覆對齊 main 的候選修改](docs/implementation/main-alignment.md)：共用服務 prompt、局部精確資訊核對、輔助摘要容錯及嚴格版本協商。管理設定修改稿、固定案例比較與待甲方完成的盲評見 [比較報告](docs/evaluation/main-alignment/README.md)。
+
+本機另已加入 [瀏覽器送前隱私檢查](docs/implementation/client-privacy.md)：文字先在瀏覽器遮罩，預設經完整預覽確認後送出；admin 可暫停確認視窗，保留自動文字遮罩。圖片已恢復原圖上傳，首頁與對話輸入框會隨文字自動伸縮，詳見 [輸入框、圖片與管理開關](docs/implementation/composer-controls.md)。此更新尚未部署。
+
+回覆呈現另已調整為 [依情境分段、分點與強調重點](docs/implementation/adaptive-response.md)，分析面板移至正文下方，完成後收合。六類案例、修改前後各三次的 [完整並排回答](docs/evaluation/adaptive-response/comparison.html) 與 [評讀及限制](docs/evaluation/adaptive-response/README.md) 已保留；管理設定修改稿尚未套用雲端。
+
 ## 核心功能
 
 - 創傷知情對話：以溫和、不批判、避免責怪受害者的語氣提供支持與資訊。
-- 隱私去識別化：後端在送出模型請求前，會先處理手機、身分證字號、Email、信用卡、IP 等常見個資格式。
+- 送出前隱私檢查：瀏覽器本機遮罩常見識別格式並提供完整文字預覽、自訂隱藏內容與人工修正；後端仍有第二層遮罩。
 - RAG 法規檢索：整合 Firestore Vector Search，檢索法規、救濟資源與性騷擾相關判決資料。
 - 本地優先紀錄：對話紀錄保存在使用者瀏覽器 LocalStorage，後端 API 採無狀態設計。
 - 前後端分離：前端使用 React + Vite + TypeScript；後端使用 Flask，並透過 Firebase Functions 對外提供 API。
@@ -28,10 +38,11 @@
 
 ```mermaid
 graph TD
-    A[React/Vite 前端] -->|送出訊息| B[Firebase Hosting]
+    A[React/Vite 前端] --> P[瀏覽器本機遮罩與完整文字確認]
+    P -->|僅送出已確認文字| B[Firebase Hosting]
     B -->|/api rewrite 或直接呼叫| C[Firebase Functions]
     C --> D[Flask API]
-    D --> E[PII 去識別化]
+    D --> E[後端第二層 PII 遮罩]
     E --> F[OpenRouter Agent]
     F -->|需要法規或案例時| G[Firestore Vector Search]
     G --> F
@@ -101,6 +112,33 @@ pnpm run dev
 VITE_API_BASE_URL=http://127.0.0.1:5000
 ```
 
+### Firebase Functions Emulator
+
+Emulator 使用專案根目錄的 `venv`，可用相同 lockfile 建立：
+
+```bash
+UV_PROJECT_ENVIRONMENT=venv uv sync --frozen
+firebase emulators:start --only functions --project anti-harassment-bot
+```
+
+前端的 `frontend/.env` 改用完整函式 URL，並重新啟動 Vite：
+
+```dotenv
+VITE_API_BASE_URL=http://127.0.0.1:5001/anti-harassment-bot/asia-east1/api_preview
+```
+
+macOS 若出現 `NSNumber initialize`、`fork()` 或 worker `SIGKILL`，請在**專案根目錄**的 `.env.local` 加入以下設定，再重啟 Emulator：
+
+```dotenv
+NO_PROXY=localhost,127.0.0.1
+```
+
+非空的代理環境設定可避免 Python 在 Gunicorn fork 後讀取 macOS 系統代理；若已有 `no_proxy`／`NO_PROXY` 清單，請保留並補上 loopback。外部服務仍可使用明確的 `HTTP_PROXY`／`HTTPS_PROXY`；只在 macOS 系統設定的代理需轉成環境變數。背景說明見 [Python urllib 的 macOS fork 注意事項](https://docs.python.org/3.13/library/urllib.request.html)。此檔僅供本機 Emulator 使用，已列入 `.gitignore`。
+
+若 worker 讀取 Firestore 出現 `Could not contact DNS servers`，也可在該 `.env.local` 加入 `GRPC_DNS_RESOLVER=native` 後重啟，讓 gRPC 使用系統的 `getaddrinfo` 解析；設定說明見 [gRPC environment variables](https://github.com/grpc/grpc/blob/master/doc/environment_variables.md)。
+
+`GET /__/health` 是 Emulator 內部的 worker 探測；應用程式健康檢查為上述函式 URL 加上 `/v1/health/`。前端健康請求最多等待 10 秒並提供重新連線；聊天請求等待回應標頭最多 30 秒、串流連續無資料最多 45 秒，整體最多 190 秒。逾時會結束等待，不會自動重送聊天。Functions Emulator 未同時啟動 Firestore Emulator 時，runtime config 與 RAG 仍會連線至設定的雲端 Firestore。
+
 ### Firebase Analytics：回覆時間與功能使用
 
 前端已整合 Firebase Web SDK，採 lazy import，不阻擋聊天或等待 SDK 完成。必須設定下列公開 Web app 環境變數、`VITE_ANALYTICS_ENABLED=true`，並由使用者在「設定 → 分享使用統計（選用）」主動開啟，才會初始化及傳送事件。預設關閉；未同意的事件不排隊補送，SDK 載入失敗不影響聊天。這是選擇加入的樣本，不能當成全體使用者流量或全站錯誤率。
@@ -131,7 +169,7 @@ CPU、記憶體、Functions 請求數和帳務不是 Firebase Analytics 的指�
 
 ### 串流聊天 API
 
-前端送出 `POST /v1/chat/` 時加入 `"stream": true`，使用 `fetch` 讀取 `text/event-stream`（SSE），AI 回覆文字會隨模型輸出逐段顯示。回覆文字的第一個可解碼片段立即交給 HTTP 串流，再讀取下一段，不等待全文或其他欄位。後續問題與建議選項也以 `guidance` 事件逐步顯示；生成中的選項暫不可操作，停止回覆仍可使用。完整回覆通過結構驗證、Actions 由已核准的 Skills 解析後，才套用情緒與來源並開放選單操作。一般下一步建議仍為水平按鈕，只有明確的 AI 追問才顯示詢問面板。
+前端送出 `POST /v1/chat/` 時加入 `"stream": true`，使用 `fetch` 讀取 `text/event-stream`（SSE），v1 回覆文字隨模型輸出逐段顯示；v2／v3 先取得完整結構化回覆並檢查來源，再依回答段落發送，不能宣稱是原始 token 串流。v4 則增量解析自然段落，完整單元通過引用檢查後立即送出，不必等整份答案結束。後續問題與建議選項也以 `guidance` 事件逐步顯示；生成中的選項暫不可操作，停止回覆仍可使用。完整回覆通過結構驗證、Actions 由已核准的 Skills 解析後，才套用情緒與來源並開放選單操作。一般下一步建議仍為水平按鈕，只有明確的 AI 追問才顯示詢問面板。
 
 ```bash
 curl --no-buffer http://127.0.0.1:5000/v1/chat/ \
@@ -145,18 +183,20 @@ curl --no-buffer http://127.0.0.1:5000/v1/chat/ \
 | Event | `data` 內容 | 前端行為 |
 | --- | --- | --- |
 | `progress` | `phase` 與 `elapsed_ms`；後者是伺服器從收到請求到該階段的實測毫秒數 | 依後端實際執行階段更新提示，不以固定秒數切換、不推估完成百分比 |
+| `analysis` | v3／v4 的實際理解、來源與回答摘要 | 顯示可核對的分析摘要與依據；done 後保留完整摘要 |
+| `reasoning` | v4 供應商公開的文字或摘要 | 與已驗證答案區分，僅頁面暫存，不儲存或匯出 |
 | `delta` | `{"text":"新增的回覆文字"}` | 將文字附加到同一則 AI 訊息 |
 | `guidance` | 累積快照，可含 `interaction_mode`、`clarifying_questions`、`suggested_replies`；陣列最後一項可能尚未生成完畢 | 以整份快照更新問題與選項預覽，不附加重複文字；等 `done` 後才可點選 |
 | `done` | 完整聊天回覆：`reply`、`session_id`、`anonymized`、`rag_used`、`emotion`、`emotion_color`、`suggested_replies`、`action_buttons`、`interaction_mode`、`clarifying_questions`；開發模式可另含 `debug_tool_calls` | 以驗證後的 `reply` 定稿，套用 metadata，結束串流 |
 | `error` | `code`、`detail`、`retryable`、`status`；依錯誤可另含 `error_id`，非 production 的開發模式可另含 `debug_message` | 顯示錯誤並結束串流，不顯示未完成的選單 |
 
-`progress.phase` 包含 `anonymizing`（啟用文字遮罩或處理 v2 摘要欄位時）、`preparing`（準備請求與必要事實）、`waiting_model`（送出模型請求）、`retrieving`（實際呼叫資料檢索）、`generating`（已收到回覆文字）、`guidance`（已收到引導資料）、`validating`（檢查回覆結構與可用的引用欄位）。只有實際執行的階段才會出現；沒有檢索就不顯示檢索提示，未收到新事件就維持目前狀態。首段回覆或引導內容優先送出，接著才補上對應狀態，不為進度提示延遲首字。`elapsed_ms` 是階段發生時間，並非完成比例或剩餘時間；不包含瀏覽器到伺服器的網路時間。
+`progress.phase` 包含 `anonymizing`（啟用對應文字遮罩階段時）、`preparing`（準備請求與必要事實）、`waiting_model`（送出模型請求）、`retrieving`（實際呼叫資料檢索）、`generating`（已收到回覆文字）、`guidance`（已收到引導資料）、`validating`（檢查回覆結構與可用的引用欄位）。只有實際執行的階段才會出現；沒有檢索就不顯示檢索提示，未收到新事件就維持目前狀態。首段回覆或引導內容優先送出，接著才補上對應狀態，不為進度提示延遲首字。`elapsed_ms` 是階段發生時間，並非完成比例或剩餘時間；不包含瀏覽器到伺服器的網路時間。
 
 #### 可收合的處理過程
 
 送出訊息後，回答上方會展開「處理過程」，按實際收到的事件累積步驟；使用者可自行收合，完成後自動收合成箭頭，點擊或用 Enter／Space 可重新展開。停止及錯誤分別顯示「已停止」「處理中斷」。它呈現可觀察的系統操作，並非原始 Chain of Thought，也不代表法律正確性已獲驗證；沒有額外模型呼叫或用定時器虛構進度。
 
-前端加上實際連線／重試事件，記錄自本次送出起的瀏覽器經過時間，跨重試不歸零；數字只在事件抵達或回覆結束時更新，不是倒數計時。最多保留 40 筆步驟，去除相鄰同階段重複事件，但保留工具流程再次回到模型的階段。請求次數不是模型呼叫次數。這份 `processingTrace` 僅保存固定階段代碼、時間、請求次數與結果，隨完成的對話在 localStorage 保存及 JSON 匯出；不送回模型、Analytics 或後端，也不包含搜尋詞、案件事實或 reasoning。舊訊息不補造步驟。
+前端加上實際連線／重試事件，記錄自本次送出起的瀏覽器經過時間，跨重試不歸零；時間資料僅供技術診斷，不在一般聊天介面顯示秒數。最多保留 40 筆步驟，去除相鄰同階段重複事件，但保留工具流程再次回到模型的階段。請求次數不是模型呼叫次數。v3 另以 `analysis` 顯示已確認條件、實際來源與回答限制。這份 `processingTrace` 僅保存固定階段代碼、時間、請求次數與結果，隨完成的對話在 localStorage 保存及 JSON 匯出；不送回模型、Analytics 或後端，也不包含搜尋詞、案件事實或 reasoning。舊訊息不補造步驟。
 
 本機瀏覽器回歸使用 `tests/browser_processing_smoke.mjs`：先以 `PYTHONPATH=. SYNTHETIC_MODEL_DELAY_SECONDS=2 .venv/bin/python tests/browser_fixture_server.py` 啟動合成 API，再在 `frontend` 啟動 `VITE_API_BASE_URL=http://127.0.0.1:5055/api VITE_ANALYTICS_ENABLED=false pnpm dev --host 127.0.0.1`，最後於專案根目錄以 `node tests/browser_processing_smoke.mjs` 執行。可透過 `PLAYWRIGHT_MODULE` 指向既有 Playwright 安裝。腳本禁止非本機網路，桌面／手機均檢查展開、手動收合、完成收合、鍵盤、重新整理與取消；結果預設在 `/tmp/harass-processing-smoke`。測試為觀察暫態而延緩真實 SSE frame 的轉送，不能當成延遲測量。
 
@@ -242,6 +282,8 @@ jsonPayload.message:*
 
 聊天回覆採用 OpenRouter Structured Outputs 的 JSON Schema 契約，必須包含情緒、回覆文字與 2 至 4 個建議回覆。若模型或供應端無法符合契約，前端會顯示錯誤；可重試且尚未顯示回覆文字時，會顯示「伺服器回傳錯誤，正在重試中」並自動重試兩次。已顯示部分文字的串流回覆不會自動重試。請選用支援 Structured Outputs 的 OpenRouter 模型。
 
+v2／v3 契約會將 Pydantic 帶 discriminator 的 `oneOf` 轉為供應商支援的 `anyOf`，避免 OpenAI 端點因 `invalid_json_schema` 拒絕整個請求；各 action 的固定類型與本地 Pydantic 驗證仍保留。
+
 設定優先順序固定為：
 
 1. 該環境的 Firestore runtime document
@@ -268,6 +310,8 @@ Action button 是共用元件與資料契約，機關名稱及不同情境的使
 只有回答目前需求存在必須由使用者補充的明確資訊缺口時，才使用 `interaction_mode: "clarify"` 與具體的 `clarifying_questions`，顯示「AI 需要更多您的資訊」詢問選單並取代一般輸入區。使用者選擇選項或填寫「其他」後，按「送出回覆」確認；可從右上角隱藏選單，再透過「顯示選單」入口重開，切換時保留選項、「其他」與一般輸入草稿。多組問題可切換並一併送出；沒有適用的 Skill 選項時，使用 `suggested_replies` 作為答案選項。一般「想先聊哪個方向？」不構成必要資訊缺口，agent 不應為了產生選單而標記 clarify。只有最新且有效的 AI 訊息可提供可操作的建議或詢問選單；網址與電話 Actions 則留在所屬 AI 回覆內，於來源標籤（例如「救濟管道」）下方另列醒目的按鈕，可直接開啟網站或撥號，不會隨詢問選單隱藏或移到後續回覆。
 
 clarify 送出的使用者訊息會將問題以淡色顯示在泡泡上方，答案顯示在下方。問題與答案的顯示 metadata 僅保存在本機 UI；聊天 API 仍收到保留完整問答脈絡的文字。answer 的建議按鈕送出一般文字訊息，不新增問題引用。
+
+前端會先去除重複選項再限制數量：v2／v3 每題最多 3 個具體答案，加上「不確定」、「暫不提供」、「自行補充」，共最多 6 個；舊版詢問選單每題最多 4 個預設答案加「其他」；一般下一步建議合併所有來源後最多 4 個。未列出的答案可自行填寫。兩種詢問選單都在右上角提供醒目的「隱藏選項」按鈕，切換後保留選擇與草稿。
 
 管理面板的 Skills 設定可編輯觸發詞、情境指令及三種通用 Actions。「建立範例」只把缺少的內建 Skills 寫入共用 collection，不覆蓋已有設定；儲存同 ID 可覆寫內建 Skill，停用則阻止它在對話中使用。刪除內建 Skill 會保留停用覆寫，避免內建預設再次出現；自訂 Skill 則刪除文件。設定快取為 60 秒，管理操作會清除目前程序的快取。系統與 Prompt 設定仍分別寫入 `runtime_config/app_dev` 或 `runtime_config/app_main`。
 

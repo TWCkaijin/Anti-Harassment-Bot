@@ -34,6 +34,24 @@ def test_build_document_documents_from_markdown(tmp_path):
     assert "性騷擾申訴期限" in docs[0].content
 
 
+def test_complete_article_import_preserves_provenance_and_boolean_metadata(tmp_path):
+    path = tmp_path / "article.md"
+    path.write_text(
+        "---\nsource: 性別平等工作法第12條\nlaw_name: 性別平等工作法\n"
+        'article_number: "12"\nversion: N0030014@2023-08-16\n'
+        "source_url: https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=N0030014&flno=12\n"
+        "checked_at: 2026-10-01\ncorpus_active: false\n"
+        'lookup_keys: ["性別平等工作法:12"]\n---\n' + "完整条文及條件。" * 500,
+        encoding="utf-8",
+    )
+    docs = build_document_documents(path)
+    assert len(docs) == 1
+    assert docs[0].metadata["corpus_active"] is False
+    assert docs[0].metadata["version"] == "N0030014@2023-08-16"
+    assert docs[0].metadata["lookup_keys"] == ["性別平等工作法:12"]
+    assert len(docs[0].content) > 1600
+
+
 def test_build_judgment_documents_from_csv(tmp_path):
     path = tmp_path / "judgments.csv"
     with path.open("w", encoding="utf-8", newline="") as file:

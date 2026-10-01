@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ActionButton, OptionsActionButton } from "../services/api";
@@ -108,6 +108,36 @@ describe("FollowUpPanel", () => {
     expect(screen.queryByRole("region")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["synchronous cancellation", (): boolean => false],
+    ["asynchronous cancellation", (): Promise<boolean> => Promise.resolve(false)],
+    ["rejected confirmation", (): Promise<boolean> => Promise.reject(new Error("Confirmation unavailable"))],
+  ] as const)("preserves all question answers after %s and permits resubmission", async (_name, cancel) => {
+    const onSend = vi.fn<() => boolean | Promise<boolean>>().mockImplementationOnce(cancel).mockResolvedValue(true);
+    const onSent = vi.fn();
+    render(<FollowUpPanel {...multipleQuestionProps} actions={[optionsAction, nextAction]} onSend={onSend} onSent={onSent} />);
+    fireEvent.click(screen.getByRole("radio", { name: "看看資源" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一題" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "其他補充" }), { target: { value: "  電子郵件  " } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "送出回覆" })); });
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSent).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "其他補充" })).toHaveValue("  電子郵件  ");
+    expect(screen.getByRole("radio", { name: "其他" })).toBeChecked();
+    await waitFor(() => expect(screen.getByRole("button", { name: "送出回覆" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "上一題" }));
+    expect(screen.getByRole("radio", { name: "看看資源" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "下一題" }));
+    expect(screen.getByRole("textbox", { name: "其他補充" })).toHaveValue("  電子郵件  ");
+
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "送出回覆" })); });
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend.mock.calls[1]).toEqual(onSend.mock.calls[0]);
+    await waitFor(() => expect(onSent).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
+  });
+
   it("keeps Other drafts when switching to a configured option", () => {
     const onSend = vi.fn();
     render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={onSend} />);
@@ -127,9 +157,9 @@ describe("FollowUpPanel", () => {
 
   it("only renders a hide control when the parent supports hiding", () => {
     const { rerender } = render(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "隱藏" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "隱藏選項" })).not.toBeInTheDocument();
     rerender(<FollowUpPanel {...clarificationProps} actions={[optionsAction]} onSend={vi.fn()} onHide={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "隱藏" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "隱藏選項" })).toBeInTheDocument();
   });
 
   it("requests hiding without sending or clearing draft answers", () => {
@@ -140,7 +170,7 @@ describe("FollowUpPanel", () => {
     fireEvent.click(screen.getByRole("radio", { name: "看看資源" }));
     fireEvent.click(screen.getByRole("button", { name: "下一題" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "稍後再完成的草稿" } });
-    fireEvent.click(screen.getByRole("button", { name: "隱藏" }));
+    fireEvent.click(screen.getByRole("button", { name: "隱藏選項" }));
     expect(onHide).toHaveBeenCalledTimes(1);
     expect(onSend).not.toHaveBeenCalled();
     expect(onSent).not.toHaveBeenCalled();
@@ -168,7 +198,7 @@ describe("FollowUpPanel", () => {
   it("allows hiding a clarification panel with resources while loading", () => {
     const onHide = vi.fn();
     render(<FollowUpPanel {...clarificationProps} actions={[{ action: "url", label: "相關資訊", url: "https://example.org" }]} onSend={vi.fn()} onHide={onHide} isLoading />);
-    fireEvent.click(screen.getByRole("button", { name: "隱藏" }));
+    fireEvent.click(screen.getByRole("button", { name: "隱藏選項" }));
     expect(onHide).toHaveBeenCalledTimes(1);
   });
 
@@ -330,6 +360,26 @@ describe("FollowUpPanel", () => {
     const actions = [null, {}, { ...optionsAction, options: [null, {}] }, { ...optionsAction, options: [optionsAction.options[0]] }] as unknown as ActionButton[];
     render(<FollowUpPanel {...clarificationProps} actions={actions} suggestedReplies={["可用建議"]} onSend={vi.fn()} />);
     expect(screen.getByRole("radio", { name: "可用建議" })).toBeInTheDocument();
+  });
+
+  it("shows at most four configured choices plus free text for an existing eight-option question", () => {
+    const onSend = vi.fn();
+    const action = { ...optionsAction, options: Array.from({ length: 8 }, (_, index) => ({ label: `選項 ${index + 1}`, value: `回覆 ${index + 1}` })) };
+    render(<FollowUpPanel {...clarificationProps} actions={[action]} onSend={onSend} />);
+    expect(screen.getAllByRole("radio")).toHaveLength(5);
+    expect(screen.getByRole("radio", { name: "選項 4" })).toBeVisible();
+    expect(screen.queryByRole("radio", { name: "選項 5" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "其他補充" }), { target: { value: "回覆 8" } });
+    fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
+    expect(onSend).toHaveBeenCalledWith(`${optionsAction.title}\n回覆 8`, expect.objectContaining({ answers: [{ question: optionsAction.title, answer: "回覆 8" }] }));
+  });
+
+  it("deduplicates trimmed suggestions before applying the four-choice limit", () => {
+    render(<FollowUpPanel {...clarificationProps} suggestedReplies={["一", " 一 ", "二", "三", "四", "五"]} onSend={vi.fn()} />);
+    expect(screen.getAllByRole("radio")).toHaveLength(5);
+    expect(screen.getAllByRole("radio", { name: "一" })).toHaveLength(1);
+    expect(screen.getByRole("radio", { name: "四" })).toBeVisible();
+    expect(screen.queryByRole("radio", { name: "五" })).not.toBeInTheDocument();
   });
 
   it("rejects choices outside server bounds or with duplicate values", () => {

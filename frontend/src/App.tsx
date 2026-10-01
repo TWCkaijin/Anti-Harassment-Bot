@@ -10,10 +10,11 @@ import ChatArea from "./components/ChatArea";
 import SettingsPanel from "./components/SettingsPanel";
 import AdminPanel from "./components/AdminPanel";
 import { useEmotionPreference } from "./hooks/useEmotionPreference";
+import PrivacyReviewDialog from "./components/PrivacyReviewDialog";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarLayout, setSidebarLayout] = useState({ scope: "", collapsed: false });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const { showEmotions, updateShowEmotions, preferenceSaveFailed } = useEmotionPreference();
@@ -31,8 +32,13 @@ export default function App() {
     deleteSession,
     renameSession,
     clearAllSessions,
-    caseFacts, pendingFacts, saveCaseFacts, contractV2, isBackendConnected, storageIssue, incompatibleSummary, canRegenerate,
+    caseFacts, pendingFacts, saveCaseFacts, contractV2, contractVersion, clientSettings, saveClarificationDraft, isBackendConnected, reconnectBackend, storageIssue, incompatibleSummary, summaryRequiresConnection, canRegenerate,
   } = useConversation();
+
+  // A first message or a different conversation starts with an unobstructed
+  // reading area. Streaming updates keep the user's explicit pin choice.
+  const layoutScope = `${currentSessionId}:${messages.length > 0}`;
+  const sidebarCollapsed = sidebarLayout.scope === layoutScope ? sidebarLayout.collapsed : messages.length > 0;
 
   const handleOpenSettings = useCallback(() => {
     setSettingsOpen(true);
@@ -48,12 +54,13 @@ export default function App() {
     <div className="flex w-full h-dvh bg-background overflow-hidden">
       {/* 側邊欄 */}
       <Sidebar
+        key={layoutScope}
         sessions={sessions}
         currentSessionId={currentSessionId}
         isOpen={sidebarOpen}
         isCollapsed={sidebarCollapsed}
         onClose={() => setSidebarOpen(false)}
-        onToggleCollapsed={() => setSidebarCollapsed((collapsed) => !collapsed)}
+        onToggleCollapsed={() => setSidebarLayout({ scope: layoutScope, collapsed: !sidebarCollapsed })}
         onSelectSession={setCurrentSessionId}
         onNewSession={createNewSession}
         onDeleteSession={deleteSession}
@@ -69,16 +76,25 @@ export default function App() {
           isLoading={isLoading}
           retryStatus={retryStatus}
           onStop={stopCurrentResponse}
-          caseFacts={contractV2 ? caseFacts : undefined}
+          caseFacts={contractV2 || caseFacts.schema_version === 3 ? caseFacts : undefined}
           pendingFacts={pendingFacts}
           onSaveCaseFacts={saveCaseFacts}
+          onClarificationDraftChange={saveClarificationDraft}
           backendConnected={isBackendConnected}
+          contractVersion={contractVersion}
+          onReconnect={reconnectBackend}
           storageIssue={storageIssue}
           showEmotions={showEmotions}
           incompatibleSummary={incompatibleSummary}
+          summaryRequiresConnection={summaryRequiresConnection}
           canRegenerate={canRegenerate}
+          allowImageUpload={clientSettings?.enable_image_upload ?? true}
         onSend={sendMessage}
-        onOpenSidebar={() => setSidebarOpen(true)}
+        onOpenSidebar={() => {
+          if (window.matchMedia("(min-width: 1024px) and (pointer: fine)").matches) {
+            setSidebarLayout({ scope: layoutScope, collapsed: !sidebarCollapsed });
+          } else setSidebarOpen(true);
+        }}
       />
 
 
@@ -97,7 +113,9 @@ export default function App() {
       <AdminPanel
         isOpen={adminOpen}
         onClose={() => setAdminOpen(false)}
+        onRuntimeConfigChanged={() => { void reconnectBackend(); }}
       />
+      <PrivacyReviewDialog />
     </div>
   );
 }

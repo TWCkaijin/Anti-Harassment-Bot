@@ -1,5 +1,6 @@
 import type { OptionsActionButton, TelActionButton, UrlActionButton } from "../services/api";
 import { getUserMessageValidationError, MAX_USER_MESSAGE_CHARACTERS } from "../hooks/conversationHistory";
+import { limitDistinctOptions, MAX_LEGACY_PREDEFINED_OPTIONS } from "./choiceOptions";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -54,13 +55,13 @@ export function getFollowUpData({ actions, suggestedReplies, clarifyingQuestions
   clarifyingQuestions?: unknown;
   interactionMode?: unknown;
 }) {
-  const optionActions = Array.isArray(actions) ? actions.filter(isValidOptionsAction) : [];
+  const optionActions = Array.isArray(actions) ? actions.filter(isValidOptionsAction).map(action => ({ ...action, options: limitDistinctOptions(action.options, MAX_LEGACY_PREDEFINED_OPTIONS) })) : [];
   const resources = getSafeResourceActions(actions);
   const questions = Array.isArray(clarifyingQuestions)
     ? [...new Set(clarifyingQuestions.filter((question) => boundedText(question, 2000)).map((question) => question.trim()))]
     : [];
   const suggestions = Array.isArray(suggestedReplies)
-    ? [...new Set(suggestedReplies.filter((reply): reply is string => boundedText(reply, MAX_USER_MESSAGE_CHARACTERS) && !getUserMessageValidationError(reply)))]
+    ? limitDistinctOptions(suggestedReplies.filter((reply): reply is string => boundedText(reply, MAX_USER_MESSAGE_CHARACTERS) && !getUserMessageValidationError(reply)).map(reply => ({ label: reply, value: reply })), MAX_LEGACY_PREDEFINED_OPTIONS).map(option => option.value)
     : [];
 
   return {

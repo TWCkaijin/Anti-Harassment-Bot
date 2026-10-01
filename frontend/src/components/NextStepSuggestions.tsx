@@ -2,11 +2,13 @@ import { trackAnalytics } from "../services/analytics";
 import { useRef, useState } from "react";
 
 import type { ActionOption } from "../services/api";
+import { limitDistinctOptions, MAX_LEGACY_PREDEFINED_OPTIONS } from "./choiceOptions";
+import { settleSendOutcome, type SendOutcome } from "../services/sendOutcome";
 
 interface NextStepSuggestionsProps {
   suggestions: ActionOption[];
   isLoading?: boolean;
-  onSend: (message: string) => void;
+  onSend: (message: string) => SendOutcome;
 }
 
 /** Suggested next steps send a plain message; they do not answer an AI question. */
@@ -14,28 +16,30 @@ export default function NextStepSuggestions({ suggestions, isLoading, onSend }: 
   const submitted = useRef(false);
   const [sent, setSent] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const visibleSuggestions = limitDistinctOptions(suggestions, MAX_LEGACY_PREDEFINED_OPTIONS);
 
   const chooseSuggestion = (value: string) => {
     if (isLoading || submitted.current) return;
     submitted.current = true;
     setSendError(null);
     try {
-      onSend(value);
+      settleSendOutcome(onSend(value), () => {
+        trackAnalytics("next_step_selected");
+        setSent(true);
+      }, () => { submitted.current = false; });
     } catch {
       submitted.current = false;
       setSendError("建議未能送出，請再試一次。");
       return;
     }
-    trackAnalytics("next_step_selected");
-    setSent(true);
   };
 
-  if (suggestions.length === 0) return null;
+  if (visibleSuggestions.length === 0) return null;
 
   return (
     <section aria-label="下一步建議" className="mb-2 min-w-0">
       <div className="flex flex-nowrap gap-2 overflow-x-auto overscroll-x-contain py-1">
-        {suggestions.map((suggestion, index) => (
+        {visibleSuggestions.map((suggestion, index) => (
           <button
             key={`${index}-${suggestion.value}`}
             type="button"

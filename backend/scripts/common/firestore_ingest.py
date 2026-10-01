@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import csv
 import hashlib
+import json
 import os
 import re
 import sys
@@ -110,19 +111,24 @@ def infer_remedy_channels(text: str) -> list[str]:
     ]
 
 
-def _parse_simple_frontmatter(text: str) -> tuple[dict[str, str], str]:
+def _parse_simple_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     if not text.startswith("---\n"):
         return {}, text
     end = text.find("\n---\n", 4)
     if end == -1:
         return {}, text
-    metadata: dict[str, str] = {}
+    metadata: dict[str, Any] = {}
     for line in text[4:end].splitlines():
         if ":" not in line:
             continue
         key, value = line.split(":", 1)
-        metadata[key.strip()] = value.strip().strip('"')
+        value = value.strip()
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            parsed = value.strip('"')
+        metadata[key.strip()] = parsed
     return metadata, text[end + 5 :]
 
 
@@ -141,7 +147,13 @@ def build_document_documents(path: Path) -> list[IngestDocument]:
     document_type = frontmatter.get("type", "law")
     jurisdiction = frontmatter.get("jurisdiction", "台灣")
     content = normalize_ws(body)
-    chunks = split_text(content)
+    # Legal article exports retain complete clauses; arbitrary character splits
+    # can remove conditions/exceptions from the same article.
+    chunks = (
+        [content]
+        if frontmatter.get("law_name") and frontmatter.get("article_number")
+        else split_text(content)
+    )
 
     documents: list[IngestDocument] = []
     for chunk_index, chunk in enumerate(chunks):
@@ -156,6 +168,7 @@ def build_document_documents(path: Path) -> list[IngestDocument]:
                 collection_name=settings.rag_collection_name,
                 content=chunk_content,
                 metadata={
+                    **frontmatter,
                     "data_type": "document",
                     "source": title,
                     "source_file": str(path),
