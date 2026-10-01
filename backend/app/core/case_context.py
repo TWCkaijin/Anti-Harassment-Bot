@@ -104,7 +104,9 @@ class SummaryUpdate(StrictModel):
 
     base_revision: int = Field(ge=0, le=MAX_CONTEXT_REVISION, strict=True)
     summary: str = Field(max_length=SUMMARY_MAX_LENGTH)
-    evidence: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=12)
+    evidence: list[Annotated[str, Field(max_length=500)]] = Field(
+        default_factory=list, max_length=12
+    )
 
 
 class ClarificationAnswer(CaseFact):

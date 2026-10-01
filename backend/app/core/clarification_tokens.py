@@ -37,10 +37,7 @@ def sign_clarification(question: dict, *, contract_version: int = 3) -> str:
         raise ValueError("Signed clarifications require contract version 3 or 4")
     if contract_version == 4 and "fact_key" in question:
         raise ValueError("V4 clarifications must not contain a fact key")
-    payload = {
-        key: question[key]
-        for key in ("question_id", "selection_mode", "max_selections")
-    }
+    payload = {key: question[key] for key in ("question_id", "selection_mode", "max_selections")}
     if contract_version == 3:
         payload["fact_key"] = question["fact_key"]
     else:
@@ -81,9 +78,7 @@ def validate_clarification_answer(
         issued = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
         if not isinstance(issued, dict):
             raise ValueError
-        if contract_version == 4 and (
-            issued.get("contract_version") != 4 or "fact_key" in issued
-        ):
+        if contract_version == 4 and (issued.get("contract_version") != 4 or "fact_key" in issued):
             raise ValueError
         if contract_version == 3 and issued.get("contract_version", 3) != 3:
             raise ValueError

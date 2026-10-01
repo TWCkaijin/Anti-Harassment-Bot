@@ -157,7 +157,9 @@ def test_request_versions_use_only_their_matching_context_schema(version, schema
     for other_schema in {1, 2, 3} - {schema}:
         with pytest.raises(ValidationError):
             chat.ChatRequest(
-                message="合成問題", contract_version=version, case_context={"schema_version": other_schema}
+                message="合成問題",
+                contract_version=version,
+                case_context={"schema_version": other_schema},
             )
 
 
@@ -196,7 +198,9 @@ def test_v4_regeneration_passes_only_the_request_snapshot_to_the_agent(monkeypat
 def test_v4_regeneration_cannot_return_a_replacement_summary(monkeypatch):
     class Agent:
         async def run(self, **kwargs):
-            return result(summary_update={"base_revision": 0, "summary": "不能恢復的舊資料", "evidence": []})
+            return result(
+                summary_update={"base_revision": 0, "summary": "不能恢復的舊資料", "evidence": []}
+            )
 
     monkeypatch.setattr(chat, "get_agent", Agent)
     response = app.test_client().post(
@@ -284,7 +288,12 @@ def test_v3_and_v4_tokens_are_not_interchangeable():
     new = selected_answer()
     with pytest.raises(ValueError):
         validate_clarification_answer({**new, "fact_key": "behavior"})
-    old = {**new, "question_id": old_question["question_id"], "fact_key": "behavior", "validation_token": old_token}
+    old = {
+        **new,
+        "question_id": old_question["question_id"],
+        "fact_key": "behavior",
+        "validation_token": old_token,
+    }
     old.pop("context_revision")
     assert validate_clarification_answer(old)["fact_key"] == "behavior"
 
@@ -366,7 +375,10 @@ def test_v4_natural_response_uses_summary_revision_and_drops_legacy_or_private_f
     assert response.json["context_revision"] == 4
     assert response.json["summary_update"] == update
     assert response.json["clarification"]["context_revision"] == 5
-    assert not {"facts_revision", "fact_updates", "answer_sections", "provider_payload"} & response.json.keys()
+    assert (
+        not {"facts_revision", "fact_updates", "answer_sections", "provider_payload"}
+        & response.json.keys()
+    )
     assert "CANARY" not in response.get_data(as_text=True)
 
 
@@ -377,11 +389,16 @@ def test_v4_natural_response_uses_summary_revision_and_drops_legacy_or_private_f
         {"context_revision": False},
         {"summary_update": {"base_revision": 1, "summary": "情境", "evidence": []}},
         {"summary_update": {"base_revision": 0, "summary": "字" * 4001, "evidence": []}},
-        {"summary_update": {"base_revision": 0, "summary": "新情境", "evidence": []}, "clarification": question(revision=0)},
+        {
+            "summary_update": {"base_revision": 0, "summary": "新情境", "evidence": []},
+            "clarification": question(revision=0),
+        },
         {"clarification": {**question(), "fact_key": "behavior"}},
     ],
 )
-def test_v4_response_rejects_wrong_revision_oversized_summary_and_legacy_question(monkeypatch, guidance):
+def test_v4_response_rejects_wrong_revision_oversized_summary_and_legacy_question(
+    monkeypatch, guidance
+):
     class Agent:
         async def run(self, **kwargs):
             return result(**guidance)
@@ -421,9 +438,13 @@ def test_reasoning_stream_exposes_only_public_fields_preserves_additive_text_and
         async def run(self, on_reasoning, on_reply_delta, **kwargs):
             await on_reasoning({"kind": "encrypted", "data": "ENCRYPTED_CANARY", "stage": "answer"})
             for entry in emitted:
-                await on_reasoning({**entry, "signature": "SIGNATURE_CANARY", "tool_args": "ARGS_CANARY"})
+                await on_reasoning(
+                    {**entry, "signature": "SIGNATURE_CANARY", "tool_args": "ARGS_CANARY"}
+                )
             await on_reply_delta("先整理現在需要的協助。")
-            return result(reasoning=[{"text": "PRIVATE_REPLACEMENT", "kind": "text", "stage": "answer"}])
+            return result(
+                reasoning=[{"text": "PRIVATE_REPLACEMENT", "kind": "text", "stage": "answer"}]
+            )
 
     monkeypatch.setattr(chat, "get_agent", Agent)
     response = app.test_client().post("/api/v1/chat/", json=request_payload(stream=True))
@@ -438,15 +459,24 @@ def test_reasoning_stream_exposes_only_public_fields_preserves_additive_text_and
 def test_nonstream_reasoning_ignores_encrypted_data_and_caps_public_text(monkeypatch):
     class Agent:
         async def run(self, **kwargs):
-            return result(reasoning=[
-                {"type": "reasoning.encrypted", "data": "ENCRYPTED_CANARY"},
-                {"text": "公" * (chat.MAX_REASONING_CHARACTERS + 1), "kind": "summary", "stage": "answer", "signature": "SIGNATURE_CANARY"},
-            ])
+            return result(
+                reasoning=[
+                    {"type": "reasoning.encrypted", "data": "ENCRYPTED_CANARY"},
+                    {
+                        "text": "公" * (chat.MAX_REASONING_CHARACTERS + 1),
+                        "kind": "summary",
+                        "stage": "answer",
+                        "signature": "SIGNATURE_CANARY",
+                    },
+                ]
+            )
 
     monkeypatch.setattr(chat, "get_agent", Agent)
     response = app.test_client().post("/api/v1/chat/", json=request_payload())
     assert response.status_code == 200
-    assert response.json["reasoning"] == [{"text": "公" * chat.MAX_REASONING_CHARACTERS, "kind": "summary", "stage": "answer"}]
+    assert response.json["reasoning"] == [
+        {"text": "公" * chat.MAX_REASONING_CHARACTERS, "kind": "summary", "stage": "answer"}
+    ]
     assert "CANARY" not in response.get_data(as_text=True)
 
 
@@ -479,7 +509,9 @@ def test_disabling_analysis_hides_reasoning_and_analysis_on_all_transports(monke
 
 
 @pytest.mark.parametrize("published", ["reasoning", "analysis", "delta"])
-def test_any_visible_v4_output_disables_retry_without_removing_published_text(monkeypatch, published):
+def test_any_visible_v4_output_disables_retry_without_removing_published_text(
+    monkeypatch, published
+):
     class Agent:
         async def run(self, on_reasoning, on_analysis, on_reply_delta, **kwargs):
             if published == "reasoning":
@@ -504,7 +536,9 @@ def test_disconnect_after_reasoning_cancels_producer(monkeypatch):
     class Agent:
         async def run(self, on_reasoning, **kwargs):
             try:
-                await on_reasoning({"text": "公開摘要", "kind": "summary", "stage": "understanding"})
+                await on_reasoning(
+                    {"text": "公開摘要", "kind": "summary", "stage": "understanding"}
+                )
                 await asyncio.Event().wait()
             finally:
                 state["closed"] = True
@@ -521,14 +555,18 @@ def test_disconnect_after_reasoning_cancels_producer(monkeypatch):
 
 
 def test_v4_provider_errors_do_not_log_or_return_case_data_in_development(monkeypatch, caplog):
-    monkeypatch.setattr(chat, "get_runtime_config", lambda: replace(runtime_config(), development_mode=True))
+    monkeypatch.setattr(
+        chat, "get_runtime_config", lambda: replace(runtime_config(), development_mode=True)
+    )
 
     class Agent:
         async def run(self, **kwargs):
             raise RuntimeError("PRIVATE_V4_CANARY")
 
     monkeypatch.setattr(chat, "get_agent", Agent)
-    response = app.test_client().post("/api/v1/chat/", json=request_payload(message="PRIVATE_V4_CANARY"))
+    response = app.test_client().post(
+        "/api/v1/chat/", json=request_payload(message="PRIVATE_V4_CANARY")
+    )
     assert response.status_code == 500
     assert "PRIVATE_V4_CANARY" not in response.get_data(as_text=True)
     assert "PRIVATE_V4_CANARY" not in caplog.text
@@ -565,7 +603,9 @@ def snapshot_v4_agent(responses):
         "我剛剛在公車上被人摸屁股了，我該怎麼辦？",
     ],
 )
-def test_controlled_pii_ab_keeps_inputs_and_complete_first_provider_payload_equal(monkeypatch, message):
+def test_controlled_pii_ab_keeps_inputs_and_complete_first_provider_payload_equal(
+    monkeypatch, message
+):
     from tests.test_guided_v4 import final_answer, legal_plan, response
 
     plan = legal_plan()
@@ -579,7 +619,10 @@ def test_controlled_pii_ab_keeps_inputs_and_complete_first_provider_payload_equa
             headers={"Authorization": "Bearer offline-admin-key"},
             json={
                 "request": request_payload(message=message),
-                "overrides": {"enable_anonymization": masking, "pipeline": {"enable_skills": False}},
+                "overrides": {
+                    "enable_anonymization": masking,
+                    "pipeline": {"enable_skills": False},
+                },
             },
         )
         assert reply.status_code == 200
@@ -620,7 +663,9 @@ def test_api_signed_email_choices_mask_values_and_keep_tokens_out_of_provider_pr
     )
     agent, snapshots = snapshot_v4_agent([response(plan())])
     monkeypatch.setattr(chat, "get_agent", lambda: agent)
-    monkeypatch.setattr(chat, "get_runtime_config", lambda: runtime_config(pipeline={"enable_skills": False}))
+    monkeypatch.setattr(
+        chat, "get_runtime_config", lambda: runtime_config(pipeline={"enable_skills": False})
+    )
     reply = app.test_client().post(
         "/api/v1/chat/", json=request_payload(clarification_answer=answer)
     )
