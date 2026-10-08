@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from time import monotonic
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessage
@@ -30,9 +30,13 @@ from backend.app.core.streaming_reply import (
 )
 from backend.app.rag.base import RAGUnavailableError
 from backend.app.rag.firestore_vector import FirestoreVectorRAG
+from backend.app.rag.rerank import apply_provider_sort, retrieve_with_rerank
 
 logger = get_logger(__name__)
 settings = get_settings()
+
+if TYPE_CHECKING:
+    from backend.app.agents.guided_v4 import ApplicableLawPrediction
 
 
 def _assemble_system_instruction(overrides: dict[str, str] | None = None) -> str:
@@ -147,6 +151,13 @@ class AgentResult:
     guidance: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ApplicableLawPredictionResult:
+    """Admin-only prediction, deliberately independent from the chat response."""
+
+    prediction: "ApplicableLawPrediction"
+
+
 def _source_type_from_collection(
     collection_name: str | None,
     fallback_data_type: str,
@@ -218,7 +229,26 @@ class OpenRouterAgent:
         on_analysis: Callable[[dict], Awaitable[None]] | None = None,
         on_reasoning: Callable[[dict], Awaitable[None]] | None = None,
         regenerate_from_summary: bool = False,
-    ) -> AgentResult:
+        output_contract: Literal["chat", "applicable_laws_v1"] = "chat",
+        expected_applicable_laws_contract_sha256: str | None = None,
+        expected_chat_test_contract_sha256: str | None = None,
+    ) -> AgentResult | ApplicableLawPredictionResult:
+        if output_contract not in {"chat", "applicable_laws_v1"}:
+            raise AgentContractError("Unsupported output contract")
+        if (
+            expected_applicable_laws_contract_sha256 is not None
+            and output_contract != "applicable_laws_v1"
+        ):
+            raise AgentContractError("Applicable-law fingerprint requires prediction mode")
+        if expected_chat_test_contract_sha256 is not None and (
+            output_contract != "chat" or contract_version != 4
+        ):
+            raise AgentContractError("Chat-test fingerprint requires v4 chat")
+        if output_contract == "applicable_laws_v1" and (
+            contract_version != 4
+            or any(callback is not None for callback in (on_reply_delta, on_guidance, on_reasoning))
+        ):
+            raise AgentContractError("Applicable-law prediction requires non-streaming v4")
         if contract_version in (2, 3, 4):
             from backend.app.agents.guided_chat import run_guided
 
@@ -247,11 +277,22 @@ class OpenRouterAgent:
             if contract_version == 4:
                 arguments["on_reasoning"] = on_reasoning
                 arguments["regenerate_from_summary"] = regenerate_from_summary
+                arguments["output_contract"] = output_contract
+                arguments["expected_chat_test_contract_sha256"] = expected_chat_test_contract_sha256
+                arguments["expected_applicable_laws_contract_sha256"] = (
+                    expected_applicable_laws_contract_sha256
+                )
             if isinstance(self.client, AsyncOpenAI):
                 async with AsyncOpenAI(
                     base_url=settings.openrouter_base_url,
                     api_key=settings.openrouter_api_key,
                     timeout=settings.openrouter_request_timeout_seconds,
+                    **(
+                        {"max_retries": 0}
+                        if output_contract == "applicable_laws_v1"
+                        or expected_chat_test_contract_sha256 is not None
+                        else {}
+                    ),
                 ) as client:
                     return await runner(self.rag, client, **arguments)
             return await runner(self.rag, self.client, **arguments)
@@ -428,6 +469,7 @@ class OpenRouterAgent:
 
             if on_progress is not None:
                 await on_progress({"phase": "waiting_model"})
+            apply_provider_sort(create_kwargs, runtime_config)
             response_message = await self._create_message(
                 client, create_kwargs, on_reply_delta, on_guidance
             )
@@ -480,8 +522,10 @@ class OpenRouterAgent:
                             query = anonymize(query).anonymized
                         if on_progress is not None:
                             await on_progress({"phase": "retrieving"})
-                        docs = await self.rag.retrieve(
+                        docs = await retrieve_with_rerank(
+                            self.rag,
                             query,
+                            runtime_config,
                             top_k=runtime_config.rag_retrieval_top_k,
                             data_type=data_type,
                             collection_names_by_data_type=runtime_config.rag_collections,
@@ -546,6 +590,7 @@ class OpenRouterAgent:
                     }
                 if on_progress is not None:
                     await on_progress({"phase": "waiting_model"})
+                apply_provider_sort(second_create_kwargs, runtime_config)
                 final_message = await self._create_message(
                     client, second_create_kwargs, on_reply_delta, on_guidance
                 )

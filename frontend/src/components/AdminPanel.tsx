@@ -15,9 +15,13 @@ import {
   type ScenarioSkill,
   type ScenarioSkillInput,
 } from "../services/api";
+import RerankSettings from "./RerankSettings";
+import { retrievalSettings } from "../services/retrievalSettings";
 import MaterialIcon from "./MaterialIcon";
 import SkillActionsEditor from "./SkillActionsEditor";
 import AdminChatTest from "./AdminChatTest";
+import AdminBatchPrediction from "./AdminBatchPrediction";
+import AdminBehaviorTests from "./AdminBehaviorTests";
 import PipelineSettingsEditor from "./PipelineSettingsEditor";
 import { DEFAULT_PIPELINE } from "../services/pipeline";
 
@@ -27,7 +31,7 @@ interface AdminPanelProps {
   onRuntimeConfigChanged?: () => void;
 }
 
-type AdminTab = "system" | "prompts" | "skills" | "test";
+type AdminTab = "system" | "prompts" | "skills" | "test" | "batch" | "behavior";
 
 const TOKEN_STORAGE_KEY = "harassment_bot_admin_token";
 // TODO(auth): Replace the persistent static token with short-lived admin authentication.
@@ -78,6 +82,7 @@ function emptySkill(): ScenarioSkill {
 function configToUpdate(config: RuntimeConfig): RuntimeConfigUpdate {
   return {
     pipeline: { ...DEFAULT_PIPELINE, ...config.pipeline },
+    ...retrievalSettings(config),
     openrouter_model: config.openrouter_model,
     rag_retrieval_top_k: config.rag_retrieval_top_k,
     rag_distance_threshold: config.rag_distance_threshold,
@@ -107,10 +112,12 @@ function skillToInput(skill: ScenarioSkill): ScenarioSkillInput {
 }
 
 const tabs: Array<{ id: AdminTab; label: string; icon: string }> = [
-  { id: "test", label: "本次診斷測試", icon: "science" },
   { id: "system", label: "系統設定", icon: "tune" },
   { id: "prompts", label: "Prompt 設定", icon: "edit_note" },
   { id: "skills", label: "Skills 設定", icon: "account_tree" },
+  { id: "test", label: "本次診斷測試", icon: "science" },
+  { id: "batch", label: "批次預測", icon: "description" },
+  { id: "behavior", label: "對話行為測試", icon: "fact_check" },
 ];
 
 export default function AdminPanel({ isOpen, onClose, onRuntimeConfigChanged }: AdminPanelProps) {
@@ -126,6 +133,8 @@ export default function AdminPanel({ isOpen, onClose, onRuntimeConfigChanged }: 
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [batchHasData, setBatchHasData] = useState(false);
+  const [behaviorHasData, setBehaviorHasData] = useState(false);
 
   const selectedSkill = skills.find((skill) => skill.id === selectedSkillId) ?? null;
   const runtimeDirty = useMemo(() => {
@@ -286,6 +295,9 @@ export default function AdminPanel({ isOpen, onClose, onRuntimeConfigChanged }: 
   };
 
   const close = () => {
+    if ((batchHasData || behaviorHasData) && !window.confirm("關閉後台會停止測試並清除本次資料。請先下載 JSON 或 Excel；確定關閉？")) return;
+    setBatchHasData(false);
+    setBehaviorHasData(false);
     setIsAuthenticated(false);
     setVerifiedToken("");
     setStatus("");
@@ -319,21 +331,28 @@ export default function AdminPanel({ isOpen, onClose, onRuntimeConfigChanged }: 
         ) : (
           <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
             <nav className="flex w-full shrink-0 border-b border-outline/15 bg-surface-container-low p-3 sm:w-44 sm:flex-col sm:border-r sm:border-b-0">
-              <div className="flex gap-1 overflow-x-auto sm:block sm:space-y-1">
-                {tabs.map((tab) => <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-semibold sm:w-full ${activeTab === tab.id ? "bg-white text-primary shadow-sm" : "text-on-surface/65 hover:bg-white/70"}`}><MaterialIcon icon={tab.icon} size={18} />{tab.label}</button>)}
+              <div className="w-full space-y-3">
+                {[{ title: "設定", items: tabs.slice(0, 3) }, { title: "驗證及測試", items: tabs.slice(3) }].map((group, index) => <div key={group.title} role="group" aria-label={group.title} className={index ? "border-t border-outline/20 pt-3" : ""}>
+                  <p className="mb-1 px-3 text-xs font-semibold text-on-surface/50">{group.title}</p>
+                  <div className="flex gap-1 overflow-x-auto sm:block sm:space-y-1">
+                    {group.items.map(tab => <button key={tab.id} onClick={() => setActiveTab(tab.id)} aria-current={activeTab === tab.id ? "page" : undefined} className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-semibold sm:w-full ${activeTab === tab.id ? "bg-white text-primary shadow-sm" : "text-on-surface/65 hover:bg-white/70"}`}><MaterialIcon icon={tab.icon} size={18} />{tab.label}</button>)}
+                  </div>
+                </div>)}
               </div>
-              <div className="mt-auto hidden whitespace-pre-line border-t border-outline/10 pt-3 text-xs leading-5 text-on-surface/50 sm:block">{activeTab === "skills" ? "共用 collection\nscenario_scripts" : activeTab === "test" ? `僅本次請求\n基準：${config.environment_document_id ?? "local fallback"}` : `目前環境\nruntime_config/${config.environment_document_id ?? "local fallback"}`}</div>
+              <div className="mt-auto hidden whitespace-pre-line border-t border-outline/10 pt-3 text-xs leading-5 text-on-surface/50 sm:block">{activeTab === "skills" ? "共用 collection\nscenario_scripts" : activeTab === "behavior" ? "本機紀錄與人工覆核\n離開前請下載 JSON" : activeTab === "batch" ? "檔案在本機讀取\n逐筆預測並下載副本" : activeTab === "test" ? `僅本次請求\n基準：${config.environment_document_id ?? "local fallback"}` : `目前環境\nruntime_config/${config.environment_document_id ?? "local fallback"}`}</div>
             </nav>
             <div className="min-w-0 flex-1 overflow-y-auto p-6">
-              {activeTab === "system" && <SystemSettings config={config} savedMaintenanceMessage={lastLoadedConfig?.maintenance_message} onChange={setConfig} />}
+              {activeTab === "system" && <SystemSettings adminToken={verifiedToken} config={config} savedMaintenanceMessage={lastLoadedConfig?.maintenance_message} onChange={setConfig} />}
               {activeTab === "prompts" && <PromptSettings config={config} onChange={setConfig} />}
               {activeTab === "skills" && <SkillsSettings skills={skills} selectedSkill={selectedSkill} onSelect={setSelectedSkillId} onCreate={createSkill} onChange={updateSkill} />}
               {activeTab === "test" && <AdminChatTest key={`${lastLoadedConfig?.environment_document_id}-${lastLoadedConfig?.updated_at}`} adminToken={verifiedToken} config={lastLoadedConfig ?? config} />}
+              <div hidden={activeTab !== "batch"}><AdminBatchPrediction adminToken={verifiedToken} onHasDataChange={setBatchHasData} /></div>
+              <div hidden={activeTab !== "behavior"}><AdminBehaviorTests adminToken={verifiedToken} onHasDataChange={setBehaviorHasData} /></div>
             </div>
           </div>
         )}
 
-          {isAuthenticated && activeTab !== "test" && <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-outline/15 px-5 py-3">
+          {isAuthenticated && activeTab !== "test" && activeTab !== "batch" && activeTab !== "behavior" && <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-outline/15 px-5 py-3">
           <p className={`text-xs ${error ? "text-error" : "text-on-surface/55"}`}>{error || status || (activeTab === "skills" ? "Skills 為 dev/main 共用設定" : "Runtime 設定只會寫入目前環境")}</p>
           {activeTab === "skills" ? <div className="flex flex-wrap gap-2"><button onClick={seedSkill} disabled={isSaving} className="rounded-lg border border-secondary/25 px-3 py-2 text-sm font-semibold text-secondary disabled:opacity-50">建立範例</button><button onClick={removeSkill} disabled={isSaving || !selectedSkill} className="rounded-lg border border-error/25 px-3 py-2 text-sm font-semibold text-error disabled:opacity-50">刪除</button><button onClick={saveSkill} disabled={isSaving || !selectedSkill} className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{isSaving ? "儲存中" : "儲存 Skill"}</button></div> : <div className="flex flex-wrap gap-2"><button onClick={seedRuntime} disabled={isSaving} className="rounded-lg px-3 py-2 text-sm font-semibold text-on-surface hover:bg-surface-container disabled:opacity-50">補齊設定</button><button onClick={resetRuntime} disabled={isSaving} className="rounded-lg border border-error/25 px-3 py-2 text-sm font-semibold text-error disabled:opacity-50">重置設定</button><button onClick={saveRuntime} disabled={isSaving || !runtimeDirty} className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{isSaving ? "儲存中" : runtimeDirty ? "儲存變更" : "已同步"}</button></div>}
         </footer>}
@@ -342,10 +361,31 @@ export default function AdminPanel({ isOpen, onClose, onRuntimeConfigChanged }: 
   );
 }
 
-function SystemSettings({ config, savedMaintenanceMessage, onChange }: { config: RuntimeConfig; savedMaintenanceMessage?: string; onChange: (config: RuntimeConfig) => void }) {
+function SystemSettings({ config, savedMaintenanceMessage, onChange, adminToken }: { adminToken: string; config: RuntimeConfig; savedMaintenanceMessage?: string; onChange: (config: RuntimeConfig) => void }) {
   const set = (updates: Partial<RuntimeConfig>) => onChange({ ...config, ...updates });
-  return <div className="mx-auto max-w-2xl space-y-7"><div><h3 className="text-xl font-bold">系統設定</h3><p className="mt-1 text-sm text-on-surface/60">模型、檢索資料庫與 runtime 開關只作用於目前環境。</p></div><section className="space-y-4"><h4 className="text-sm font-bold text-on-surface">模型與生成</h4><Field label="OpenRouter Model"><input value={config.openrouter_model} onChange={(event) => set({ openrouter_model: event.target.value })} className="input" /></Field><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="Temperature"><input type="number" min="0" max="2" step="0.05" value={config.temperature} onChange={(event) => set({ temperature: Number(event.target.value) })} className="input" /></Field><Field label="Top P"><input type="number" min="0.01" max="1" step="0.05" value={config.top_p} onChange={(event) => set({ top_p: Number(event.target.value) })} className="input" /></Field><Field label="Max tokens"><input type="number" min="0" max="8192" value={config.max_tokens} onChange={(event) => set({ max_tokens: Number(event.target.value) })} className="input" /><span className="mt-1 block text-[11px] text-on-surface/50">0 表示不設定上限</span></Field><Field label="思考等級"><select value={config.reasoning_effort} onChange={(event) => set({ reasoning_effort: event.target.value as RuntimeConfig["reasoning_effort"] })} className="input"><option value="none">關閉</option><option value="minimal">最少</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">很高</option><option value="max">最大</option></select><span className="mt-1 block text-[11px] text-on-surface/50">需使用支援 reasoning 的模型</span></Field></div></section><section className="space-y-4 border-t border-outline/10 pt-6"><h4 className="text-sm font-bold">檢索設定</h4><Field label="RAG Retrieval Top K"><input type="number" min="1" max="20" value={config.rag_retrieval_top_k} onChange={(event) => set({ rag_retrieval_top_k: Number(event.target.value) })} className="input" /></Field><Field label="RAG Distance Threshold"><input type="number" min="0" max="2" step="0.01" value={config.rag_distance_threshold ?? ""} onChange={(event) => set({ rag_distance_threshold: event.target.value === "" ? null : Number(event.target.value) })} className="input" placeholder="停用" /><span className="mt-1 block text-[11px] text-on-surface/50">0–2；留空表示停用，數值越小代表越相似</span></Field>{(["law", "judgment", "remedy"] as const).map((key) => <Field key={key} label={key}><input value={config.rag_collections[key]} onChange={(event) => set({ rag_collections: { ...config.rag_collections, [key]: event.target.value } })} className="input" /></Field>)}</section><section className="space-y-3 border-t border-outline/10 pt-6"><h4 className="text-sm font-bold">Runtime 開關</h4><Toggle label="後端 PII 遮罩（第二層）" checked={config.enable_anonymization} onChange={(checked) => set({ enable_anonymization: checked })} /><Toggle label="送出前遮罩確認" checked={config.enable_client_privacy_review !== false} onChange={(checked) => set({ enable_client_privacy_review: checked })} /><p className="text-xs leading-relaxed text-on-surface/65">開啟時可檢查並修改遮罩後的內容；關閉時略過確認視窗，仍會自動遮罩文字。後端 PII 由上方開關獨立控制。儲存後本頁立即重新讀取設定；其他已開啟頁面請重新連線或重新整理。</p><Toggle label="允許圖片上傳" checked={config.enable_image_upload} onChange={(checked) => set({ enable_image_upload: checked })} /><p className="text-xs leading-relaxed text-on-surface/65">圖片以原圖傳送，不做自動去識別；支援 PNG、JPEG、GIF、WebP，每張最多 5 MB。</p><Toggle label="Development mode" checked={config.development_mode} onChange={(checked) => set({ development_mode: checked })} /></section>
-    <section className="border-t border-outline/10 pt-6"><PipelineSettingsEditor value={{ ...DEFAULT_PIPELINE, ...config.pipeline }} onChange={pipeline => set({ pipeline })} /></section>
+  return <div className="mx-auto max-w-2xl space-y-7">
+    <div><h3 className="text-xl font-bold">系統設定</h3><p className="mt-1 text-sm text-on-surface/60">模型、檢索與流程設定只作用於目前環境。</p></div>
+    <section aria-label="模型設定" className="space-y-4">
+      <h4 className="text-sm font-bold">模型設定</h4>
+      <Field label="OpenRouter Model"><input value={config.openrouter_model} onChange={(event) => set({ openrouter_model: event.target.value })} className="input" /></Field><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="Temperature"><input type="number" min="0" max="2" step="0.05" value={config.temperature} onChange={(event) => set({ temperature: Number(event.target.value) })} className="input" /></Field><Field label="Top P"><input type="number" min="0.01" max="1" step="0.05" value={config.top_p} onChange={(event) => set({ top_p: Number(event.target.value) })} className="input" /></Field><Field label="Max tokens"><input type="number" min="0" max="8192" value={config.max_tokens} onChange={(event) => set({ max_tokens: Number(event.target.value) })} className="input" /><span className="mt-1 block text-[11px] text-on-surface/50">0 表示不設定上限</span></Field><Field label="思考等級"><select value={config.reasoning_effort} onChange={(event) => set({ reasoning_effort: event.target.value as RuntimeConfig["reasoning_effort"] })} className="input"><option value="none">關閉</option><option value="minimal">最少</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="xhigh">很高</option><option value="max">最大</option></select><span className="mt-1 block text-[11px] text-on-surface/50">需使用支援 reasoning 的模型</span></Field></div>
+      <RerankSettings config={config} onChange={set} adminToken={adminToken} />
+    </section>
+    <section aria-label="處理流程" className="border-t border-outline/10 pt-6">
+      <PipelineSettingsEditor value={{ ...DEFAULT_PIPELINE, ...config.pipeline }} onChange={pipeline => set({ pipeline })} maskingEnabled={config.enable_anonymization}>
+        <Toggle label="後端 PII 遮罩（第二層）" checked={config.enable_anonymization} onChange={checked => set({ enable_anonymization: checked })} />
+        <Toggle label="送出前遮罩確認" checked={config.enable_client_privacy_review !== false} onChange={checked => set({ enable_client_privacy_review: checked })} />
+        <p className="text-xs leading-relaxed text-on-surface/65">瀏覽器會自動遮罩文字；此開關決定送出前是否顯示確認視窗。後端遮罩另由上方開關控制。</p>
+        <Toggle label="啟用 Reranking" checked={config.rag_rerank_enabled ?? false} onChange={checked => set({ rag_rerank_enabled: checked })} />
+        <p className="text-xs text-on-surface/60">資料檢索開啟時，才會對檢索結果重排。</p>
+        <Toggle label="允許圖片上傳" checked={config.enable_image_upload} onChange={checked => set({ enable_image_upload: checked })} />
+        <p className="text-xs leading-relaxed text-on-surface/65">圖片以原圖傳送，不做自動去識別；每張最多 5 MB。</p>
+        <Toggle label="Development mode" checked={config.development_mode} onChange={checked => set({ development_mode: checked })} />
+      </PipelineSettingsEditor>
+    </section>
+    <section aria-label="檢索設定" className="space-y-4 border-t border-outline/10 pt-6">
+      <h4 className="text-sm font-bold">檢索設定</h4>
+      <Field label="RAG Retrieval Top K"><input type="number" min="1" max="20" value={config.rag_retrieval_top_k} onChange={(event) => set({ rag_retrieval_top_k: Number(event.target.value) })} className="input" /></Field><Field label="RAG Distance Threshold"><input type="number" min="0" max="2" step="0.01" value={config.rag_distance_threshold ?? ""} onChange={(event) => set({ rag_distance_threshold: event.target.value === "" ? null : Number(event.target.value) })} className="input" placeholder="停用" /><span className="mt-1 block text-[11px] text-on-surface/50">0–2；留空表示停用，數值越小代表越相似</span></Field>{(["law", "judgment", "remedy"] as const).map((key) => <Field key={key} label={key}><input value={config.rag_collections[key]} onChange={(event) => set({ rag_collections: { ...config.rag_collections, [key]: event.target.value } })} className="input" /></Field>)}
+    </section>
     <section className="space-y-3 border-t border-outline/10 pt-6">
       <h4 className="text-sm font-bold">維護模式</h4>
       <p className={`rounded-lg px-3 py-3 text-sm font-semibold ${savedMaintenanceMessage?.trim() ? "bg-error/10 text-error" : "bg-surface-container-low text-on-surface/65"}`}>

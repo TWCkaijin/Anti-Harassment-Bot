@@ -6,7 +6,6 @@ or Firestore.
 ```text
 backend/scripts/common/   Shared ingestion utilities
 backend/scripts/ingest/   Firestore Vector Search ingestion entrypoints
-backend/scripts/legacy/   Compatibility wrappers for old script names or flows
 ```
 
 Use these after source data has already been standardized under `data/`.

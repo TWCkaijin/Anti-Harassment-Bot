@@ -13,6 +13,7 @@ import {
   type ScenarioSkill,
 } from "../services/api";
 import AdminPanel from "./AdminPanel";
+import { DEFAULT_PIPELINE } from "../services/pipeline";
 import PrivacyReviewDialog from "./PrivacyReviewDialog";
 
 vi.mock("../services/api", async () => {
@@ -351,4 +352,31 @@ describe("AdminPanel runtime config", () => {
       "body.rag_distance_threshold: Must be between 0 and 2",
     )).toBeInTheDocument();
   });
+});
+
+it("groups models and workflow controls and preserves custom mask scope when toggling its master", async () => {
+  vi.mocked(getRuntimeConfig).mockResolvedValue({ ...runtimeConfig, pipeline: { ...DEFAULT_PIPELINE, mask_retrieval_query: false } });
+  vi.mocked(updateRuntimeConfig).mockResolvedValue(runtimeConfig);
+  render(<AdminPanel isOpen onClose={vi.fn()} />);
+  fireEvent.change(screen.getByPlaceholderText("輸入 ADMIN_API_KEY"), { target: { value: "admin-token" } });
+  fireEvent.click(screen.getByRole("button", { name: /驗證並進入/ }));
+  const models = await screen.findByRole("region", { name: "模型設定" });
+  expect(within(models).getByLabelText("OpenRouter Model")).toBeVisible();
+  expect(within(models).getByLabelText("Rerank 模型")).toBeVisible();
+  expect(within(models).queryByRole("checkbox")).not.toBeInTheDocument();
+  const workflows = screen.getByRole("region", { name: "處理流程" });
+  expect(within(workflows).getByRole("checkbox", { name: "啟用 Reranking" })).toBeVisible();
+  expect(screen.getAllByRole("checkbox", { name: "啟用 Reranking" })).toHaveLength(1);
+  expect(within(screen.getByRole("group", { name: "驗證及測試" })).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("對話行為測試")]);
+  expect(within(screen.getByRole("navigation")).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("系統設定"), expect.stringContaining("Prompt 設定"), expect.stringContaining("Skills 設定"), expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("對話行為測試")]);
+  fireEvent.click(screen.getByText("進階遮罩範圍（自訂範圍）"));
+  const queryMask = screen.getByLabelText("遮罩檢索查詢");
+  expect(queryMask).not.toBeChecked();
+  fireEvent.click(screen.getByRole("checkbox", { name: "後端 PII 遮罩（第二層）" }));
+  expect(queryMask).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: "後端 PII 遮罩（第二層）" }));
+  expect(queryMask).not.toBeDisabled(); expect(queryMask).not.toBeChecked();
+  fireEvent.click(screen.getByRole("checkbox", { name: "啟用 Reranking" }));
+  fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+  await waitFor(() => expect(updateRuntimeConfig).toHaveBeenCalledWith("admin-token", expect.objectContaining({ rag_rerank_enabled: true, enable_anonymization: true, pipeline: expect.objectContaining({ mask_retrieval_query: false }) })));
 });

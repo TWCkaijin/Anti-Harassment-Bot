@@ -21,10 +21,6 @@
 
 使用 `tests/browser_fixture_server.py` 與本機 Vite，設定 `VITE_API_BASE_URL=http://127.0.0.1:5055/api`、`VITE_ANALYTICS_ENABLED=false`。執行 `node tests/browser_homepage_smoke.mjs --stage after`；可用 `PLAYWRIGHT_MODULE` 指定既有安裝。瀏覽器檢查封鎖非本機請求，確認圖示不依賴外部字型，並輸出桌面、手機與窄螢幕的中英文畫面。測試不代表正式部署、真人諮詢或法律正確性驗證。
 
-2026-09-30 的本機合成資料驗收涵蓋 1440、390、320 px 的中英文畫面、12 次合成聊天、頁籤資源、輸入與建議操作、側邊欄與設定。外部字型請求被封鎖，因此預覽使用既有字型備援；圖示皆來自本地 SVG。
 
-- [桌面首頁](previews/desktop-zh-TW-homepage.png)
-- [手機首頁](previews/mobile-zh-TW-homepage.png)
-- [320 px 中文](previews/narrow-zh-TW-homepage.png)／[320 px 英文](previews/narrow-en-homepage.png)
-- [標記的 16／24／32／48 px 呈現](previews/brand-mark-sizes.png)
-- [瀏覽器驗證紀錄](previews/browser-verification.json)
+
+歷史設計預覽與瀏覽器截圖已外部封存；正式品牌素材仍位於 frontend/public 與 frontend/src/assets。驗收以 docs/DELIVERY.md 為準。

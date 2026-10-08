@@ -37,6 +37,7 @@ from backend.app.core.scenario_scripts import (
     get_matching_scenario_scripts,
 )
 from backend.app.core.streaming_reply import MAX_STREAM_RESPONSE_LENGTH
+from backend.app.rag.rerank import apply_provider_sort, retrieve_with_rerank
 
 
 class AnswerSection(StrictModel):
@@ -920,9 +921,12 @@ async def run_guided(
                 masking["changed_values"] += int(changed)
             await progress("retrieving")
             started = monotonic()
+            rerank_before = metrics.get("rerank_ms", 0)
             # One embedding serves all independent collection reads.
-            docs = await rag.retrieve(
+            docs = await retrieve_with_rerank(
+                rag,
                 query,
+                config,
                 top_k=config.rag_retrieval_top_k,
                 data_type=types[0] if len(types) == 1 else "all",
                 collection_names_by_data_type=config.rag_collections,
@@ -936,7 +940,9 @@ async def run_guided(
                     else {}
                 ),
             )
-            metrics["retrieval_ms"] += (monotonic() - started) * 1000
+            metrics["retrieval_ms"] += (monotonic() - started) * 1000 - (
+                metrics.get("rerank_ms", 0) - rerank_before
+            )
             for doc in docs:
                 collection = doc.metadata.get("collection")
                 kind = next(
@@ -967,6 +973,7 @@ async def run_guided(
                     "reasoning": {"effort": config.reasoning_effort, "exclude": True}
                 }
             options.update(extra or {})
+            apply_provider_sort(options, config)
             metrics["model_calls"] += 1
             started = monotonic()
             response = await client.chat.completions.create(**options)

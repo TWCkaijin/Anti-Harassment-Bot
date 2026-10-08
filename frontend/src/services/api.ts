@@ -156,6 +156,13 @@ export interface HealthResponse {
 }
 
 export interface RuntimeConfig {
+  openrouter_provider_sort?: "auto" | "latency" | "throughput" | "price";
+  rag_rerank_enabled?: boolean;
+  rag_rerank_model?: string;
+  rag_rerank_candidate_k?: number;
+  rag_rerank_timeout_seconds?: number;
+  rag_rerank_max_chars_per_doc?: number;
+
   pipeline?: PipelineSettings;
   openrouter_model: string;
   rag_retrieval_top_k: number;
@@ -179,11 +186,19 @@ export interface RuntimeConfig {
   environment_document_id?: string;
   updated_at?: string;
   updated_by?: string;
+  applicable_laws_contract_sha256?: string;
+  chat_test_contract_sha256?: string;
 }
 
 export type RuntimeConfigUpdate = Partial<
   Pick<
     RuntimeConfig,
+    | "openrouter_provider_sort"
+    | "rag_rerank_enabled"
+    | "rag_rerank_model"
+    | "rag_rerank_candidate_k"
+    | "rag_rerank_timeout_seconds"
+    | "rag_rerank_max_chars_per_doc"
     | "openrouter_model"
     | "rag_retrieval_top_k"
     | "rag_distance_threshold"
@@ -202,6 +217,19 @@ export type RuntimeConfigUpdate = Partial<
 > & { pipeline?: Partial<PipelineSettings> };
 
 export interface AdminChatTestResult { response: ChatResponse; diagnostics: Record<string, unknown> }
+
+export const APPLICABLE_LAW_NAMES = ["性騷法", "性工法", "性平法"] as const;
+export type ApplicableLawName = typeof APPLICABLE_LAW_NAMES[number];
+export interface ApplicableLawPrediction {
+  predicted_laws: ApplicableLawName[];
+  decision_status: "predicted" | "insufficient_facts" | "no_target_law";
+  decision_reason: string | null;
+}
+export interface AdminApplicableLawTestResult {
+  output_contract: "applicable_laws_v1";
+  prediction: ApplicableLawPrediction;
+  diagnostics: Record<string, unknown>;
+}
 
 // ── API 錯誤類別 ─────────────────────────────────────────────────────────
 
@@ -573,16 +601,56 @@ export async function getRuntimeConfig(adminToken: string): Promise<RuntimeConfi
   });
 }
 
-export async function runAdminChatTest(adminToken: string, request: ChatRequest, overrides: RuntimeConfigUpdate, signal?: AbortSignal): Promise<AdminChatTestResult> {
+export async function runAdminChatTest(adminToken: string, request: ChatRequest, overrides: RuntimeConfigUpdate, signal?: AbortSignal, expectedContractSha256?: string): Promise<AdminChatTestResult> {
   const reviewedBody = reviewedRequestBody(request);
   const guard = requestGuard(190_000, "診斷測試逾時，請檢查服務後再試。", signal);
   try {
     const result = await apiFetch<AdminChatTestResult>("/v1/admin/chat-test", {
       method: "POST", headers: { Authorization: `Bearer ${adminToken}` }, signal: guard.signal,
-      body: `{"request":${reviewedBody},"overrides":${JSON.stringify(overrides)}}`,
+      body: `{"request":${reviewedBody},"overrides":${JSON.stringify(overrides)}${expectedContractSha256 ? `,"expected_chat_test_contract_sha256":${JSON.stringify(expectedContractSha256)}` : ""}}`,
     });
     if (!isRecord(result.diagnostics)) throw new ApiError(502, "診斷回應格式不正確");
     return { response: parseChatResponse(result.response, request.contract_version ?? 1), diagnostics: result.diagnostics };
+  } catch (error) { if (guard.signal.aborted) throw guard.signal.reason; throw error; }
+  finally { guard.dispose(); }
+}
+
+/** This diagnostic contract is independent of normal chat replies and never repairs model output. */
+export function parseAdminApplicableLawTestResult(payload: unknown): AdminApplicableLawTestResult {
+  const invalid = () => new ApiError(502, "適用法規預測格式不正確");
+  if (!isRecord(payload) || Object.keys(payload).some(key => !["output_contract", "prediction", "diagnostics"].includes(key))
+    || payload.output_contract !== "applicable_laws_v1" || !isRecord(payload.diagnostics)
+    || !isRecord(payload.prediction)) throw invalid();
+  const prediction = payload.prediction;
+  const laws = prediction.predicted_laws;
+  const status = prediction.decision_status;
+  const reason = prediction.decision_reason;
+  if (Object.keys(prediction).some(key => !["predicted_laws", "decision_status", "decision_reason"].includes(key))
+    || !Array.isArray(laws) || laws.length > 3
+    || !laws.every(law => APPLICABLE_LAW_NAMES.some(name => name === law))
+    || new Set(laws).size !== laws.length
+    || typeof status !== "string" || !["predicted", "insufficient_facts", "no_target_law"].includes(status)
+    || (status === "predicted" ? laws.length === 0 : laws.length !== 0)
+    || (status === "predicted" ? reason !== null : typeof reason !== "string" || !reason.trim() || [...reason].length > 300)) throw invalid();
+  return {
+    output_contract: "applicable_laws_v1",
+    prediction: { predicted_laws: [...laws] as ApplicableLawName[], decision_status: status as ApplicableLawPrediction["decision_status"], decision_reason: reason as string | null },
+    diagnostics: payload.diagnostics,
+  };
+}
+
+/** Send only the approved v4 snapshot to the authenticated, non-streaming prediction endpoint. */
+export async function runAdminApplicableLawTest(adminToken: string, request: ChatRequest, overrides: RuntimeConfigUpdate, signal?: AbortSignal, expectedContractSha256?: string): Promise<AdminApplicableLawTestResult> {
+  const reviewedBody = reviewedRequestBody(request);
+  if (!adminToken.trim()) throw new ApiError(401, "請先登入管理員帳號");
+  if (request.contract_version !== 4) throw new ApiError(422, "適用法規預測只支援 v4");
+  const guard = requestGuard(190_000, "診斷測試逾時，請檢查服務後再試。", signal);
+  try {
+    const result = await apiFetch<unknown>("/v1/admin/chat-test", {
+      method: "POST", headers: { Authorization: `Bearer ${adminToken}` }, signal: guard.signal,
+      body: `{"request":${reviewedBody},"overrides":${JSON.stringify(overrides)},"output_contract":"applicable_laws_v1"${expectedContractSha256 ? `,"expected_applicable_laws_contract_sha256":${JSON.stringify(expectedContractSha256)}` : ""}}`,
+    });
+    return parseAdminApplicableLawTestResult(result);
   } catch (error) { if (guard.signal.aborted) throw guard.signal.reason; throw error; }
   finally { guard.dispose(); }
 }
@@ -650,4 +718,8 @@ export async function deleteScenarioSkill(adminToken: string, id: string): Promi
     method: "DELETE",
     headers: { Authorization: `Bearer ${adminToken}` },
   });
+}
+
+export async function getRerankModels(adminToken: string): Promise<{ data: { id: string; name: string }[] }> {
+  return apiFetch("/v1/admin/rerank-models", { headers: { "X-Admin-Token": adminToken } });
 }

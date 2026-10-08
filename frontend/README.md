@@ -1,73 +1,17 @@
-# React + TypeScript + Vite
+# 前端維護
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React、TypeScript、Vite、Tailwind CSS；使用 Node.js 24 / pnpm 9。從專案根目錄執行：
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+pnpm --dir frontend install --frozen-lockfile
+VITE_API_BASE_URL=http://127.0.0.1:5000/api pnpm --dir frontend dev --host 127.0.0.1
+pnpm --dir frontend lint
+pnpm --dir frontend test:coverage
+pnpm --dir frontend build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Flask 預設本機 port 為 5000。既有 `.env` 保留作過渡用途；新環境參考 `.env.example`，不覆寫既有設定。沒有明確設定 API URL 時，程式仍有舊 8000 fallback，因此應始終指定 `VITE_API_BASE_URL`。
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+`dist/` 是可重建的公開產物。`VITE_*` 會進入瀏覽器，僅能放公開設定，不能放 Admin token、服務帳戶私鑰或模型 API key。Firebase Web app 設定與 Admin service-account 私鑰不同。
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+應用維護與驗收方式見 [開發維運手冊](../docs/technical-report/manuals/開發維運手冊.md)，過渡與部署見 [交接文件](../docs/HANDOVER.md)。

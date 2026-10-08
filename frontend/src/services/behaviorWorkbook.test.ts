@@ -1,0 +1,43 @@
+import { webcrypto } from "node:crypto";
+import { strFromU8, unzipSync } from "fflate";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { behaviorResult, behaviorRun } from "../test/behaviorFixture";
+import { exportBehaviorWorkbook } from "./behaviorWorkbook";
+import { refreshBehaviorEvidence } from "./behaviorRecords";
+import { parseScenarioWorkbook } from "./scenarioWorkbook";
+import { emptySummaryContext } from "./caseFacts";
+
+beforeEach(() => vi.stubGlobal("crypto", webcrypto));
+afterEach(() => vi.unstubAllGlobals());
+it("exports three readable report sheets, numeric timing and literal strings", async () => {
+  let run = behaviorRun();
+  const request = { message: "=not-a-formula", history: [], use_rag: true, contract_version: 4 as const, case_context: emptySummaryContext() };
+  const result = behaviorResult(request, "=literal <test> & report");
+  run.records[0] = { ...run.records[0], status: "completed", turns: [{ number: 1, attempt: 1, status: "completed", startedAt: "2026-10-08T00:00:00Z", elapsedMs: 1234, request, result, contextAfter: emptySummaryContext(), issues: [] }] };
+  run = await refreshBehaviorEvidence(run);
+  run.records[0].review = { verdict: "fail", critical: true, reason: "=literal review", reviewer: "合成覆核者", reviewedAt: "2026-10-08T00:01:00Z", evidenceSha256: run.records[0].evidenceSha256 };
+  const bytes = exportBehaviorWorkbook(run);
+  const copy = parseScenarioWorkbook(bytes, "report.xlsx");
+  expect(copy.sheets.map(sheet => sheet.name)).toEqual(["測試總表", "逐輪紀錄", "執行設定"]);
+  expect(copy.sheets[0].rows.get(2)?.get(6)).toBe("失敗");
+  expect(copy.sheets[0].rows.get(2)?.get(10)).toBe("是");
+  expect(copy.sheets[1].rows.get(2)?.get(6)).toBe("1.23");
+  expect(copy.sheets[1].rows.get(2)?.get(7)).toBe("=not-a-formula");
+  expect(copy.sheets[1].rows.get(2)?.get(10)).toBe("=literal <test> & report");
+  const xml = strFromU8(unzipSync(bytes)["xl/worksheets/sheet2.xml"]);
+  expect(xml).not.toContain("<f>"); expect(xml).toContain('<c r="G2" s="2"><v>1.23</v>');
+  expect(xml).toContain('state="frozen"');
+});
+it("splits long evidence without truncation or broken surrogate pairs and excludes secrets", () => {
+  const run = behaviorRun();
+  const reply = "字😀".repeat(18000);
+  const request = { message: "合成", history: [], use_rag: true, contract_version: 4 as const, case_context: emptySummaryContext() };
+  const result = behaviorResult(request, reply); result.diagnostics.validation_token = "never-export";
+  run.records[0] = { ...run.records[0], status: "completed", turns: [{ number: 1, attempt: 1, status: "completed", startedAt: "2026-10-08T00:00:00Z", elapsedMs: 0, request, result, contextAfter: emptySummaryContext(), issues: [] }] };
+  const bytes = exportBehaviorWorkbook(run), copy = parseScenarioWorkbook(bytes, "long.xlsx");
+  const rows = [...copy.sheets[1].rows].filter(([number]) => number > 1);
+  expect(rows.map(([, cells]) => cells.get(10) ?? "").join("")).toBe(reply);
+  expect(rows.every(([, cells]) => cells.get(0) === "B01" && cells.get(1) === "1")).toBe(true);
+  expect(rows.every(([, cells]) => [...cells.values()].every(value => value.length <= 30000))).toBe(true);
+  expect(Object.values(unzipSync(bytes)).map(data => strFromU8(data)).join("")).not.toContain("never-export");
+});

@@ -1,5 +1,9 @@
 # 「適用法規」API 可靠性評測
 
+五類對話行為的後台套件、多輪執行、人工覆核及 JSON／Excel 匯出，請見 [對話行為測試](../../docs/technical-report/BEHAVIOR_TESTS.md)。此功能使用一般對話 v4，不使用法名命中評分。
+
+三法有序預測與 Excel 副本寫入使用獨立工具 `applicable_law_predict.py`，操作與驗證見 [三法適用預測](../../docs/technical-report/BATCH_PREDICTION.md)。它不使用本頁舊工具的法名覆蓋率或 gold 排列來產生預測。
+
 新增的離線四層評測、634題未覆核候選資料、合成反例與v2多輪harness，請見 [FOUR_LAYER.md](FOUR_LAYER.md)。本頁保留既有法名覆蓋率工具的操作方式；法名命中不等於法律內容正確。
 
 首可讀文字／完整回覆P50與P95、階段耗時、呼叫次數及成本待測工具，請見 [BENCHMARK.md](BENCHMARK.md)；預設離線，報告不包含案件原文。

@@ -6,8 +6,11 @@ import {
   normalizeApiErrorDetail,
   sendChat as sendApprovedChat,
   parseChatResponse,
+  parseAdminApplicableLawTestResult,
   updateRuntimeConfig,
   runAdminChatTest as runApprovedAdminChatTest,
+  runAdminApplicableLawTest as runApprovedAdminApplicableLawTest,
+  type AdminApplicableLawTestResult,
   type RuntimeConfig,
 } from "./api";
 import { approvePrivacyDraft, createPrivacyDraft } from "./clientPrivacy";
@@ -16,7 +19,8 @@ import { approvePrivacyDraft, createPrivacyDraft } from "./clientPrivacy";
 // clientPrivacy tests exercise the actual unapproved/approved transport boundary.
 const sendChat = (...args: Parameters<typeof sendApprovedChat>) => sendApprovedChat(approvePrivacyDraft(createPrivacyDraft(args[0])), ...args.slice(1) as Tail<Parameters<typeof sendApprovedChat>>);
 type Tail<T extends unknown[]> = T extends [unknown, ...infer Rest] ? Rest : never;
-const runAdminChatTest = (...args: Parameters<typeof runApprovedAdminChatTest>) => runApprovedAdminChatTest(args[0], approvePrivacyDraft(createPrivacyDraft(args[1])), args[2], args[3]);
+const runAdminChatTest = (...args: Parameters<typeof runApprovedAdminChatTest>) => runApprovedAdminChatTest(args[0], approvePrivacyDraft(createPrivacyDraft(args[1])), args[2], args[3], args[4]);
+const runAdminApplicableLawTest = (...args: Parameters<typeof runApprovedAdminApplicableLawTest>) => runApprovedAdminApplicableLawTest(args[0], approvePrivacyDraft(createPrivacyDraft(args[1])), args[2], args[3]);
 
 const runtimeConfig: RuntimeConfig = {
   openrouter_model: "test/model",
@@ -255,6 +259,82 @@ describe("v3 protocol and isolated admin requests", () => {
   });
 });
 const eventText = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+
+describe("isolated applicable-law admin contract", () => {
+  const result: AdminApplicableLawTestResult = {
+    output_contract: "applicable_laws_v1",
+    prediction: { predicted_laws: ["性騷法", "性工法", "性平法"], decision_status: "predicted", decision_reason: null },
+    diagnostics: { retrieval: { status: "zero_results" } },
+  };
+
+  it("preserves the exact predicted order without requiring any chat fields", () => {
+    expect(parseAdminApplicableLawTestResult(result)).toEqual(result);
+    expect(parseAdminApplicableLawTestResult({ ...result, prediction: { predicted_laws: ["性工法", "性騷法"], decision_status: "predicted", decision_reason: null } }).prediction.predicted_laws).toEqual(["性工法", "性騷法"]);
+  });
+
+  it.each(["insufficient_facts", "no_target_law"] as const)("accepts valid empty %s predictions", decision_status => {
+    const empty = { ...result, prediction: { predicted_laws: [], decision_status, decision_reason: "缺少當事人關係或適用情境。" } };
+    expect(parseAdminApplicableLawTestResult(empty)).toEqual(empty);
+  });
+
+  it.each([
+    { predicted_laws: ["性騷法", "性騷法"], decision_status: "predicted", decision_reason: null },
+    { predicted_laws: ["性騷擾防治法"], decision_status: "predicted", decision_reason: null },
+    { predicted_laws: [" 性工法"], decision_status: "predicted", decision_reason: null },
+    { predicted_laws: ["刑法"], decision_status: "predicted", decision_reason: null },
+    { predicted_laws: ["性騷法", "性工法", "性平法", "性騷法"], decision_status: "predicted", decision_reason: null },
+    { predicted_laws: [], decision_status: "predicted", decision_reason: null },
+    { predicted_laws: ["性工法"], decision_status: "insufficient_facts", decision_reason: "未提供會影響適用方向的當事人身分與關係。" },
+    { predicted_laws: ["性平法"], decision_status: "no_target_law", decision_reason: "情境僅描述一般財物糾紛，沒有性或性別相關行為。" },
+    { predicted_laws: [], decision_status: "unknown" },
+    { predicted_laws: [], decision_status: ["insufficient_facts"] },
+    { predicted_laws: "性工法", decision_status: "predicted", decision_reason: null },
+    { predicted_laws: ["性工法"], decision_status: "predicted", decision_reason: null, reply: "額外聊天正文" },
+  ])("rejects invalid predictions without repairing them: %j", prediction => {
+    expect(() => parseAdminApplicableLawTestResult({ ...result, prediction })).toThrowError("適用法規預測格式不正確");
+  });
+
+  it.each([
+    null,
+    { output_contract: "chat", prediction: result.prediction, diagnostics: {} },
+    { ...result, diagnostics: [] },
+    { ...result, reply: "額外聊天正文" },
+    { ...result, response: chatResponse },
+    { ...result, suggested_replies: [] },
+  ])("rejects wrong envelopes and extra chat output: %j", payload => {
+    expect(() => parseAdminApplicableLawTestResult(payload)).toThrowError("適用法規預測格式不正確");
+  });
+
+  it("uses the approved snapshot and outer contract on the authenticated non-streaming endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = approvePrivacyDraft(createPrivacyDraft({ ...chatRequest, message: "合成 synthetic@example.com 情境", contract_version: 4 }));
+    const overrides = { enable_anonymization: false, pipeline: { trim_history: false } };
+    expect(await runApprovedAdminApplicableLawTest("admin-token", request, overrides)).toEqual(result);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("/v1/admin/chat-test"), expect.objectContaining({
+      method: "POST", headers: expect.objectContaining({ Authorization: "Bearer admin-token" }),
+      body: JSON.stringify({ request, overrides, output_contract: "applicable_laws_v1" }),
+    }));
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.request.message).toBe("合成 [電子郵件] 情境");
+    expect(sent.request).not.toHaveProperty("stream");
+    expect(sent.request).not.toHaveProperty("output_contract");
+  });
+
+  it("rejects unapproved snapshots, missing authentication and non-v4 requests before transport", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(runApprovedAdminApplicableLawTest("admin-token", { ...chatRequest, contract_version: 4 }, {})).rejects.toMatchObject({ code: "review_required" });
+    await expect(runAdminApplicableLawTest(" ", { ...chatRequest, contract_version: 4 }, {})).rejects.toMatchObject({ status: 401 });
+    await expect(runAdminApplicableLawTest("admin-token", { ...chatRequest, contract_version: 3 }, {})).rejects.toMatchObject({ status: 422 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("exposes operation failures without converting them into empty predictions", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "檢索失敗", retryable: false }), { status: 503, headers: { "Content-Type": "application/json" } })));
+    await expect(runAdminApplicableLawTest("admin-token", { ...chatRequest, contract_version: 4 }, {})).rejects.toMatchObject({ status: 503, detail: "檢索失敗" });
+  });
+});
 
 function pendingFetch() {
   let signal!: AbortSignal;
@@ -524,4 +604,23 @@ describe("chat streaming transport", () => {
     await expect(sendChat(chatRequest, undefined, onDelta)).resolves.toEqual(chatResponse);
     expect(onDelta).not.toHaveBeenCalled();
   });
+});
+
+it.each([undefined, null, "", " \n", "字".repeat(301), 123])("rejects an abstention with an invalid reason: %j", decision_reason => {
+  for (const decision_status of ["insufficient_facts", "no_target_law"]) {
+    expect(() => parseAdminApplicableLawTestResult({ output_contract: "applicable_laws_v1", diagnostics: {}, prediction: { predicted_laws: [], decision_status, decision_reason } })).toThrow("適用法規預測格式不正確");
+  }
+});
+
+
+it("sends the independent chat-test fingerprint only on the authenticated admin request", async () => {
+  const { behaviorResult } = await import("../test/behaviorFixture");
+  const result = behaviorResult();
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } }));
+  vi.stubGlobal("fetch", fetchMock);
+  await runAdminChatTest("test-token", { message: "synthetic", history: [], use_rag: true, contract_version: 4 }, {}, undefined, "b".repeat(64));
+  const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+  expect(body.expected_chat_test_contract_sha256).toBe("b".repeat(64));
+  expect(body).not.toHaveProperty("expected_applicable_laws_contract_sha256");
+  expect(body).not.toHaveProperty("authorization");
 });

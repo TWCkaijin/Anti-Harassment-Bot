@@ -77,6 +77,13 @@ class Settings(BaseSettings):
         description="OpenRouter API request timeout 秒數",
     )
 
+    openrouter_provider_sort: Literal["auto", "latency", "throughput", "price"] = "auto"
+    rag_rerank_enabled: bool = False
+    rag_rerank_model: str = Field(default="cohere/rerank-4-fast", min_length=1)
+    rag_rerank_candidate_k: int = Field(default=20, ge=1, le=50)
+    rag_rerank_timeout_seconds: float = Field(default=1.0, ge=0.1, le=10)
+    rag_rerank_max_chars_per_doc: int = Field(default=2000, ge=100, le=20000)
+
     # ── RAG / Firestore Vector Search ─────────────────────────────────────
     rag_collection_name: str = Field(
         default="rag_documents",

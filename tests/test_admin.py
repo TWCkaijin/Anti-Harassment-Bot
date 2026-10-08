@@ -26,6 +26,11 @@ def _runtime_config():
     )
 
 
+@pytest.fixture(autouse=True)
+def no_fingerprint_catalog_network(monkeypatch):
+    monkeypatch.setattr(admin_module, "get_enabled_scenario_catalog", lambda **kwargs: ())
+
+
 def test_admin_updates_prompt_sections(monkeypatch):
     calls = []
     monkeypatch.setattr(admin_module.settings, "admin_api_key", "test-token")

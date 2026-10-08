@@ -31,7 +31,17 @@ AGENT_PROMPT_SECTIONS = (
 )
 PROMPT_MAX_LENGTH = 20000
 FIRESTORE_READ_TIMEOUT_SECONDS = 5.0
+RERANK_FIELDS = (
+    "openrouter_provider_sort",
+    "rag_rerank_enabled",
+    "rag_rerank_model",
+    "rag_rerank_candidate_k",
+    "rag_rerank_timeout_seconds",
+    "rag_rerank_max_chars_per_doc",
+)
+
 WRITABLE_FIELDS = {
+    *RERANK_FIELDS,
     "openrouter_model",
     "temperature",
     "top_p",
@@ -60,6 +70,12 @@ class RuntimeConfig:
     temperature: float
     top_p: float
     max_tokens: int
+    openrouter_provider_sort: str = "auto"
+    rag_rerank_enabled: bool = False
+    rag_rerank_model: str = "cohere/rerank-4-fast"
+    rag_rerank_candidate_k: int = 20
+    rag_rerank_timeout_seconds: float = 1.0
+    rag_rerank_max_chars_per_doc: int = 2000
     reasoning_effort: str = "none"
     agent_prompt_sections: dict[str, str] = field(default_factory=dict)
     rag_collections: dict[str, str] = field(default_factory=dict)
@@ -116,6 +132,7 @@ def resolve_runtime_config(
     cleaned = validate_runtime_config_update(overrides or {})
     for key, value in cleaned.items():
         data[key] = {**data[key], **value} if isinstance(value, dict) else value
+    _validate_rerank_counts(data)
     return _build_config(data, source="request_override" if overrides else base.source)
 
 
@@ -197,7 +214,15 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
     rag_collections = _default_rag_collections()
     rag_collections.update(validated.get("rag_collections", {}))
 
+    # Invalid persisted combinations must not break ordinary chat.
+    if validated.get("rag_rerank_candidate_k", settings.rag_rerank_candidate_k) < validated.get(
+        "rag_retrieval_top_k", settings.rag_retrieval_top_k
+    ):
+        validated["rag_rerank_candidate_k"] = validated.get(
+            "rag_retrieval_top_k", settings.rag_retrieval_top_k
+        )
     return RuntimeConfig(
+        **{key: validated.get(key, getattr(settings, key)) for key in RERANK_FIELDS},
         openrouter_model=validated.get("openrouter_model", settings.openrouter_model),
         rag_retrieval_top_k=validated.get("rag_retrieval_top_k", settings.rag_retrieval_top_k),
         enable_anonymization=(
@@ -307,17 +332,40 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
     for key, value in payload.items():
         if key not in WRITABLE_FIELDS:
             continue
-        if key in {"openrouter_model", "maintenance_message"}:
+        if key == "openrouter_provider_sort":
+            if not isinstance(value, str) or value not in {
+                "auto",
+                "latency",
+                "throughput",
+                "price",
+            }:
+                raise ValueError("openrouter_provider_sort is invalid")
+            cleaned[key] = value
+        elif key in {"rag_rerank_candidate_k", "rag_rerank_max_chars_per_doc"}:
+            low, high = (1, 50) if key == "rag_rerank_candidate_k" else (100, 20000)
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError(f"{key} must be an integer between {low} and {high}")
+            cleaned[key] = value
+        elif key == "rag_rerank_timeout_seconds":
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(value)
+                or not 0.1 <= value <= 10
+            ):
+                raise ValueError("rag_rerank_timeout_seconds must be between 0.1 and 10")
+            cleaned[key] = float(value)
+        elif key in {"openrouter_model", "rag_rerank_model", "maintenance_message"}:
             if value is None:
-                if key == "openrouter_model":
-                    raise ValueError("openrouter_model must be a non-empty string")
+                if key in {"openrouter_model", "rag_rerank_model"}:
+                    raise ValueError(f"{key} must be a non-empty string")
                 cleaned[key] = ""
                 continue
             if not isinstance(value, str):
                 raise ValueError(f"{key} must be a string")
             normalized = value.replace("\\n", "\n").replace("\r\n", "\n").strip()
-            if key == "openrouter_model" and not normalized:
-                raise ValueError("openrouter_model must be a non-empty string")
+            if key in {"openrouter_model", "rag_rerank_model"} and not normalized:
+                raise ValueError(f"{key} must be a non-empty string")
             cleaned[key] = normalized
         elif key in {"temperature", "top_p"}:
             try:
@@ -363,6 +411,7 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("rag_distance_threshold must be between 0 and 2")
             cleaned[key] = threshold
         elif key in {
+            "rag_rerank_enabled",
             "enable_anonymization",
             "enable_image_upload",
             "enable_client_privacy_review",
@@ -386,6 +435,7 @@ def _default_runtime_document() -> dict[str, Any]:
     from backend.app.agents.openrouter_agent import get_default_prompt_sections
 
     return {
+        **{key: getattr(settings, key) for key in RERANK_FIELDS},
         "openrouter_model": settings.openrouter_model,
         "temperature": settings.openrouter_temperature,
         "top_p": settings.openrouter_top_p,
@@ -422,9 +472,15 @@ def _missing_runtime_defaults(existing: dict[str, Any], defaults: dict[str, Any]
     return missing
 
 
+def _validate_rerank_counts(data):
+    if data["rag_rerank_candidate_k"] < data["rag_retrieval_top_k"]:
+        raise ValueError("rag_rerank_candidate_k must be at least rag_retrieval_top_k")
+
+
 def update_runtime_config(payload: dict[str, Any], updated_by: str) -> RuntimeConfig:
-    seed_runtime_config_if_missing(updated_by=updated_by)
     cleaned = validate_runtime_config_update(payload)
+    resolve_runtime_config(get_runtime_config(), cleaned)
+    seed_runtime_config_if_missing(updated_by=updated_by)
     cleaned["updated_by"] = updated_by
     cleaned["updated_at"] = SERVER_TIMESTAMP
 
