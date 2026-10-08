@@ -7,11 +7,16 @@ server-side only; do not expose secrets through this route.
 
 import asyncio
 import uuid
+from typing import Literal
 
 from flask import Blueprint, jsonify, request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.app.agents.openrouter_agent import get_default_prompt_sections
+from backend.app.core.agent_errors import (
+    ApplicableLawsContractMismatchError,
+    ChatTestContractMismatchError,
+)
 from backend.app.core.config import get_settings
 from backend.app.core.logger import get_logger
 from backend.app.core.runtime_config import (
@@ -27,10 +32,20 @@ from backend.app.core.scenario_scripts import (
     seed_example_scenario_scripts,
     upsert_scenario_script,
 )
+from backend.app.core.scenario_scripts import (
+    get_scenario_scripts as get_enabled_scenario_catalog,
+)
 
 settings = get_settings()
 logger = get_logger(__name__)
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+
+@admin_bp.after_request
+def _prevent_chat_test_caching(response):
+    if request.path.endswith("/admin/chat-test"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _log_operation_failure(operation: str, error: Exception) -> None:
@@ -46,10 +61,29 @@ def _log_operation_failure(operation: str, error: Exception) -> None:
 
 
 def _public_config():
-    config = get_runtime_config(force_refresh=True).public_dict()
+    from backend.app.agents.guided_v4 import (
+        applicable_laws_contract_sha256,
+        applicable_laws_scenario_catalog_sha256,
+        chat_test_contract_sha256,
+    )
+
+    runtime_config = get_runtime_config(force_refresh=True)
+    config = runtime_config.public_dict()
     prompt_sections = get_default_prompt_sections()
     prompt_sections.update(config.get("agent_prompt_sections") or {})
     config["agent_prompt_sections"] = prompt_sections
+    catalog = (
+        tuple(get_enabled_scenario_catalog(force_refresh=True))
+        if runtime_config.pipeline.get("enable_skills", True)
+        else ()
+    )
+    config["applicable_laws_contract_sha256"] = applicable_laws_contract_sha256(
+        runtime_config, catalog
+    )
+    config["applicable_laws_scenario_catalog_sha256"] = applicable_laws_scenario_catalog_sha256(
+        runtime_config, catalog
+    )
+    config["chat_test_contract_sha256"] = chat_test_contract_sha256(runtime_config, catalog)
     return config
 
 
@@ -78,6 +112,19 @@ def _require_admin() -> tuple[str | None, tuple[object, int] | None]:
     return None, (jsonify({"detail": "Unauthorized"}), 401)
 
 
+@admin_bp.route("/rerank-models", methods=["GET"])
+def rerank_models():
+    _, error = _require_admin()
+    if error:
+        return error
+    from backend.app.core.rerank_models import list_rerank_models
+
+    try:
+        return jsonify({"data": list_rerank_models()})
+    except Exception:
+        return jsonify({"detail": "無法取得 rerank 模型清單；可保留設定或手填模型 ID。"}), 502
+
+
 @admin_bp.route("/config", methods=["GET"])
 def get_config():
     _, error = _require_admin()
@@ -99,11 +146,31 @@ def chat_test():
         model_config = ConfigDict(extra="forbid")
         chat_request: chat_api.ChatRequest = Field(alias="request")
         overrides: dict = Field(default_factory=dict)
+        output_contract: Literal["chat", "applicable_laws_v1"] = "chat"
+        expected_applicable_laws_contract_sha256: str | None = Field(
+            default=None, pattern="^[0-9a-f]{64}$"
+        )
+        expected_chat_test_contract_sha256: str | None = Field(
+            default=None, pattern="^[0-9a-f]{64}$"
+        )
 
     try:
         data = ChatTestRequest.model_validate(request.get_json(silent=True))
         if data.chat_request.stream:
             return jsonify({"detail": "Admin chat tests return JSON; stream must be false"}), 422
+        if data.output_contract == "applicable_laws_v1" and data.chat_request.contract_version != 4:
+            return jsonify(
+                {"detail": "Applicable-law prediction requires chat contract version 4"}
+            ), 422
+        if (
+            data.expected_applicable_laws_contract_sha256 is not None
+            and data.output_contract != "applicable_laws_v1"
+        ):
+            return jsonify({"detail": "Applicable-law fingerprint requires prediction mode"}), 422
+        if data.expected_chat_test_contract_sha256 is not None and (
+            data.output_contract != "chat" or data.chat_request.contract_version != 4
+        ):
+            return jsonify({"detail": "Chat-test fingerprint requires v4 chat"}), 422
         config = resolve_runtime_config(get_runtime_config(), data.overrides)
     except ValidationError as exc:
         return chat_api._request_validation_error(exc)
@@ -116,10 +183,52 @@ def chat_test():
         arguments, was_anonymized = chat_api._prepare_agent_input(
             data.chat_request, config, diagnostics, include_input_stages=True
         )
+        if data.output_contract == "applicable_laws_v1":
+            arguments["output_contract"] = data.output_contract
+            arguments["expected_applicable_laws_contract_sha256"] = (
+                data.expected_applicable_laws_contract_sha256
+            )
+        if data.expected_chat_test_contract_sha256 is not None:
+            arguments["expected_chat_test_contract_sha256"] = (
+                data.expected_chat_test_contract_sha256
+            )
         result = asyncio.run(chat_api.get_agent().run(**arguments))
+    except ChatTestContractMismatchError:
+        return jsonify(
+            {
+                "code": "chat_test_contract_mismatch",
+                "detail": "對話測試的提示或情境腳本已變更，請重新準備測試。",
+                "retryable": False,
+            }
+        ), 409
+    except ApplicableLawsContractMismatchError:
+        return jsonify(
+            {
+                "code": "applicable_laws_contract_mismatch",
+                "detail": "適用法規測試的提示或情境腳本已變更，請重新準備測試。",
+                "retryable": False,
+            }
+        ), 409
     except Exception as exc:
         return chat_api._agent_error(config, exc)
     try:
+        if data.output_contract == "applicable_laws_v1":
+            from backend.app.agents.guided_v4 import ApplicableLawPrediction
+            from backend.app.agents.openrouter_agent import (
+                AgentContractError,
+                ApplicableLawPredictionResult,
+            )
+
+            if not isinstance(result, ApplicableLawPredictionResult):
+                raise AgentContractError("Invalid applicable-law result type")
+            prediction = ApplicableLawPrediction.model_validate(result.prediction)
+            return jsonify(
+                {
+                    "output_contract": data.output_contract,
+                    "prediction": prediction.model_dump(),
+                    "diagnostics": diagnostics,
+                }
+            )
         response = chat_api._response_payload(
             result, str(uuid.uuid4()), was_anonymized, config, data.chat_request
         )

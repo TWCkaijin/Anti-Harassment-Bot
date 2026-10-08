@@ -214,7 +214,10 @@ def get_scenario_scripts(force_refresh: bool = False) -> tuple[ScenarioScript, .
 
 
 def get_matching_scenario_scripts(
-    user_message: str, history: list[dict[str, Any]] | None = None
+    user_message: str,
+    history: list[dict[str, Any]] | None = None,
+    *,
+    catalog: tuple[ScenarioScript, ...] | None = None,
 ) -> tuple[ScenarioScript, ...]:
     recent_messages = [
         message.get("content", "")
@@ -224,7 +227,8 @@ def get_matching_scenario_scripts(
     normalized_message = "\n".join([*recent_messages, user_message]).lower()
     return tuple(
         script
-        for script in get_scenario_scripts()
+        for script in (get_scenario_scripts() if catalog is None else catalog)
+        if script.enabled
         if any(keyword in normalized_message for keyword in script.trigger_keywords)
     )
 

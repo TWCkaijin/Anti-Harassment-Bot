@@ -1,4 +1,5 @@
-import type { RuntimeConfigUpdate } from "./api";
+import { retrievalSettings } from "./retrievalSettings";
+import type { RuntimeConfig, RuntimeConfigUpdate } from "./api";
 import { isRecord } from "./caseFacts";
 import { DEFAULT_PIPELINE } from "./pipeline";
 
@@ -22,6 +23,7 @@ export function reproducibleOverrides(value: unknown): RuntimeConfigUpdate | nul
     || !isRecord(collections) || !["law", "judgment", "remedy"].every(key => typeof collections[key] === "string")) return null;
   const keys = ["openrouter_model", "rag_retrieval_top_k", "rag_distance_threshold", "enable_anonymization", "temperature", "top_p", "max_tokens", "reasoning_effort", "agent_prompt_sections", "rag_collections", "enable_image_upload", "development_mode"];
   const result: Record<string, unknown> = Object.fromEntries(keys.map(key => [key, structuredClone(value[key])]));
+  Object.assign(result, retrievalSettings(value as unknown as RuntimeConfig));
   result.maintenance_message = value.maintenance_message ?? "";
   if (typeof value.enable_client_privacy_review === "boolean") result.enable_client_privacy_review = value.enable_client_privacy_review;
   result.pipeline = Object.fromEntries(Object.keys(DEFAULT_PIPELINE).map(key => [key, pipeline[key]]));

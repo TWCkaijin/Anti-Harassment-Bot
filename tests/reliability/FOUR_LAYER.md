@@ -2,7 +2,7 @@
 
 `four_layer_eval.py` 是獨立、預設離線的評測程式，不會 import backend、初始化 Firebase 或自行呼叫模型。既有 `applicable_law_api_eval.py` 保持原有行為，仍可量測法名覆蓋率；法名命中不等於法律內容正確。
 
-## 已產出的資料
+## 資料與可重新產生的輸出
 
 - `candidates/cases.candidate.jsonl`：原始兩份 XLSX 的 634 題候選情境，335 + 299；全部 `unreviewed`，正式 gold 為 0。
 - `candidates/manifest.json`：原始檔 SHA256、工作表／列號追溯、題數、警告、family 分組及 split 方法。
@@ -10,6 +10,8 @@
 - `results/four-layer.offline.json`：合成回應的離線評測結果，含故意錯誤的反例。這不是模型品質基準。
 
 family 使用正規化文字三字片段 Jaccard 相似度 0.72 分群，再按 family hash 分 development／validation／holdout。同一 family 不跨組；此次資料在此閾值下為 634 群。此方法未確認語意近重複，故所有分組標示 `heuristic_needs_review`，不能視為已完成盲測隔離。原始 workbook 檔名不能證明生成模型、prompt 或人工覆核來源。
+
+候選資料與歷次 results 已移至私人封存；下列輸出名稱表示可重建項目，非隨附檔案。原始 Excel 仍完整保留於 resource。
 
 ## 安全的離線命令
 
@@ -24,7 +26,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python tests/reliability/four_layer_eval.py 
   --output-dir /tmp/four-layer-candidates
 
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python tests/reliability/four_layer_eval.py evaluate \
-  --cases tests/reliability/candidates/cases.candidate.jsonl \
+  --cases /tmp/four-layer-candidates/cases.candidate.jsonl \
   --output /tmp/candidate-readiness.json
 
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider \

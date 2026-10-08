@@ -1,9 +1,13 @@
+import type { ReactNode } from "react";
 import type { PipelineSettings } from "../services/pipeline";
 
-const switches = [
+const maskSwitches = [
   ["mask_message", "遮罩訊息與歷史", "送入模型前處理訊息與歷史中的文字識別資訊。"],
   ["mask_case_context", "遮罩情境摘要", "處理結構化摘要及選項回覆中的文字識別資訊。"],
   ["mask_retrieval_query", "遮罩檢索查詢", "送入檢索服務前處理查詢文字。"],
+] as const;
+
+const switches = [
   ["trim_history", "精簡對話歷史", "依下方預算保留近期歷史；關閉時仍有請求大小上限。"],
   ["extract_facts", "自動擷取事實", "從使用者明確敘述整理條件；不會刪除已確認摘要。"],
   ["auto_clarify", "允許補問", "只在會改變回答方向的資料不足時補問。"],
@@ -13,11 +17,21 @@ const switches = [
   ["enable_analysis", "顯示分析摘要", "提供已確認條件、資料來源與回答限制的摘要。"],
 ] as const;
 
-export default function PipelineSettingsEditor({ value, onChange, disabled = false }: { value: PipelineSettings; onChange: (value: PipelineSettings) => void; disabled?: boolean }) {
+export default function PipelineSettingsEditor({ value, onChange, disabled = false, maskingEnabled = true, children }: { value: PipelineSettings; onChange: (value: PipelineSettings) => void; disabled?: boolean; maskingEnabled?: boolean; children?: ReactNode }) {
   const set = (changes: Partial<PipelineSettings>) => onChange({ ...value, ...changes });
   return <fieldset disabled={disabled} className="space-y-3">
     <legend className="mb-3 text-sm font-bold">處理流程開關</legend>
-    <p className="text-xs leading-relaxed text-on-surface/65">以下三個遮罩階段都在後端，受後端 PII 開關控制；瀏覽器仍會自動遮罩文字，確認視窗可由「送出前遮罩確認」開關暫停。診斷結果會列出生效設定與各步驟移除的數量。</p>
+    {children}
+    <details className="rounded-lg border border-outline/15 p-3">
+      <summary className="cursor-pointer text-sm font-medium">進階遮罩範圍（{!maskingEnabled ? "後端遮罩已關閉" : maskSwitches.every(([key]) => value[key]) ? "全部開啟" : "自訂範圍"}）</summary>
+      <p className="my-3 text-xs leading-relaxed text-on-surface/60">各階段共用上方後端 PII 開關；關閉總開關時，保留範圍設定但不執行後端遮罩。</p>
+      <fieldset disabled={!maskingEnabled} className="space-y-3 disabled:opacity-50">
+        {maskSwitches.map(([key, label, description]) => <label key={key} className="flex items-center justify-between gap-4 text-sm">
+          <span>{label}<span className="mt-1 block text-xs text-on-surface/60">{description}</span></span>
+          <input type="checkbox" aria-label={label} checked={value[key]} onChange={event => set({ [key]: event.target.checked })} className="h-5 w-5 shrink-0 accent-primary" />
+        </label>)}
+      </fieldset>
+    </details>
     {switches.map(([key, label, description]) => <label key={key} className="flex items-center justify-between gap-4 rounded-lg border border-outline/15 px-3 py-3 text-sm">
       <span><span className="font-medium">{label}</span><span className="mt-1 block text-xs leading-relaxed text-on-surface/60">{description}</span></span>
       <input type="checkbox" aria-label={label} checked={value[key]} onChange={event => set({ [key]: event.target.checked })} className="h-5 w-5 shrink-0 accent-primary" />

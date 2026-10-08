@@ -63,6 +63,7 @@ def isolated_runtime(monkeypatch):
     base = config()
     monkeypatch.setattr(admin.settings, "admin_api_key", "offline-test-key")
     monkeypatch.setattr(admin, "get_runtime_config", lambda **kwargs: base)
+    monkeypatch.setattr(admin, "get_enabled_scenario_catalog", lambda **kwargs: ())
     monkeypatch.setattr(chat, "get_runtime_config", lambda: base)
     monkeypatch.setattr(health, "get_runtime_config", lambda: base)
     monkeypatch.setattr(app.extensions["chat_request_security"], "rate_limit_enabled", False)
