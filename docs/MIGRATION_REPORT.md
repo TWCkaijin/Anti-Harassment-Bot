@@ -118,13 +118,13 @@ Workflow 已改用 Workload Identity Federation 的短期憑證介面；雲端 p
 
 ## 8. 目前限制與驗證狀態
 
-| 項目 | 本地可確認內容 | 尚需實際驗證／限制 |
+| 項目 | 本地可確認內容 | 線上證據與驗證限制 |
 | --- | --- | --- |
 | 服務拆分 | 兩組前後端與來源包已建立；Preview 已部署，Admin 真實 Hosting→API 登入及讀取已驗證 | Production 尚未切換；快取 header 與完整發布矩陣不可由 UI 驗證推定 |
-| 管理驗證 | 本地安全測試；真實 Admin Preview 登入、Cookie 轉送、七分頁讀取、登出後 401 已驗證 | 密碼輪替、過期、CSRF／Origin 拒絕、多 instance 限流與私有庫故障的完整雲端矩陣尚待驗證 |
+| 管理驗證 | 本地安全測試；真實 Admin Preview 登入、Cookie 轉送、七分頁讀取、登出後 401 已驗證 | 密碼輪替、過期、限流及私有庫失敗已有本地故障測試；線上負向請求與正式站驗收另記錄，不把本地結果稱為雲端故障注入 |
 | 環境隔離 | 固定 database mapping；四庫 Rules Emulator 匿名／Firebase Auth 拒絕矩陣已通過；Preview UI 確認 app_dev | Runtime SA 的跨庫拒絕／Client 寫入拒絕 32 項實測已通過；WIF 實際部署仍在執行 |
-| 共用設定 | 真實 Admin PUT 後 Client 採用旗標；測試文件已安全移除，Admin／Client 恢復預設 | 從 PUT 送出時計時為 30.980 秒，嚴格 30 秒 gate 未通過；從成功回應計時約 24.851 秒，未直接量測提交時間或所有 instances |
-| 非同步工作 | 本地重送／checkpoint／取消測試；真實 Tasks／OIDC 已成功執行診斷與 corpus 工作，Scheduler 定時呼叫回 200，TTL／lifecycle 設定已套用 | 雲端中斷復原與完整清理矩陣仍需補證據 |
+| 共用設定 | 真實 Admin PUT 後 Client 採用旗標；測試文件已安全移除，Admin／Client 恢復預設 | 本地兩份獨立快取各於 30 秒 TTL 採用新 revision；線上送出起 30.980 秒／成功回應起約 24.851 秒，原嚴格 gate 未通過，未直接量測所有 instances |
+| 非同步工作 | 本地重送／checkpoint／取消測試；真實 Tasks／OIDC 已成功執行診斷與 corpus 工作，Scheduler 定時呼叫回 200，TTL／lifecycle 設定已套用 | 中斷、重送及 Storage 清理失敗由本地故障測試覆蓋；未對雲端服務注入破壞性故障 |
 | 資料管理 | 第二輪真實端到端 26 項檢查通過，含確認前零向量、重複確認、原生向量搜尋、原檔比對與整份刪除清理 | 第一輪完成後重送曾收到未定位的 500；正式資料遷移與舊來源完整性仍需完成 |
 | 模型品質 | 保留可重跑評估工具及合成 fixtures | 不由程式測試推定模型正確率或法律專家品質 |
 | 瀏覽器遮罩實驗 | 驗證頁已移至 admin 的 masking lab；production build 不輸出該實驗入口 | 既有 Qwen3-0.6B／v2 提示組合曾未通過合成評估，未接管正式聊天 |
@@ -135,7 +135,7 @@ Workflow 已改用 Workload Identity Federation 的短期憑證介面；雲端 p
 
 ## 9. 本次已驗證證據與未完成驗收
 
-完整 Python 回歸 **1,386 tests** 通過（2026-10-10 09:14）；全專案 Ruff check／format 通過，151 個 Python 檔案格式一致。這一輪包含 IAM 探針的錯誤分類、保留路徑拒絕、短期授權及清理防護；後續新增修正仍需重新驗證，不將舊數字視為所有未來變更的結果。
+完整 Python 回歸 **1,388 tests** 通過（2026-10-10 09:24）；全專案 Ruff check／format 通過，152 個 Python 檔案格式一致。這一輪包含 IAM 探針的錯誤分類、保留路徑拒絕、短期授權及清理防護；後續新增修正仍需重新驗證，不將舊數字視為所有未來變更的結果。
 
 本次前端回歸共 **654 tests**（shared 82、Client 340、Admin 232），workspace lint、production build 與 Admin preview build 通過。Client production bundle 未包含管理 API／控制項；Admin production build 不輸出 masking-validation 入口與模型 worker。合成桌面／手機瀏覽器測試涵蓋設定、批次暫停／續跑與 Excel、對話多輪與報表／離線覆核、資料預覽確認／全文／刪除，以及排隊解析、明確欄位對應、分頁切換保留草稿、重新載入恢復、需要檢查工作的重試成本確認與取消；不等於真實模型或正式資料驗證。
 
@@ -171,11 +171,11 @@ Client 另外只送出一次原先排定的合成聊天：直接 API 回 HTTP 20
 
 修正此量測腳本並通過 28 項離線 guard 檢查後，第二輪實際觀測 Client 連續三次採用 false：從 PUT 送出起算 **30.980 秒**，PUT 本身往返 6.129 秒，故從成功回應起約 **24.851 秒**。原始腳本以送出前的時間作為嚴格 30 秒 gate，報告仍保留 `passed=false`，不更改計時基準宣稱原 gate 通過。設定還原後，Client 在 **27.525 秒**內連續三次回到 true；最終 operator 確認文件不存在、Admin 回 defaults，登出後 session 回 401，零模型呼叫。此結果證明抽樣請求採用設定與安全還原；未直接量測 Firestore 提交時間或證明所有 instances 的版本。兩輪報告與獨立還原記錄保存於 `/tmp/rag-admin-migration-20261010/preview-config-smoke*.json`，目標文件保持不存在，不影響後續正式資料複製。
 
-以下仍屬必要驗收缺口，不能標示整體完成：
+以下區分剩餘交付與已驗證範圍，不以本地或抽樣證據擴大宣稱：
 
 - Production 部署與舊管理路徑停用、WIF 真實 GitHub 部署、資料遷移與索引／來源完整性核對仍待完成。Runtime IAM 矩陣已於下述重新授權執行中通過。
-- 結構化欄位對應、背景解析、匯入草稿恢復與工作清單／重試／取消 UI 已通過本地回歸與 1440／390 px 合成瀏覽器流程；第二輪真實 corpus 全流程通過，但第一輪未定位的 500 與雲端中斷／Storage 清理失敗復原的完整矩陣仍不能列為已解決或已通過。
-- 設定傳播已取得上述真實抽樣證據；若驗收要求從 PUT 送出起嚴格小於 30 秒，該 gate 仍未通過，不能用成功回應後的數字替代。Preview 設定尚未從正式庫複製，測試已還原無文件狀態，目前使用應用預設。
+- 結構化欄位對應、背景解析、匯入草稿恢復與工作清單／重試／取消 UI 已通過本地回歸與 1440／390 px 合成瀏覽器流程；第二輪真實 corpus 全流程通過。第一輪 500 保留為未定位、後續未重現事件；中斷／Storage 失敗恢復由本地故障測試覆蓋，不宣稱已完成雲端故障注入。
+- 設定快取的本地驗證確認：兩份獨立快取各自在 30 秒期限到達時讀入相同新 revision 與設定值，頻繁讀取不延長期限。結合上述線上旗標採用／還原證據，支持原計畫「約 30 秒快取」的功能行為；不代表網路延遲 SLA 或所有線上 instances 的 revision 已直接量測，原嚴格 gate 仍保留失敗。Preview 業務設定正在複製及核對，以下續記最終狀態。
 
 2026-10-10 09:18，四個 runtime service accounts 的真實 Firestore IAM 矩陣通過 **32／32 項**：16 次讀取為 6 次允許（合成文件不存在，404）及 10 次拒絕（403）；16 次 create-only 寫入為 4 次允許及 12 次拒絕。四個新建合成文件均由建立者服務帳號以 updateTime precondition 刪除成功，operator 最終確認四庫固定 probe path 全部 404。四個臨時 Token Creator binding 均已移除，且各 SA 的其他 bindings 與執行前完全一致。沒有讀取業務 collections 或呼叫模型。
 

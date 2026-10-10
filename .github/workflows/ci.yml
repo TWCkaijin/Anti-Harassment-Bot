@@ -76,8 +76,6 @@ jobs:
     name: Firestore Rules Emulator (four databases)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      FIREBASE_EMULATORS_PATH: ${{ runner.temp }}/firebase-emulators
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,4 +97,6 @@ jobs:
           pnpm install --frozen-lockfile
           npm install --global firebase-tools@15.33.0
       - name: Verify anonymous and Firebase Auth denial on all four databases
+        env:
+          FIREBASE_EMULATORS_PATH: ${{ runner.temp }}/firebase-emulators
         run: pnpm test:rules
