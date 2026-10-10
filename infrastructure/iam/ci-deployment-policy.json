@@ -33,22 +33,48 @@
       "title": "RAG service deployment metadata",
       "description": "Inspect only the four pre-existing application Run services; cannot modify service IAM.",
       "stage": "GA",
-      "includedPermissions": ["run.services.get", "run.services.getIamPolicy"]
+      "includedPermissions": [
+        "run.services.get",
+        "run.services.getIamPolicy"
+      ]
     },
     "ragArtifactMetadata": {
       "title": "RAG function artifact policy metadata",
       "description": "Read the operator-managed cleanup policy of the existing gcf-artifacts repository.",
       "stage": "GA",
-      "includedPermissions": ["artifactregistry.repositories.get"]
+      "includedPermissions": [
+        "artifactregistry.repositories.get"
+      ]
     }
   },
-  "function_ids": ["api", "api_preview", "admin_api", "admin_api_preview"],
-  "runtime_service_accounts": ["rag-client-prod", "rag-client-dev", "rag-admin-prod", "rag-admin-dev"],
-  "secret_ids": ["RAG_OPENROUTER_PROD", "RAG_OPENROUTER_DEV", "RAG_CLARIFICATION_PROD", "RAG_CLARIFICATION_DEV", "RAG_CLARIFICATION_LEGACY_PROD", "RAG_CLARIFICATION_LEGACY_DEV"],
+  "function_ids": [
+    "api",
+    "api_preview",
+    "admin_api",
+    "admin_api_preview"
+  ],
+  "runtime_service_accounts": [
+    "rag-client-prod",
+    "rag-client-dev",
+    "rag-admin-prod",
+    "rag-admin-dev"
+  ],
+  "secret_ids": [
+    "RAG_OPENROUTER_PROD",
+    "RAG_OPENROUTER_DEV",
+    "RAG_CLARIFICATION_PROD",
+    "RAG_CLARIFICATION_DEV",
+    "RAG_CLARIFICATION_LEGACY_PROD",
+    "RAG_CLARIFICATION_LEGACY_DEV"
+  ],
   "unresolved_hosting_grant": {
     "role": "roles/firebasehosting.admin",
     "scope": "project",
     "reason": "Firebase Hosting does not support custom roles or site-level IAM policies. This includes creating/deleting sites and changing any Hosting channel in the project.",
     "applied_by_default": false
-  }
+  },
+  "build_service_accounts": [
+    "rag-build-dev",
+    "rag-build-prod"
+  ]
 }

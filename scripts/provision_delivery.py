@@ -67,7 +67,7 @@ def deploy_permissions(p, *, allow_project_hosting_admin=False):
                 "--role=roles/secretmanager.viewer",
             ]
         )
-    for identity in policy["runtime_service_accounts"]:
+    for identity in policy["runtime_service_accounts"] + policy["build_service_accounts"]:
         p.run(
             [
                 "iam",
