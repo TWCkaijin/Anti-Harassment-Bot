@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="370" viewBox="0 0 1080 370" role="img" aria-label="法律品質的分層驗證">
+<defs><marker id="tip" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#5B7282"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<path d="M300,74.0 L400,74.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M680,74.0 L780,74.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M920.0,118 L920.0,235" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M780,279.0 L680,279.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M400,279.0 L300,279.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<rect x="20" y="30" width="280" height="88" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="160.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">候選／合成測試案例</text>
+<text x="160.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">專家覆核須另行完成</text>
+<rect x="400" y="30" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">檢索評估</text>
+<text x="540.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">相關來源與版本覆蓋</text>
+<rect x="780" y="30" width="280" height="88" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="920.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">回答評估</text>
+<text x="920.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">適用方向與來源支持</text>
+<rect x="20" y="235" width="280" height="88" rx="6" fill="#FFF3D8" stroke="#BECDD3"/>
+<text x="160.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">人工複核與發布門檻</text>
+<text x="160.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">通過後再驗證正式環境</text>
+<rect x="400" y="235" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">效能與費用</text>
+<text x="540.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">TTFT／總耗時／tokens</text>
+<rect x="780" y="235" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="920.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">多輪互動評估</text>
+<text x="920.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">更正／衝突／拒答</text>
+</svg>

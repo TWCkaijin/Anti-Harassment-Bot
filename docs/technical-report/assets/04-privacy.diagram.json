@@ -1,0 +1,83 @@
+{
+  "title": "隱私與外送邊界",
+  "width": 1080,
+  "height": 370,
+  "nodes": [
+    {
+      "id": "raw",
+      "label": "前端本機文字遮罩\n完成後自動送出",
+      "x": 20,
+      "y": 30,
+      "w": 280,
+      "h": 88,
+      "kind": "accent"
+    },
+    {
+      "id": "backend",
+      "label": "Flask 接收審閱文字\n第二層遮罩依設定",
+      "x": 400,
+      "y": 30,
+      "w": 280,
+      "h": 88,
+      "kind": "normal"
+    },
+    {
+      "id": "outside",
+      "label": "OpenRouter／供應商\n接收處理後的內容",
+      "x": 780,
+      "y": 30,
+      "w": 280,
+      "h": 88,
+      "kind": "decision"
+    },
+    {
+      "id": "image",
+      "label": "原圖可直接傳送\n沒有自動去識別",
+      "x": 20,
+      "y": 235,
+      "w": 280,
+      "h": 88,
+      "kind": "decision"
+    },
+    {
+      "id": "logs",
+      "label": "日誌與分析\n操作指標白名單",
+      "x": 400,
+      "y": 235,
+      "w": 280,
+      "h": 88,
+      "kind": "normal"
+    },
+    {
+      "id": "limits",
+      "label": "姓名／地址／特殊細節\n仍可能重新識別",
+      "x": 780,
+      "y": 235,
+      "w": 280,
+      "h": 88,
+      "kind": "decision"
+    }
+  ],
+  "edges": [
+    [
+      "raw",
+      "backend"
+    ],
+    [
+      "backend",
+      "outside"
+    ],
+    [
+      "image",
+      "backend"
+    ],
+    [
+      "backend",
+      "logs"
+    ],
+    [
+      "outside",
+      "limits"
+    ]
+  ]
+}

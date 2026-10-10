@@ -1,0 +1,12 @@
+flowchart TD
+    case["候選／合成測試案例<br/>專家覆核須另行完成"]
+    retrieval["檢索評估<br/>相關來源與版本覆蓋"]
+    answer["回答評估<br/>適用方向與來源支持"]
+    release["人工複核與發布門檻<br/>通過後再驗證正式環境"]
+    metrics["效能與費用<br/>TTFT／總耗時／tokens"]
+    interaction["多輪互動評估<br/>更正／衝突／拒答"]
+    case --> retrieval
+    retrieval --> answer
+    answer --> interaction
+    interaction --> metrics
+    metrics --> release

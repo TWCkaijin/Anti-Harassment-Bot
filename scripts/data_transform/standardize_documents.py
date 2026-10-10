@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from backend.app.rag.default_rag import _DEFAULT_DOCUMENTS
+from rag_core.rag.default_rag import _DEFAULT_DOCUMENTS
 
 
 def slugify(value: str) -> str:

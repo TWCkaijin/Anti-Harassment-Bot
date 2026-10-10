@@ -1,0 +1,172 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>性騷擾防治智能 AI 技術報告</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}body{overflow-wrap:anywhere;margin:0;color:#193a4b;background:#f3f6f8;font:17px/1.85 'Heiti TC','Noto Sans CJK TC',system-ui,sans-serif}main{max-width:1050px;margin:0 auto;background:white;padding:60px 72px 90px}h1{font-size:36px;line-height:1.4;border-bottom:4px solid #177f71;padding-bottom:20px}h2{font-size:27px;margin-top:48px;border-top:1px solid #becdd3;padding-top:24px}h3{font-size:21px;margin-top:30px}p{margin:14px 0}table{table-layout:fixed;border-collapse:collapse;width:100%;margin:20px 0;font-size:15px}th,td{border:1px solid #becdd3;padding:10px 12px;text-align:left;vertical-align:top}th{background:#177f71;color:white}tr:nth-child(even){background:#f3f6f8}code{font-size:.9em;background:#eef4f3;padding:2px 4px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f6f8;padding:18px;font-size:14px}blockquote{border-left:4px solid #a87515;padding:12px 20px;background:#fff3d8;margin:20px 0}figure{margin:28px 0}figure svg{width:100%;height:auto}figcaption{font-size:14px;color:#5b7282}a{color:#177f71}li{margin:8px 0}nav{font-size:16px;border-bottom:1px solid #becdd3;padding:10px 0 24px}footer{font-size:13px;color:#5b7282;margin-top:55px}@media(max-width:700px){main{padding:26px 20px}h1{font-size:28px}table{font-size:13px}th,td{padding:6px}}@media print{body,main{background:white}main{padding:0;max-width:none}h2,h3{break-after:avoid}table,figure,pre{break-inside:avoid}a{color:inherit}}
+</style></head><body><main><h1>性騷擾防治智能 AI 技術報告</h1><nav><a href="#section-1">1. 系統用途與組成</a><br><a href="#section-2">2. 契約與回答流程</a><br><a href="#section-3">3. 摘要與多輪一致性</a><br><a href="#section-4">4. RAG 與資料管理</a><br><a href="#section-5">5. 隱私與輸出邊界</a><br><a href="#section-6">6. 管理與評估</a><br><a href="#section-7">7. 部署與交付</a><br><a href="#section-8">8. 驗收與可編輯來源</a></nav><p>版本日期：2026-10-10。描述 Client／Admin 拆分後的原始碼與資料流。各項本機及雲端驗收結果見 <a href="../MIGRATION_REPORT.md">遷移報告</a>，文件中的設計說明不代表所有雲端切換已完成。</p>
+<h2 id="section-1">1. 系統用途與組成</h2>
+<p>本系統提供性騷擾相關初步支持、資訊整理與法規／求助方向。前端使用 React、TypeScript、Vite、Tailwind CSS；後端為 Flask，透過 Firebase Functions 對外提供 HTTP 與 SSE。生成模型由 OpenRouter 提供，RAG 使用 Firestore 法規、判決及救濟資料。模型輸出不能取代專業判斷或正式申訴程序。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1080" height="590" viewBox="0 0 1080 590" role="img" aria-label="同環境 Client／Admin 架構與資料責任">
+<defs><marker id="tip" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#5B7282"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<path d="M320,70.0 L390,70.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M690,70.0 L760,70.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M320,290.0 L390,290.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M540.0,245 L540.0,115" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M170.0,335 L170.0,465" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M320,510.0 L390,510.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M910.0,465 L170.0,335" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M170.0,245 L540.0,115" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<rect x="20" y="25" width="300" height="90" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="170.0" y="65.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">Client 網站／API</text>
+<text x="170.0" y="89.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">聊天、摘要、SSE</text>
+<rect x="390" y="25" width="300" height="90" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="65.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">shared 共用推論</text>
+<text x="540.0" y="89.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">Agent、RAG、契約</text>
+<rect x="760" y="25" width="300" height="90" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="910.0" y="65.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">OpenRouter</text>
+<text x="910.0" y="89.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">生成與 embedding</text>
+<rect x="20" y="245" width="300" height="90" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="170.0" y="285.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">Admin 網站／API</text>
+<text x="170.0" y="309.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">session、CSRF、管理</text>
+<rect x="390" y="245" width="300" height="90" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="285.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">同環境業務資料庫</text>
+<text x="540.0" y="309.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">設定、Skills、檢索來源</text>
+<rect x="760" y="465" width="300" height="90" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="910.0" y="505.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">Admin 私有資料庫</text>
+<text x="910.0" y="529.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">密碼、sessions、jobs</text>
+<rect x="20" y="465" width="300" height="90" rx="6" fill="#FFF3D8" stroke="#BECDD3"/>
+<text x="170.0" y="505.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">Cloud Tasks／worker</text>
+<text x="170.0" y="529.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">OIDC、checkpoint</text>
+<rect x="390" y="465" width="300" height="90" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="505.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">私有 Storage</text>
+<text x="540.0" y="529.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">原檔、預覽、工作內容</text>
+</svg><figcaption>系統架構</figcaption></figure>
+<p>Client 與 Admin 各有獨立網站及 Flask app，共用 Agent、RAG、契約與遮罩模組。同環境的兩個後端共用業務資料庫：production 為 <code>(default)</code>，preview 為 <code>app-dev</code>；密碼、sessions、jobs 與操作紀錄則放在 <code>admin-private</code>／<code>admin-private-dev</code>。</p>
+<p>Client 前端保存會話與摘要；聊天 API 依每次請求接收必要歷史及情境，沒有新增後端個案資料庫。Admin 單次診斷請求與結果短期保存並於 24 小時後禁止讀取。平台日誌與模型供應商保存政策仍須獨立確認，不能把 API 無狀態等同全程不留資料。</p>
+<h2 id="section-2">2. 契約與回答流程</h2>
+<p>health 宣告支援聊天契約 1、2、3、4。前端依能力協商選用版本，v1-v3 相容路徑保留；v4 是目前文字摘要及自然段落功能的主要契約。單一文字摘要不能靜默降級到不支援的舊契約。</p>
+<p>v4 對複雜、法律、期限或程序問題先整理需求及檢索線索，再取回資料並生成答案；簡單支持可直接完成。來源驗證以本次取回內容與結構化欄位為依據，理解結果本身不是法源。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1080" height="380" viewBox="0 0 1080 380" role="img" aria-label="v4 回覆與相容契約">
+<defs><marker id="tip" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#5B7282"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<path d="M540.0,108 L540.0,135" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M540.0,223 L160.0,260" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M540.0,223 L540.0,260" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<rect x="400" y="20" width="280" height="88" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="540.0" y="59.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">訊息與文字摘要</text>
+<text x="540.0" y="83.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">contract v4</text>
+<rect x="400" y="135" width="280" height="88" rx="6" fill="#FFF3D8" stroke="#BECDD3"/>
+<text x="540.0" y="174.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">理解需求與必要條件</text>
+<text x="540.0" y="198.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">判斷是否檢索</text>
+<rect x="20" y="260" width="280" height="88" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="160.0" y="299.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">簡單支持</text>
+<text x="160.0" y="323.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">直接回覆</text>
+<rect x="400" y="260" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="299.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">查詢法源</text>
+<text x="540.0" y="323.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">可選重排後回答</text>
+<rect x="780" y="260" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="920.0" y="299.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">保留舊契約</text>
+<text x="920.0" y="323.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">v1-v3 相容路徑</text>
+</svg><figcaption>回答處理流程</figcaption></figure>
+<p>v4 以 answer_units 產生自然段落，完整單元通過局部來源檢查後才送出 delta，不必等整份答案完成。v2/v3 則先取得完整結構化回覆再分段。SSE 包含 progress、analysis、reasoning、delta、guidance、done 與 error；詳細欄位見 <a href="API_REFERENCE.md">API 參考</a>。</p>
+<p>reasoning 僅顯示供應商公開提供的文字／摘要，與正式答案分開，頁面重新整理或匯出時不保留。已顯示內容後不自動完整重播；錯誤或取消會標示未完成，只有通過 done 驗證才提交完整 metadata。</p>
+<p>模型理解與最終回答均傳入嚴格 JSON Schema，並要求支援參數的模型端點；回傳後仍驗證型別、引用與完成狀態，不只依賴文字指令。詳見 <a href="CHAT_CONTRACT.md">聊天契約</a>。</p>
+<h2 id="section-3">3. 摘要與多輪一致性</h2>
+<p>v4 案件 schema 3 使用 summary、summary_origin 及 revision，本機 storage schema 為 4。舊固定欄位會轉為文字並保留 legacyCaseFacts；無法辨識或超長資料不強制覆寫。</p>
+<p>使用者可查看、編輯、儲存摘要或儲存後重新回答。查看不會停止回答；開始編輯會停止目前回覆。晚到結果須同時符合會話、請求及 revision，不能蓋掉使用者更正。重新回答沿用原需求，但以更正後摘要為案件事實。具體契約見 <a href="CHAT_CONTRACT.md">聊天契約</a>。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1080" height="370" viewBox="0 0 1080 370" role="img" aria-label="情境摘要的確認與更新">
+<defs><marker id="tip" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#5B7282"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<path d="M300,74.0 L400,74.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M680,74.0 L780,74.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M920.0,118 L920.0,235" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M780,279.0 L680,279.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M400,279.0 L300,279.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<rect x="20" y="30" width="280" height="88" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="160.0" y="81.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">使用者輸入／選項回答</text>
+<rect x="400" y="30" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">summary_update 建議</text>
+<text x="540.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">保留情境與原文依據</text>
+<rect x="780" y="30" width="280" height="88" rx="6" fill="#FFF3D8" stroke="#BECDD3"/>
+<text x="920.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">核對請求及 revision</text>
+<text x="920.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">排除過期結果</text>
+<rect x="20" y="235" width="280" height="88" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="160.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">localStorage</text>
+<text x="160.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">文字摘要與 revision</text>
+<rect x="400" y="235" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">使用者修正與保存</text>
+<text x="540.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">revision 遞增，舊請求停止</text>
+<rect x="780" y="235" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="920.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">目前了解的情況</text>
+<text x="920.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">使用者可直接編輯</text>
+</svg><figcaption>摘要更新流程</figcaption></figure>
+<h2 id="section-4">4. RAG 與資料管理</h2>
+<p>法規、判決及救濟資料各有用途，不能以一種資料替代全部依據。檢索合併精確條號查詢與向量結果，保留來源 ID、metadata、距離與查找方式。索引缺漏、embedding 或資料庫失敗必須與成功零結果區分。</p>
+<p>可選 reranking 在擴大候選後重新排序，失敗或逾時回退到原排序，不更换模型重試。candidate_retrieval_ms 與 retrieval_ms 有重疊，不應直接相加；rerank_ms 另列。設定見 <a href="RERANKING.md">重排與批次統計</a>。</p>
+<p>Admin 提供原檔上傳、背景解析、欄位對應、分段預覽及確認後 embedding／發布；支援結構化檔案、文字、可抽取文字的 PDF／DOCX。所有 chunks 準備完成才在同一業務庫交易發布，私有庫 job 依 receipt 對帳。原檔存在私有 Storage，下載需管理驗證；整份來源刪除包含 chunks、原檔及暫存副本。舊資料須先核對 manifest，缺少原檔時不推測還原。</p>
+<p>更新／回復工具見 <a href="../../admin/backend/admin_app/scripts/README.md">資料工具</a>。自動化測試使用合成 fixtures。原始碼、快照與既有匯入預覽不代表雲端已更新；事件時間、適用版本及法律推論仍需專業核對。</p>
+<h2 id="section-5">5. 隱私與輸出邊界</h2>
+<p>官方前端先對文字做本機規則遮罩，完成後直接送出；首次及後續訊息均不顯示人工確認視窗。送出範圍包括當次訊息、選入的歷史、摘要及追問內容。管理端單筆診斷使用相同處理邊界；Excel 批次另有整批預覽及開始確認。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1080" height="370" viewBox="0 0 1080 370" role="img" aria-label="隱私與外送邊界">
+<defs><marker id="tip" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#5B7282"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<path d="M300,74.0 L400,74.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M680,74.0 L780,74.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M160.0,235 L540.0,118" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M540.0,118 L540.0,235" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M920.0,118 L920.0,235" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<rect x="20" y="30" width="280" height="88" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="160.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">前端本機文字遮罩</text>
+<text x="160.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">完成後自動送出</text>
+<rect x="400" y="30" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">Flask 接收審閱文字</text>
+<text x="540.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">第二層遮罩依設定</text>
+<rect x="780" y="30" width="280" height="88" rx="6" fill="#FFF3D8" stroke="#BECDD3"/>
+<text x="920.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">OpenRouter／供應商</text>
+<text x="920.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">接收處理後的內容</text>
+<rect x="20" y="235" width="280" height="88" rx="6" fill="#FFF3D8" stroke="#BECDD3"/>
+<text x="160.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">原圖可直接傳送</text>
+<text x="160.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">沒有自動去識別</text>
+<rect x="400" y="235" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">日誌與分析</text>
+<text x="540.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">操作指標白名單</text>
+<rect x="780" y="235" width="280" height="88" rx="6" fill="#FFF3D8" stroke="#BECDD3"/>
+<text x="920.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">姓名／地址／特殊細節</text>
+<text x="920.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">仍可能重新識別</text>
+</svg><figcaption>文字與圖片外送邊界</figcaption></figure>
+<p>舊確認設定不再影響前端；小模型及持久化對照表尚未通過整合門檻，正式辨識仍使用本機規則。圖片可原圖傳送，沒有自動 OCR、EXIF 或臉部去識別；格式驗證不是匿名化。既有本機紀錄、匯出與特殊事件細節仍可能識別個人。完整邊界見 <a href="PRIVACY.md">隱私說明</a>。</p>
+<h2 id="section-6">6. 管理與評估</h2>
+<p>獨立 Admin 網站提供模型／provider／rerank 設定、Prompt、Skills、維護模式、單筆診斷、三法批次及行為測試。共享密碼在私有庫以 Argon2id hash 保存，登入建立 HttpOnly session；每次管理請求重新驗證，寫入再檢查 CSRF 與 Origin。設定採 revision 比對，診斷工作綁定登入 session 並透過佇列執行。設定可能寫入 Firestore，診斷与測試可能呼叫付費模型。</p>
+<p>三法批次支援 Excel 選欄、遮罩預覽、暫停續跑、失敗重試與結果副本。可選參考答案留在瀏覽器；評分採任一法規命中，不等同完整集合正確。行為測試支援逐輪摘要、規則證據與人工覆核；人工結論綁定具體資料雜湊。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1080" height="370" viewBox="0 0 1080 370" role="img" aria-label="法律品質的分層驗證">
+<defs><marker id="tip" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#5B7282"/></marker></defs>
+<rect width="100%" height="100%" fill="white"/>
+<path d="M300,74.0 L400,74.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M680,74.0 L780,74.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M920.0,118 L920.0,235" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M780,279.0 L680,279.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<path d="M400,279.0 L300,279.0" stroke="#5B7282" fill="none" stroke-width="2" marker-end="url(#tip)"/>
+<rect x="20" y="30" width="280" height="88" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="160.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">候選／合成測試案例</text>
+<text x="160.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">專家覆核須另行完成</text>
+<rect x="400" y="30" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">檢索評估</text>
+<text x="540.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">相關來源與版本覆蓋</text>
+<rect x="780" y="30" width="280" height="88" rx="6" fill="#E9F4F0" stroke="#BECDD3"/>
+<text x="920.0" y="69.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">回答評估</text>
+<text x="920.0" y="93.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">適用方向與來源支持</text>
+<rect x="20" y="235" width="280" height="88" rx="6" fill="#FFF3D8" stroke="#BECDD3"/>
+<text x="160.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">人工複核與發布門檻</text>
+<text x="160.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">通過後再驗證正式環境</text>
+<rect x="400" y="235" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="540.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">效能與費用</text>
+<text x="540.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">TTFT／總耗時／tokens</text>
+<rect x="780" y="235" width="280" height="88" rx="6" fill="#F3F6F8" stroke="#BECDD3"/>
+<text x="920.0" y="274.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">多輪互動評估</text>
+<text x="920.0" y="298.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">更正／衝突／拒答</text>
+</svg><figcaption>評估與驗收層次</figcaption></figure>
+<p>工程測試驗證契約與工具運作，候選資料／合成案例不等於專家 gold。既有 resource 結果不改寫，也不視為本次模型品質驗收。真實檢索召回、回答適切性、法律內容、效能與成本需要各自證據。</p>
+<h2 id="section-7">7. 部署與交付</h2>
+<p>四個 Functions 位於 asia-east1。Client 維持 <code>api</code>／<code>api_preview</code>、512 MB、180 秒；Admin 為 <code>admin_api</code>／<code>admin_api_preview</code>、1 GB、900 秒。Admin 耗時工作由 Cloud Tasks 呼叫同一 Function 的 OIDC worker，前端輪詢進度。正式與 preview 分開使用 runtime SA、資料庫 IAM、queue、bucket 及 secrets。</p>
+<p><a href="../OPERATIONS.md">操作手冊</a> 列出安裝、密碼初始化、五個本機程序、發布與回復。CI 的 main/dev 流程改用 WIF／ADC，先後端再前端。兩份 Functions source 由白名單產生並各自獨立載入；Hosting 僅發布對應前端 dist。Rules 禁止瀏覽器直接讀寫，後端再由資料庫 IAM 與 API allowlist 限制；不宣稱 Admin SDK 的 collection IAM 隔離。</p>
+<h2 id="section-8">8. 驗收與可編輯來源</h2>
+<p>本報告及三份手冊以 Markdown 為來源，同步提供離線 HTML 與 PDF。diagram JSON 定義架構圖，建置時產生 SVG 與 Mermaid。文件工具可獨立於簡報與 AI 編輯工具運作。</p>
+<p>實際程式測試、部署狀態、文件檢查與保護範圍比對結果集中見 <a href="../MIGRATION_REPORT.md">遷移報告</a>。文件建置工具可以輸出頁數與來源／輸出 SHA-256 至指定位置。工程測試通過不代表模型品質或法律專家審查完成。</p><footer>本文件可離線閱讀。範圍與驗證狀態以文件內說明及 verification.json 為準。</footer></main></body></html>

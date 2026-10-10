@@ -1,0 +1,43 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>性騷擾防治智能 AI 開發維運手冊</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}body{overflow-wrap:anywhere;margin:0;color:#193a4b;background:#f3f6f8;font:17px/1.85 'Heiti TC','Noto Sans CJK TC',system-ui,sans-serif}main{max-width:1050px;margin:0 auto;background:white;padding:60px 72px 90px}h1{font-size:36px;line-height:1.4;border-bottom:4px solid #177f71;padding-bottom:20px}h2{font-size:27px;margin-top:48px;border-top:1px solid #becdd3;padding-top:24px}h3{font-size:21px;margin-top:30px}p{margin:14px 0}table{table-layout:fixed;border-collapse:collapse;width:100%;margin:20px 0;font-size:15px}th,td{border:1px solid #becdd3;padding:10px 12px;text-align:left;vertical-align:top}th{background:#177f71;color:white}tr:nth-child(even){background:#f3f6f8}code{font-size:.9em;background:#eef4f3;padding:2px 4px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f6f8;padding:18px;font-size:14px}blockquote{border-left:4px solid #a87515;padding:12px 20px;background:#fff3d8;margin:20px 0}figure{margin:28px 0}figure svg{width:100%;height:auto}figcaption{font-size:14px;color:#5b7282}a{color:#177f71}li{margin:8px 0}nav{font-size:16px;border-bottom:1px solid #becdd3;padding:10px 0 24px}footer{font-size:13px;color:#5b7282;margin-top:55px}@media(max-width:700px){main{padding:26px 20px}h1{font-size:28px}table{font-size:13px}th,td{padding:6px}}@media print{body,main{background:white}main{padding:0;max-width:none}h2,h3{break-after:avoid}table,figure,pre{break-inside:avoid}a{color:inherit}}
+</style></head><body><main><h1>性騷擾防治智能 AI 開發維運手冊</h1><nav><a href="#section-1">1. 安裝與本機程序</a><br><a href="#section-2">2. 模組與契約</a><br><a href="#section-3">3. 資料與權限</a><br><a href="#section-4">4. 測試與套件建置</a><br><a href="#section-5">5. 瀏覽器與可靠性工具</a><br><a href="#section-6">6. 部署與回復</a><br><a href="#section-7">7. 文件建置</a></nav><p>版本日期：2026-10-10。本文件提供拆分後架構與日常檢查摘要。完整環境變數、密碼管理、部署與回復命令集中於 <a href="../../OPERATIONS.md">操作手冊</a>；實際驗收狀態見 <a href="../../MIGRATION_REPORT.md">遷移報告</a>。</p>
+<h2 id="section-1">1. 安裝與本機程序</h2>
+<p>使用 Python 3.13、Node.js 24、pnpm 10.27.0、uv。由根目錄執行：</p>
+<pre><code>uv sync --frozen --all-extras
+pnpm install --frozen-lockfile</code></pre>
+<p>不要覆寫既有環境檔。以 <code>.env.example</code> 建立獨立本機設定，讓 <code>RAG_ENV_FILE</code> 指向該檔，並設定 <code>PYTHONPATH=shared/python:client/backend:admin/backend</code>、<code>ENVIRONMENT=development</code> 與 <code>FLASK_SKIP_DOTENV=1</code>。後者停用 Flask CLI 自動載入根目錄 <code>.env</code>，讓 API 與 Python worker 都由共用設定模組讀取 <code>RAG_ENV_FILE</code>；已匯出的同名變數仍優先。業務庫使用 <code>app-dev</code>，設定文件為 <code>app_dev</code>，私有庫為 <code>admin-private-dev</code>。</p>
+<table><tr><th>程序</th><th>根目錄執行命令</th></tr><tr><td>Client API</td><td><code>uv run flask --app client_app.main:create_app run --port 8000</code></td></tr><tr><td>Admin API</td><td><code>uv run flask --app admin_app.main:create_app run --port 8001</code></td></tr><tr><td>Client 網頁</td><td><code>pnpm --filter @rag/client dev</code>，port 5173</td></tr><tr><td>Admin 網頁</td><td><code>pnpm --filter @rag/admin dev</code>，port 5174</td></tr><tr><td>本機 worker</td><td><code>uv run python -m admin_app.worker_cli --poll-seconds 2</code></td></tr></table>
+<p>本機 Admin 使用 HTTP 時設定 <code>ADMIN_COOKIE_SECURE=false</code>。本機 worker 的 Cloud Tasks 設定需全部留空，並與 Admin API 共用同一套 project、database、Storage 設定；它只執行 development jobs。Storage 使用 ADC，本機執行仍可能呼叫真實 dev 資源與模型。</p>
+<h2 id="section-2">2. 模組與契約</h2>
+<table><tr><th>目錄</th><th>職責</th></tr><tr><td><code>client/backend</code></td><td>Client Flask app、聊天／health 路由、SSE wrapper</td></tr><tr><td><code>client/frontend</code></td><td>聊天、摘要、歷史、匯出及使用者設定</td></tr><tr><td><code>admin/backend</code></td><td>密碼／session、設定、Skills、診斷 jobs、corpus、worker 與資料 CLI</td></tr><tr><td><code>admin/frontend</code></td><td>獨立登入、管理設定、測試與檢索來源管理</td></tr><tr><td><code>shared/python/rag_core</code></td><td>Agent、RAG、Runtime Config、契約、PII、內建 Skills</td></tr><tr><td><code>shared/frontend</code></td><td>聊天契約、遮罩及前端共用服務</td></tr><tr><td><code>client/tests</code>、<code>admin/tests</code>、<code>shared/tests</code></td><td>各自回歸及共用測試</td></tr><tr><td><code>infrastructure</code></td><td>四庫 Rules、向量／私有索引、IAM、Emulator 測試</td></tr></table>
+<p>Client 支援聊天契約 1-4；v4 使用 schema 3 文字摘要，瀏覽器 storage schema 4。完整單元驗證後送出 delta，done 才提交摘要與 metadata。SSE wrapper 保持 lazy iterator 與關閉清理，不先讀完回應。詳細欄位見 <a href="../CHAT_CONTRACT.md">聊天契約</a> 與 <a href="../API_REFERENCE.md">API 參考</a>。</p>
+<p>更動需覆蓋摘要 revision／過期結果、取消／重試、遮罩後請求快照、圖片邊界、未知 source ID、契約指紋、歷史遷移、Excel 原內容及人工覆核失效。</p>
+<h2 id="section-3">3. 資料與權限</h2>
+<p>同環境 Client／Admin 共用業務庫，collection 分工由後端 allowlist 控制。Client SA 只讀對應業務庫；Admin SA 可操作對應業務及私有庫。四庫 Rules 拒絕瀏覽器直連。不能以 Rules 測試取代 SDK 實際 IAM 驗收，也不宣稱 IAM 能限制 Admin SDK 只讀某些 collections。</p>
+<p>Runtime Config 與 Skills 的寫入採 revision 比對，一般快取約 30 秒／Skills 約 60 秒。production／preview 缺少或錯配必要 database／document／secret 設定時拒絕啟動。管理密碼、sessions、CSRF、jobs 不能進入 Client 回應或公開產物。</p>
+<p>原始 <code>data/</code>、<code>resource/</code>、<code>.env</code>、<code>.env.local</code> 及 <code>firebase_admin.json</code> 保留；<a href="../../../admin/backend/admin_app/scripts/README.md">資料工具</a> 的搬移、catalog、apply 使用明確資料庫與核對過的計畫。不要把舊 seed 或預覽直接當成最新雲端計畫。</p>
+<h2 id="section-4">4. 測試與套件建置</h2>
+<pre><code>uv run --frozen ruff check client/backend admin/backend shared/python client/tests admin/tests shared/tests scripts conftest.py
+uv run --frozen ruff format --check client/backend admin/backend shared/python client/tests admin/tests shared/tests scripts conftest.py
+uv run --frozen pytest client/tests admin/tests shared/tests -q
+pnpm -r lint
+pnpm -r test
+pnpm -r build
+pnpm test:rules
+uv run --frozen python scripts/build_functions.py --discovery-venv
+uv run --frozen python scripts/quality/check_source_package.py</code></pre>
+<p>pytest 透過根目錄 conftest 禁用 dotenv 並使用 ci 假 key 與替身。Rules 驗證需 Java 21／Firebase CLI 15.33.0，對四庫測試匿名及 Firebase 已登入讀寫拒絕。Functions builder 匯出各自鎖定 dependencies，獨立載入入口並檢查路由分離；檔案清單再確認內建 Skills 存在、機密與原始資料排除。</p>
+<h2 id="section-5">5. 瀏覽器與可靠性工具</h2>
+<p>瀏覽器合成腳本位於 <code>client/tests/browser_*.mjs</code> 與 <code>admin/tests/browser_*.mjs</code>，用 Playwright 驗證桌面／手機。依腳本說明設定 <code>PLAYWRIGHT_MODULE</code>、<code>BROWSER_BASE_URL</code> 與專案外輸出目錄。合成攔截測試不呼叫付費模型；實際 preview 的 Cookie、SSE、Cloud Tasks、Storage、向量查詢需另外驗收。</p>
+<p>可靠性工具位於 <code>admin/tests/reliability</code>。CLI 用隱藏提示或密碼檔登入，再提交及輪詢 jobs；先用 dry-run／prepare-only 核對，明確指定 live 才送出。其 TypeScript bridge 以 Node 26 驗證，與前端建置 Node 24 的要求分開。</p>
+<p><a href="../../../admin/tests/reliability/README.md">可靠性工具</a>、<a href="../../../admin/tests/reliability/FOUR_LAYER.md">四層評估</a>、<a href="../../../admin/tests/reliability/BENCHMARK.md">效能工具</a> 保留各自指標定義。法名命中、來源 ID 與合成案例不證明法律品質。</p>
+<h2 id="section-6">6. 部署與回復</h2>
+<pre><code>uv run --frozen python scripts/deploy.py --environment preview --service all
+uv run --frozen python scripts/configure_admin_workers.py --environment preview --apply</code></pre>
+<p>首次資源設定與 password CLI 見完整操作手冊。正式使用 production；腳本先發布 Admin／Client 後端，再發布前端。preview channel 有效 30 天，以部署 JSON 的實際 URL 為準。CI main/dev 改用 WIF／ADC 與受限 deploy SA；本機 workflow 檔存在不代表遠端已生效。</p>
+<p>Cloud Tasks 與 Scheduler 使用各環境指定的 OIDC identity／audience；worker 位於同一 Admin Function。job lease、checkpoint、receipt 對帳及物件 generation 用於安全恢復。未知外部模型結果不自動重複呼叫。</p>
+<p>回復前停止匯入／刪除。程式回復選擇已知可用的新架構版本，不能重新開放舊固定 token。設定用最新 revision 寫回核對值；資料按備份與 receipts 修復。error ID 與計數用於排查，不能以關閉身份驗證或反覆重試掩蓋失敗。</p>
+<h2 id="section-7">7. 文件建置</h2>
+<p>Markdown／diagram JSON 為來源；SVG、Mermaid、HTML、PDF 為衍生物。在獨立文件環境安裝 ReportLab、pypdf 及中文字型，執行：</p>
+<pre><code>DOC_PYTHON=/path/to/docs-python bash docs/technical-report/scripts/build.sh</code></pre>
+<p><a href="../scripts/README.md">文件工具</a> 提供連結與中文抽取檢查；詳細報告輸出至專案外，生成後逐頁檢查中文、表格與頁尾。</p><footer>本文件可離線閱讀。範圍與驗證狀態以文件內說明及 verification.json 為準。</footer></main></body></html>

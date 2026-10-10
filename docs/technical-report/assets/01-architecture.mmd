@@ -1,0 +1,17 @@
+flowchart TD
+    client["Client 網站／API<br/>聊天、摘要、SSE"]
+    shared["shared 共用推論<br/>Agent、RAG、契約"]
+    model["OpenRouter<br/>生成與 embedding"]
+    admin["Admin 網站／API<br/>session、CSRF、管理"]
+    business["同環境業務資料庫<br/>設定、Skills、檢索來源"]
+    private["Admin 私有資料庫<br/>密碼、sessions、jobs"]
+    tasks["Cloud Tasks／worker<br/>OIDC、checkpoint"]
+    storage["私有 Storage<br/>原檔、預覽、工作內容"]
+    client --> shared
+    shared --> model
+    admin --> business
+    business --> shared
+    admin --> tasks
+    tasks --> storage
+    private --> admin
+    admin --> shared

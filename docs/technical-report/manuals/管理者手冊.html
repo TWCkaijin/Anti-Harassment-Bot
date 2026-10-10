@@ -1,0 +1,34 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>性騷擾防治智能 AI 管理者手冊</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}body{overflow-wrap:anywhere;margin:0;color:#193a4b;background:#f3f6f8;font:17px/1.85 'Heiti TC','Noto Sans CJK TC',system-ui,sans-serif}main{max-width:1050px;margin:0 auto;background:white;padding:60px 72px 90px}h1{font-size:36px;line-height:1.4;border-bottom:4px solid #177f71;padding-bottom:20px}h2{font-size:27px;margin-top:48px;border-top:1px solid #becdd3;padding-top:24px}h3{font-size:21px;margin-top:30px}p{margin:14px 0}table{table-layout:fixed;border-collapse:collapse;width:100%;margin:20px 0;font-size:15px}th,td{border:1px solid #becdd3;padding:10px 12px;text-align:left;vertical-align:top}th{background:#177f71;color:white}tr:nth-child(even){background:#f3f6f8}code{font-size:.9em;background:#eef4f3;padding:2px 4px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f6f8;padding:18px;font-size:14px}blockquote{border-left:4px solid #a87515;padding:12px 20px;background:#fff3d8;margin:20px 0}figure{margin:28px 0}figure svg{width:100%;height:auto}figcaption{font-size:14px;color:#5b7282}a{color:#177f71}li{margin:8px 0}nav{font-size:16px;border-bottom:1px solid #becdd3;padding:10px 0 24px}footer{font-size:13px;color:#5b7282;margin-top:55px}@media(max-width:700px){main{padding:26px 20px}h1{font-size:28px}table{font-size:13px}th,td{padding:6px}}@media print{body,main{background:white}main{padding:0;max-width:none}h2,h3{break-after:avoid}table,figure,pre{break-inside:avoid}a{color:inherit}}
+</style></head><body><main><h1>性騷擾防治智能 AI 管理者手冊</h1><nav><a href="#section-1">1. 登入與環境辨識</a><br><a href="#section-2">2. 系統、Prompt 與 Skills 設定</a><br><a href="#section-3">3. 單筆診斷</a><br><a href="#section-4">4. Excel 三法批次預測</a><br><a href="#section-5">5. 對話行為測試</a><br><a href="#section-6">6. 檢索來源管理</a><br><a href="#section-7">7. 故障處理</a></nav><p>版本日期：2026-10-10。管理操作可能寫入 Firestore 或呼叫付費模型；先確認環境與權限。完整維運命令見 <a href="../../OPERATIONS.md">操作手冊</a>。</p>
+<h2 id="section-1">1. 登入與環境辨識</h2>
+<p>開啟獨立 Admin 網站並輸入管理密碼。後端核對私有 Firestore 的 Argon2id hash，設定 HttpOnly／Secure／SameSite=Strict session cookie。每次管理請求重新驗證；不再使用固定 token，也不把 session 或密碼存入 localStorage。</p>
+<p>production 使用業務庫 <code>(default)</code> 的 <code>runtime_config/app_main</code>，preview 使用 <code>app-dev</code> 的 <code>runtime_config/app_dev</code>。Skills 也位於各自業務庫，兩個環境不共用資料。先確認頁面環境再操作；目前網址及雲端狀態見 <a href="../../MIGRATION_REPORT.md">遷移報告</a>。</p>
+<p>修改前保存原設定與變更原因；使用完畢按登出撤銷 session。閒置期限預設 30 分鐘、最長 8 小時；密碼輪替使舊 sessions 失效。操作身分為後端產生的共用管理者及 session，不冒充具名人員。</p>
+<h2 id="section-2">2. 系統、Prompt 與 Skills 設定</h2>
+<table><tr><th>區域</th><th>內容與注意事項</th></tr><tr><td>模型設定</td><td>聊天模型、生成參數、Provider 排序及 Rerank 模型；影響費用與延遲</td></tr><tr><td>處理流程</td><td>Reranking、後端 PII 總開關及細部範圍等；前端固定自動遮罩，已無送出前確認開關</td></tr><tr><td>檢索設定</td><td>Top K、距離門檻；collection 名稱由後端固定，不接受任意路徑</td></tr><tr><td>維護模式</td><td>儲存非空 maintenance_message 後聊天回 503；清空並儲存才解除</td></tr><tr><td>Prompt</td><td>同一 runtime document 的提示區段；未設定區段使用內建值</td></tr><tr><td>Skills</td><td>情境關鍵詞、指令及網址／電話／選項；來源為內建指令與共用覆寫</td></tr></table>
+<p>一般設定快取約 30 秒、Skills 約 60 秒；儲存後確認 Client 實際行為。儲存採 revision 比對，衝突時重新載入並整合修改。max_tokens=0 表示不傳上限，不代表免費或無限回應。production 強制關閉 development diagnostics。</p>
+<p>Skills 建立範例只補缺少項目；停用可阻止使用。刪除內建 Skill 會保存停用覆寫，避免預設重新出現。對網址、電話及誘導選項應有人工核對；詳細 API 見 <a href="../API_REFERENCE.md">設定參考</a>。</p>
+<h2 id="section-3">3. 單筆診斷</h2>
+<p>在「驗證及測試」選擇單筆診斷，輸入合成或已適當處理的情境。可暫時覆寫設定，檢查來源、輸入處理階段及回答；本次覆寫不等於儲存環境設定。</p>
+<p>診斷由背景工作執行，只有建立它的 session 可讀取、取消或重試；重新登入後不能取得舊 session 的結果。單次請求與結果預設 24 小時後不可讀取並清理。設定／Skills／契約漂移時停止，未知模型結果需由操作者明確決定是否重試。</p>
+<p>PII 比較只切換後端遮罩，前端已核准的文字保持相同。診斷中的「處理前」是後端收到的前端處理後文字，不代表瀏覽器原稿。兩次模型結果不同不能單獨證明遮罩造成品質差異。</p>
+<h2 id="section-4">4. Excel 三法批次預測</h2>
+<p>1. 選取 Excel、工作表、標題列、情境欄位與選用的參考答案欄。</p>
+<p>2. 準備整批資料，檢查模型／設定及全部遮罩預覽，再確認開始。</p>
+<p>3. 執行中可要求完成本筆後暫停，再續跑未完成列。失敗列需手動重試。</p>
+<p>4. 隨時下載結果副本；切換頁籤保留進度，重新整理或關閉頁面前應先下載。</p>
+<p>完整工作簿與參考答案不送到模型，每次只送選定列情境與固定設定。預測有性工法、性平法、性騷法三類；資訊不足／不適用三法有具體原因，操作失敗另列狀態。</p>
+<p>參考答案評分是「任一法規命中」，忽略順序及多餘預測。統計分別列分子／分母；沒有有效參考答案的列不納入正確率。這不是法律品質或完整集合一致率。</p>
+<p>Excel 匯出保留原始工作表，另加結果與統計表。操作上限、契約指紋及 CLI 見 <a href="../BATCH_PREDICTION.md">批次預測</a>，分母定義與重排見 <a href="../RERANKING.md">重排與統計</a>。</p>
+<h2 id="section-5">5. 對話行為測試</h2>
+<p>此工具使用一般對話 v4，與三法命中評分獨立。內建五類案例為服務範圍、幻覺、情境更新、提示注入與即時安全；也可匯入測試表或既有 JSON 紀錄。</p>
+<p>多輪案例依實際前輪回覆及摘要承接，逐輪確認送出內容。暫停等待目前請求完成；操作錯誤停止該案後續輪次，驗證、限流或契約問題可能停止整套。設定固定後若需改動，另開測試。</p>
+<p>人工覆核與規則提示分開；沒有警告不代表通過。通過率分母只有已覆核且可判定的案例。覆核綁定腳本、設定、契約與證據雜湊，內容變動後需重新覆核。匯入紀錄不會自動發送請求。</p>
+<p>JSON 保留逐輪結構，Excel 包含測試總表、逐輪紀錄與執行設定。紀錄只存目前頁面記憶體，離開前下載；兩種匯出都可能含敏感輸入與回覆。詳見 <a href="../BEHAVIOR_TESTS.md">行為測試指南</a>。</p>
+<h2 id="section-6">6. 檢索來源管理</h2>
+<p>選擇法規、判決或求助資源，依序上傳、等待解析、選擇欄位對應、檢查完整分段，再確認 embedding／發布。確認前不呼叫 embedding；預設上限為 5 MiB、PDF 100 頁、100 chunks，PDF 不含 OCR。來源詳情提供完整 chunks、metadata 與原檔下載。工作紀錄可恢復進度；重複確認不建立第二份發布。</p>
+<p>整份來源刪除前需確認環境、來源、chunks 與原檔。資料及物件清理尚未全部成功時保持「刪除中／清理中」，可恢復工作；不刪除 repository 原始資料。舊來源需核對 manifest 後才能整份刪除，缺少原檔時明示無原檔。進階資料維護見 <a href="../../../admin/backend/admin_app/scripts/README.md">資料工具</a>。</p>
+<h2 id="section-7">7. 故障處理</h2>
+<table><tr><th>現象</th><th>檢查方向</th></tr><tr><td>401／403</td><td>session、環境、Origin、CSRF 或權限，必要時重新登入</td></tr><tr><td>409 設定衝突</td><td>重新讀取最新 revision，再整合修改</td></tr><tr><td>429</td><td>等待限制解除；避免重複計費</td></tr><tr><td>maintenance 503</td><td>核對環境後清空維護訊息並儲存</td></tr><tr><td>rag_unavailable</td><td>embedding、Firestore、collections、索引與維度</td></tr><tr><td>契約指紋不符</td><td>先下載結果，再重新準備測試；前後端需一致</td></tr><tr><td>回覆或法源有疑義</td><td>保留最小必要證據，安排來源與人工覆核，不用自動分數替代</td></tr></table>
+<p>日誌以錯誤 ID、狀態與操作版本定位；不要把完整使用者對話或 key 貼到一般問題追蹤系統。背景工作、權限與回復方式見 <a href="../../OPERATIONS.md">操作手冊</a>。</p><footer>本文件可離線閱讀。範圍與驗證狀態以文件內說明及 verification.json 為準。</footer></main></body></html>
