@@ -1,0 +1,20 @@
+flowchart TD
+    A[POST /v1/chat/ 或 /api/v1/chat/] --> B[Firebase HTTP wrapper → Flask<br/>保留 WSGI 串流與關閉回呼]
+    B --> C[API 邊界檢查<br/>請求大小、限流、選用 App Check]
+    C --> D[ChatRequest 驗證<br/>文字、歷史、角色、圖片]
+    D --> E[讀取 Runtime Config<br/>檢查維護模式與圖片開關]
+    E --> F{stream = true？}
+    F -- 是 --> G[SSE 回應與非同步工作<br/>送出實際 progress 階段]
+    F -- 否 --> H[一般 JSON 請求路徑]
+    G --> I[依設定遮蔽本輪文字與文字歷史]
+    H --> I
+    I --> J[OpenRouterAgent<br/>系統提示、Skills、模型與 RAG]
+    J --> K[解析回答 JSON<br/>Pydantic 驗證]
+    K --> L[以已匹配的可信任 Skills<br/>解析及過濾 action selectors]
+    L --> M[SSE done 或完整 JSON<br/>回覆、來源、引導及動作]
+    J -. 串流中 .-> N[delta 文字／guidance 預覽]
+    C -. 拒絕 .-> X[開始串流前：HTTP 錯誤與 JSON]
+    D -. 不合法 .-> X
+    E -. 停用／維護 .-> X
+    J -. 執行失敗 .-> Y[依階段回 HTTP 錯誤<br/>或 SSE error event]
+    K -. 格式不符 .-> Y

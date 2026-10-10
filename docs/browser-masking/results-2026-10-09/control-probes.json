@@ -1,0 +1,136 @@
+[
+  {
+    "id": "arithmetic",
+    "elapsedMs": 219.39999999850988,
+    "response": {
+      "id": "e90f3fda-8624-4b0e-a7f9-b89462b2868c",
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "logprobs": null,
+          "message": {
+            "content": "<think>\n\n</think>\n\n1+1=2",
+            "role": "assistant"
+          }
+        }
+      ],
+      "model": "Qwen3-0.6B-q4f16_1-MLC",
+      "object": "chat.completion",
+      "created": 1791482420,
+      "usage": {
+        "completion_tokens": 5,
+        "prompt_tokens": 33,
+        "total_tokens": 38,
+        "extra": {
+          "e2e_latency_s": 0.219,
+          "prefill_tokens_per_s": 218.97810218545052,
+          "decode_tokens_per_s": 74.85029939618853,
+          "time_to_first_token_s": 0.15070000000298023,
+          "time_per_output_token_s": 0.013360000000894068
+        }
+      }
+    }
+  },
+  {
+    "id": "simple_zh_no_grammar",
+    "elapsedMs": 229.80000000447035,
+    "response": {
+      "id": "93ada335-bdc0-4540-83c0-c9b34c5e9be9",
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "logprobs": null,
+          "message": {
+            "content": "<think>\n\n</think>\n\n{\"entities\":[{\"text\":\"李四\",\"type\":\"person\"}]}",
+            "role": "assistant"
+          }
+        }
+      ],
+      "model": "Qwen3-0.6B-q4f16_1-MLC",
+      "object": "chat.completion",
+      "created": 1791482420,
+      "usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 58,
+        "total_tokens": 71,
+        "extra": {
+          "e2e_latency_s": 0.23,
+          "prefill_tokens_per_s": 1060.3290675839116,
+          "decode_tokens_per_s": 74.66973003956767,
+          "time_to_first_token_s": 0.05470000000298023,
+          "time_per_output_token_s": 0.013392307692422318
+        }
+      }
+    }
+  },
+  {
+    "id": "simple_zh_grammar",
+    "elapsedMs": 365,
+    "response": {
+      "id": "23b43000-6573-4d72-b346-abf8fa0ea418",
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "logprobs": null,
+          "message": {
+            "content": "<think>\n\n</think>\n\n{\"entities\":[{\"text\":\"李四\",\"type\":\"person\"}]}",
+            "role": "assistant"
+          }
+        }
+      ],
+      "model": "Qwen3-0.6B-q4f16_1-MLC",
+      "object": "chat.completion",
+      "created": 1791482420,
+      "usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 58,
+        "total_tokens": 71,
+        "extra": {
+          "e2e_latency_s": 0.365,
+          "prefill_tokens_per_s": 286.1371484911063,
+          "decode_tokens_per_s": 80.59516429535445,
+          "time_to_first_token_s": 0.20270000000298022,
+          "time_per_output_token_s": 0.012407692306889937,
+          "grammar_init_s": 0.19820000000298024,
+          "grammar_per_token_s": 0.00009230769253694093
+        }
+      }
+    }
+  },
+  {
+    "id": "production_prompt_no_grammar",
+    "elapsedMs": 602.3000000044703,
+    "response": {
+      "id": "1ae89fa2-7558-42d7-b139-9c55dd58cb4f",
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "logprobs": null,
+          "message": {
+            "content": "<think>\n\n</think>\n\n```json\n{\"entities\": []}\n```",
+            "role": "assistant"
+          }
+        }
+      ],
+      "model": "Qwen3-0.6B-q4f16_1-MLC",
+      "object": "chat.completion",
+      "created": 1791482421,
+      "usage": {
+        "completion_tokens": 9,
+        "prompt_tokens": 482,
+        "total_tokens": 491,
+        "extra": {
+          "e2e_latency_s": 0.602,
+          "prefill_tokens_per_s": 1038.7931034482758,
+          "decode_tokens_per_s": 65.40697674347773,
+          "time_to_first_token_s": 0.464,
+          "time_per_output_token_s": 0.015288888889054457
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-09",
+  "typescript": "passed",
+  "eslint": "passed",
+  "viteBuild": "passed",
+  "vitest": {
+    "files": 44,
+    "tests": 622,
+    "failed": 0
+  },
+  "browserBenchmark": {
+    "cases": 120,
+    "gatePassed": false
+  },
+  "failureSmoke": {
+    "passed": true,
+    "method": "real-browser worker fault injection"
+  },
+  "backend": "not rerun; backend code unchanged",
+  "deployment": "not performed"
+}
