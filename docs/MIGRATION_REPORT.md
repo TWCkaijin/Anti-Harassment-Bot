@@ -1,6 +1,6 @@
 # Client／Admin 拆分與資料管理遷移報告
 
-更新日期：2026-10-10。本文描述目前工作目錄與已取得的驗證證據。**兩個 Preview Functions 與網站已更新部署；Production 切換、WIF／IAM 真實權限矩陣與業務資料遷移仍未完成。** 真實背景工作與合成匯入已執行，已知失敗及待補驗收列於第 9 節；不把本機測試或部分線上成功等同整體遷移完成。
+更新日期：2026-10-10。本文描述目前工作目錄與已取得的驗證證據。**兩個 Preview Functions 與網站已更新部署；Runtime IAM 的 32 項實測已通過；Production 切換、WIF 部署與業務資料遷移正在執行。** 真實背景工作與合成匯入已執行，已知失敗及待補驗收列於第 9 節；不把本機測試或部分線上成功等同整體遷移完成。
 
 ## 1. 目錄與服務責任
 
@@ -122,7 +122,7 @@ Workflow 已改用 Workload Identity Federation 的短期憑證介面；雲端 p
 | --- | --- | --- |
 | 服務拆分 | 兩組前後端與來源包已建立；Preview 已部署，Admin 真實 Hosting→API 登入及讀取已驗證 | Production 尚未切換；快取 header 與完整發布矩陣不可由 UI 驗證推定 |
 | 管理驗證 | 本地安全測試；真實 Admin Preview 登入、Cookie 轉送、七分頁讀取、登出後 401 已驗證 | 密碼輪替、過期、CSRF／Origin 拒絕、多 instance 限流與私有庫故障的完整雲端矩陣尚待驗證 |
-| 環境隔離 | 固定 database mapping；四庫 Rules Emulator 匿名／Firebase Auth 拒絕矩陣已通過；Preview UI 確認 app_dev | Runtime SA 跨庫拒絕、Client 寫入拒絕與 WIF 實際部署仍需雲端驗證 |
+| 環境隔離 | 固定 database mapping；四庫 Rules Emulator 匿名／Firebase Auth 拒絕矩陣已通過；Preview UI 確認 app_dev | Runtime SA 的跨庫拒絕／Client 寫入拒絕 32 項實測已通過；WIF 實際部署仍在執行 |
 | 共用設定 | 真實 Admin PUT 後 Client 採用旗標；測試文件已安全移除，Admin／Client 恢復預設 | 從 PUT 送出時計時為 30.980 秒，嚴格 30 秒 gate 未通過；從成功回應計時約 24.851 秒，未直接量測提交時間或所有 instances |
 | 非同步工作 | 本地重送／checkpoint／取消測試；真實 Tasks／OIDC 已成功執行診斷與 corpus 工作，Scheduler 定時呼叫回 200，TTL／lifecycle 設定已套用 | 雲端中斷復原與完整清理矩陣仍需補證據 |
 | 資料管理 | 第二輪真實端到端 26 項檢查通過，含確認前零向量、重複確認、原生向量搜尋、原檔比對與整份刪除清理 | 第一輪完成後重送曾收到未定位的 500；正式資料遷移與舊來源完整性仍需完成 |
@@ -173,9 +173,13 @@ Client 另外只送出一次原先排定的合成聊天：直接 API 回 HTTP 20
 
 以下仍屬必要驗收缺口，不能標示整體完成：
 
-- Production 部署與舊管理路徑停用、WIF 真實 GitHub 部署、runtime service account 的跨環境拒絕／Client 寫入拒絕矩陣、資料遷移與索引／來源完整性核對仍待完成。
+- Production 部署與舊管理路徑停用、WIF 真實 GitHub 部署、資料遷移與索引／來源完整性核對仍待完成。Runtime IAM 矩陣已於下述重新授權執行中通過。
 - 結構化欄位對應、背景解析、匯入草稿恢復與工作清單／重試／取消 UI 已通過本地回歸與 1440／390 px 合成瀏覽器流程；第二輪真實 corpus 全流程通過，但第一輪未定位的 500 與雲端中斷／Storage 清理失敗復原的完整矩陣仍不能列為已解決或已通過。
 - 設定傳播已取得上述真實抽樣證據；若驗收要求從 PUT 送出起嚴格小於 30 秒，該 gate 仍未通過，不能用成功回應後的數字替代。Preview 設定尚未從正式庫複製，測試已還原無文件狀態，目前使用應用預設。
+
+2026-10-10 09:18，四個 runtime service accounts 的真實 Firestore IAM 矩陣通過 **32／32 項**：16 次讀取為 6 次允許（合成文件不存在，404）及 10 次拒絕（403）；16 次 create-only 寫入為 4 次允許及 12 次拒絕。四個新建合成文件均由建立者服務帳號以 updateTime precondition 刪除成功，operator 最終確認四庫固定 probe path 全部 404。四個臨時 Token Creator binding 均已移除，且各 SA 的其他 bindings 與執行前完全一致。沒有讀取業務 collections 或呼叫模型。
+
+第一次嘗試因 IAM 授權傳播尚未完成而無法取得 token；第二次因探針 collection 使用 Firestore 保留名稱而收到 400，均未完成矩陣且已撤除臨時授權。修正為合法 `migration_permission_probe/not-present`、加入保留名稱離線拒絕及有界傳播等待後，第三次完成上述實測，始終保留原核准的 30 分鐘到期時間。成功報告為 `/tmp/rag-admin-migration-20261010/runtime-iam-approved-result-r3.json`，先前失敗記錄保留；可重用流程見 [Runtime IAM 實測](RUNTIME_IAM_PROBE.md)。
 
 ## 10. 文件與清理邊界
 

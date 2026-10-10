@@ -31,4 +31,4 @@
 <p>整份來源刪除前需確認環境、來源、chunks 與原檔。資料及物件清理尚未全部成功時保持「刪除中／清理中」，可恢復工作；不刪除 repository 原始資料。舊來源需核對 manifest 後才能整份刪除，缺少原檔時明示無原檔。進階資料維護見 <a href="../../../admin/backend/admin_app/scripts/README.md">資料工具</a>。</p>
 <h2 id="section-7">7. 故障處理</h2>
 <table><tr><th>現象</th><th>檢查方向</th></tr><tr><td>401／403</td><td>session、環境、Origin、CSRF 或權限，必要時重新登入</td></tr><tr><td>409 設定衝突</td><td>重新讀取最新 revision，再整合修改</td></tr><tr><td>429</td><td>等待限制解除；避免重複計費</td></tr><tr><td>maintenance 503</td><td>核對環境後清空維護訊息並儲存</td></tr><tr><td>rag_unavailable</td><td>embedding、Firestore、collections、索引與維度</td></tr><tr><td>契約指紋不符</td><td>先下載結果，再重新準備測試；前後端需一致</td></tr><tr><td>回覆或法源有疑義</td><td>保留最小必要證據，安排來源與人工覆核，不用自動分數替代</td></tr></table>
-<p>日誌以錯誤 ID、狀態與操作版本定位；不要把完整使用者對話或 key 貼到一般問題追蹤系統。背景工作、權限與回復方式見 <a href="../../OPERATIONS.md">操作手冊</a>。</p><footer>本文件可離線閱讀。範圍與驗證狀態以文件內說明及 verification.json 為準。</footer></main></body></html>
+<p>日誌以錯誤 ID、狀態與操作版本定位；不要把完整使用者對話或 key 貼到一般問題追蹤系統。背景工作、權限與回復方式見 <a href="../../OPERATIONS.md">操作手冊</a>。</p><footer>本文件可離線閱讀。範圍與驗證狀態以文件內說明及遷移報告為準。</footer></main></body></html>
