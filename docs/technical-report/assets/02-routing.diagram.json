@@ -1,0 +1,66 @@
+{
+  "title": "v4 回覆與相容契約",
+  "width": 1080,
+  "height": 380,
+  "nodes": [
+    {
+      "id": "input",
+      "label": "訊息與文字摘要\ncontract v4",
+      "x": 400,
+      "y": 20,
+      "w": 280,
+      "h": 88,
+      "kind": "accent"
+    },
+    {
+      "id": "gate",
+      "label": "理解需求與必要條件\n判斷是否檢索",
+      "x": 400,
+      "y": 135,
+      "w": 280,
+      "h": 88,
+      "kind": "decision"
+    },
+    {
+      "id": "clarify",
+      "label": "簡單支持\n直接回覆",
+      "x": 20,
+      "y": 260,
+      "w": 280,
+      "h": 88,
+      "kind": "accent"
+    },
+    {
+      "id": "direct",
+      "label": "查詢法源\n可選重排後回答",
+      "x": 400,
+      "y": 260,
+      "w": 280,
+      "h": 88,
+      "kind": "normal"
+    },
+    {
+      "id": "legacy",
+      "label": "保留舊契約\nv1-v3 相容路徑",
+      "x": 780,
+      "y": 260,
+      "w": 280,
+      "h": 88,
+      "kind": "normal"
+    }
+  ],
+  "edges": [
+    [
+      "input",
+      "gate"
+    ],
+    [
+      "gate",
+      "clarify"
+    ],
+    [
+      "gate",
+      "direct"
+    ]
+  ]
+}

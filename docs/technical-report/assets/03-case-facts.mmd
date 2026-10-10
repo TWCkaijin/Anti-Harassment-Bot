@@ -1,0 +1,12 @@
+flowchart TD
+    input["使用者輸入／選項回答"]
+    propose["summary_update 建議<br/>保留情境與原文依據"]
+    conflict["核對請求及 revision<br/>排除過期結果"]
+    local["localStorage<br/>文字摘要與 revision"]
+    save["使用者修正與保存<br/>revision 遞增，舊請求停止"]
+    display["目前了解的情況<br/>使用者可直接編輯"]
+    input --> propose
+    propose --> conflict
+    conflict --> display
+    display --> save
+    save --> local

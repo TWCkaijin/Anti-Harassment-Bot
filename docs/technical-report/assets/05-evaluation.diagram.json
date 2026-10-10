@@ -1,0 +1,83 @@
+{
+  "title": "法律品質的分層驗證",
+  "width": 1080,
+  "height": 370,
+  "nodes": [
+    {
+      "id": "case",
+      "label": "候選／合成測試案例\n專家覆核須另行完成",
+      "x": 20,
+      "y": 30,
+      "w": 280,
+      "h": 88,
+      "kind": "accent"
+    },
+    {
+      "id": "retrieval",
+      "label": "檢索評估\n相關來源與版本覆蓋",
+      "x": 400,
+      "y": 30,
+      "w": 280,
+      "h": 88,
+      "kind": "normal"
+    },
+    {
+      "id": "answer",
+      "label": "回答評估\n適用方向與來源支持",
+      "x": 780,
+      "y": 30,
+      "w": 280,
+      "h": 88,
+      "kind": "accent"
+    },
+    {
+      "id": "release",
+      "label": "人工複核與發布門檻\n通過後再驗證正式環境",
+      "x": 20,
+      "y": 235,
+      "w": 280,
+      "h": 88,
+      "kind": "decision"
+    },
+    {
+      "id": "metrics",
+      "label": "效能與費用\nTTFT／總耗時／tokens",
+      "x": 400,
+      "y": 235,
+      "w": 280,
+      "h": 88,
+      "kind": "normal"
+    },
+    {
+      "id": "interaction",
+      "label": "多輪互動評估\n更正／衝突／拒答",
+      "x": 780,
+      "y": 235,
+      "w": 280,
+      "h": 88,
+      "kind": "normal"
+    }
+  ],
+  "edges": [
+    [
+      "case",
+      "retrieval"
+    ],
+    [
+      "retrieval",
+      "answer"
+    ],
+    [
+      "answer",
+      "interaction"
+    ],
+    [
+      "interaction",
+      "metrics"
+    ],
+    [
+      "metrics",
+      "release"
+    ]
+  ]
+}

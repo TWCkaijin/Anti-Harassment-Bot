@@ -1,0 +1,9 @@
+flowchart TD
+    input["訊息與文字摘要<br/>contract v4"]
+    gate["理解需求與必要條件<br/>判斷是否檢索"]
+    clarify["簡單支持<br/>直接回覆"]
+    direct["查詢法源<br/>可選重排後回答"]
+    legacy["保留舊契約<br/>v1-v3 相容路徑"]
+    input --> gate
+    gate --> clarify
+    gate --> direct
