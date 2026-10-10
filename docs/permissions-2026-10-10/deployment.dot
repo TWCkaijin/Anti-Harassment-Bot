@@ -1,0 +1,21 @@
+digraph IAM {
+ graph [rankdir=LR,bgcolor="#f8fafc",pad="0.3",nodesep="0.4",ranksep="0.6",fontname="Arial",label="Deployment identity and privilege boundaries",labelloc=t,fontsize=22];
+ node [shape=box,style="rounded,filled",fillcolor="white",color="#94a3b8",fontname="Arial",fontsize=12,margin="0.15,0.1"];
+ edge [fontname="Arial",fontsize=10,color="#64748b"];
+ github [label="GitHub Actions\ndev / main push\nExact repo + owner IDs\nExact workflow + branch",fillcolor="#dbeafe"];
+ wif [label="WIF: rag-github / github\nShort-lived OIDC credentials",fillcolor="#dbeafe"];
+ deploy [label="rag-deploy\nSHARED by dev + prod",fillcolor="#fef3c7"];
+ funcs [label="4 existing Functions\nget / getIamPolicy / update"];
+ runtime [label="4 eligible runtime accounts\n3 currently in use; prod Client legacy\nService Account User (actAs)",fillcolor="#dcfce7"];
+ build [label="rag-build-dev / rag-build-prod\nService Account User (actAs)",fillcolor="#dcfce7"];
+ sources [label="2 shared build source buckets\nStorage Object Viewer"];
+ artifacts [label="Shared gcf-artifacts repository\nArtifact Registry Writer"];
+ logs [label="Project logging\nLogs Writer"];
+ metadata [label="Project discovery + source upload\n4 Run services: metadata only\n6 secrets: metadata only\nArtifact repository: metadata only"];
+ hosting [label="PROJECT-WIDE Hosting Admin\nAll sites / channels\nCreate + delete included",fillcolor="#fee2e2"];
+ github->wif [label="attribute condition"];
+ wif->deploy [label="workloadIdentityUser"];
+ deploy->funcs;deploy->runtime;deploy->build;deploy->metadata;deploy->hosting;
+ build->sources;build->artifacts;build->logs;
+ funcs->runtime [style=dashed,label="runtime selection (see runtime chart)"];
+}

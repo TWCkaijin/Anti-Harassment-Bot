@@ -1,0 +1,1130 @@
+{
+  "project": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragDeployMetadata"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@gcp-sa-artifactregistry.iam.gserviceaccount.com"
+        ],
+        "role": "roles/artifactregistry.serviceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@gcp-sa-cloudaicompanion.iam.gserviceaccount.com"
+        ],
+        "role": "roles/cloudaicompanion.serviceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:741986685144@cloudbuild.gserviceaccount.com"
+        ],
+        "role": "roles/cloudbuild.builds.builder"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@gcp-sa-cloudbuild.iam.gserviceaccount.com"
+        ],
+        "role": "roles/cloudbuild.serviceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:firebase-adminsdk-fbsvc@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/cloudconfig.admin"
+      },
+      {
+        "members": [
+          "serviceAccount:anti-harassment-bot@appspot.gserviceaccount.com"
+        ],
+        "role": "roles/clouddeploy.editor"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@gcf-admin-robot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/cloudfunctions.serviceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+        ],
+        "role": "roles/cloudscheduler.serviceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@gcp-sa-cloudtasks.iam.gserviceaccount.com"
+        ],
+        "role": "roles/cloudtasks.serviceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@containerregistry.iam.gserviceaccount.com"
+        ],
+        "role": "roles/containerregistry.ServiceAgent"
+      },
+      {
+        "condition": {
+          "expression": "resource.name==\"projects/anti-harassment-bot/databases/(default)\" || resource.name==\"projects/anti-harassment-bot/databases/admin-private\"",
+          "title": "rag-admin-prod-databases"
+        },
+        "members": [
+          "serviceAccount:rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/datastore.user"
+      },
+      {
+        "condition": {
+          "expression": "resource.name==\"projects/anti-harassment-bot/databases/app-dev\" || resource.name==\"projects/anti-harassment-bot/databases/admin-private-dev\"",
+          "title": "rag-admin-dev-databases"
+        },
+        "members": [
+          "serviceAccount:rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/datastore.user"
+      },
+      {
+        "condition": {
+          "expression": "resource.name==\"projects/anti-harassment-bot/databases/app-dev\"",
+          "title": "rag-client-dev-databases"
+        },
+        "members": [
+          "serviceAccount:rag-client-dev@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/datastore.viewer"
+      },
+      {
+        "condition": {
+          "expression": "resource.name==\"projects/anti-harassment-bot/databases/(default)\"",
+          "title": "rag-client-prod-databases"
+        },
+        "members": [
+          "serviceAccount:rag-client-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/datastore.viewer"
+      },
+      {
+        "members": [
+          "serviceAccount:741986685144-compute@developer.gserviceaccount.com",
+          "serviceAccount:anti-harassment-bot@appspot.gserviceaccount.com"
+        ],
+        "role": "roles/editor"
+      },
+      {
+        "members": [
+          "serviceAccount:anti-harassment-bot@appspot.gserviceaccount.com"
+        ],
+        "role": "roles/firebase.admin"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@gcp-sa-firebase.iam.gserviceaccount.com"
+        ],
+        "role": "roles/firebase.managementServiceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:firebase-adminsdk-fbsvc@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/firebase.sdkAdminServiceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:firebase-adminsdk-fbsvc@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/firebaseauth.admin"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@gcp-sa-firebasedataconnect.iam.gserviceaccount.com"
+        ],
+        "role": "roles/firebasedataconnect.serviceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/firebasehosting.admin"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@firebase-rules.iam.gserviceaccount.com"
+        ],
+        "role": "roles/firebaserules.system"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@gcp-sa-firestore.iam.gserviceaccount.com"
+        ],
+        "role": "roles/firestore.serviceAgent"
+      },
+      {
+        "members": [
+          "serviceAccount:firebase-adminsdk-fbsvc@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountTokenCreator"
+      },
+      {
+        "members": [
+          "serviceAccount:anti-harassment-bot@appspot.gserviceaccount.com",
+          "serviceAccount:firebase-adminsdk-fbsvc@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-build-dev@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-build-prod@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-client-dev@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-client-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/logging.logWriter"
+      },
+      {
+        "members": [
+          "user:owner-1 (redacted)",
+          "user:owner-2 (redacted)"
+        ],
+        "role": "roles/owner"
+      },
+      {
+        "members": [
+          "serviceAccount:service-741986685144@serverless-robot-prod.iam.gserviceaccount.com"
+        ],
+        "role": "roles/run.serviceAgent"
+      }
+    ],
+    "etag": "BwZddngKhlc=",
+    "version": 3
+  },
+  "accounts": [
+    {
+      "disabled": false,
+      "displayName": "App Engine default service account",
+      "email": "anti-harassment-bot@appspot.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/anti-harassment-bot@appspot.gserviceaccount.com",
+      "oauth2ClientId": "114645423645172884176",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "114645423645172884176"
+    },
+    {
+      "disabled": false,
+      "displayName": "Default compute service account",
+      "email": "741986685144-compute@developer.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/741986685144-compute@developer.gserviceaccount.com",
+      "oauth2ClientId": "100365846739769689026",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "100365846739769689026"
+    },
+    {
+      "description": "Firebase Admin SDK Service Agent",
+      "disabled": false,
+      "displayName": "firebase-adminsdk",
+      "email": "firebase-adminsdk-fbsvc@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/firebase-adminsdk-fbsvc@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "103914699526093650481",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "103914699526093650481"
+    },
+    {
+      "disabled": false,
+      "displayName": "RAG admin-dev",
+      "email": "rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "108217225015181298649",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "108217225015181298649"
+    },
+    {
+      "disabled": false,
+      "displayName": "RAG tasks-dev",
+      "email": "rag-tasks-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/rag-tasks-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "109947018572139079510",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "109947018572139079510"
+    },
+    {
+      "disabled": false,
+      "displayName": "RAG function build dev",
+      "email": "rag-build-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/rag-build-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "107562489769132448382",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "107562489769132448382"
+    },
+    {
+      "disabled": false,
+      "displayName": "RAG client-dev",
+      "email": "rag-client-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/rag-client-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "115285836034430133432",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "115285836034430133432"
+    },
+    {
+      "disabled": false,
+      "displayName": "RAG admin-prod",
+      "email": "rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "114181304347962876318",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "114181304347962876318"
+    },
+    {
+      "disabled": false,
+      "displayName": "RAG deploy",
+      "email": "rag-deploy@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/rag-deploy@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "115003041014746960030",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "115003041014746960030"
+    },
+    {
+      "disabled": false,
+      "displayName": "RAG client-prod",
+      "email": "rag-client-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/rag-client-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "115415126572551531005",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "115415126572551531005"
+    },
+    {
+      "disabled": false,
+      "displayName": "RAG tasks-prod",
+      "email": "rag-tasks-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/rag-tasks-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "117438455903433959560",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "117438455903433959560"
+    },
+    {
+      "disabled": false,
+      "displayName": "RAG function build prod",
+      "email": "rag-build-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "etag": "MDEwMjE5MjA=",
+      "name": "projects/anti-harassment-bot/serviceAccounts/rag-build-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "oauth2ClientId": "103376249890712185665",
+      "projectId": "anti-harassment-bot",
+      "uniqueId": "103376249890712185665"
+    }
+  ],
+  "provider": {
+    "attributeCondition": "assertion.repository_id == '1253167044' && assertion.repository_owner_id == '92873112' && assertion.event_name == 'push' && ((assertion.ref == 'refs/heads/main' && assertion.workflow_ref == 'TWCkaijin/Anti-Harassment-Bot/.github/workflows/deploy-main.yml@refs/heads/main') || (assertion.ref == 'refs/heads/dev' && assertion.workflow_ref == 'TWCkaijin/Anti-Harassment-Bot/.github/workflows/deploy-dev.yml@refs/heads/dev'))",
+    "attributeMapping": {
+      "attribute.repository_id": "assertion.repository_id",
+      "google.subject": "assertion.sub"
+    },
+    "displayName": "github",
+    "name": "projects/741986685144/locations/global/workloadIdentityPools/rag-github/providers/github",
+    "oidc": {
+      "issuerUri": "https://token.actions.githubusercontent.com"
+    },
+    "state": "ACTIVE"
+  },
+  "roles": [
+    {
+      "description": "Read the operator-managed cleanup policy of the existing gcf-artifacts repository.",
+      "etag": "BwZddgIb5QM=",
+      "name": "projects/anti-harassment-bot/roles/ragArtifactMetadata",
+      "stage": "GA",
+      "title": "RAG function artifact policy metadata"
+    },
+    {
+      "description": "Project metadata and signed source uploads; no function creation, deletion, IAM modification, build submission, database data access, or secret payload access.",
+      "etag": "BwZddgHDEhU=",
+      "name": "projects/anti-harassment-bot/roles/ragDeployMetadata",
+      "stage": "GA",
+      "title": "RAG deployment discovery and source upload"
+    },
+    {
+      "description": "Bind directly to the four pre-existing application functions.",
+      "etag": "BwZddgHhlQE=",
+      "name": "projects/anti-harassment-bot/roles/ragFunctionUpdater",
+      "stage": "GA",
+      "title": "RAG existing function updater"
+    },
+    {
+      "description": "Inspect only the four pre-existing application Run services; cannot modify service IAM.",
+      "etag": "BwZddgH_Wvk=",
+      "name": "projects/anti-harassment-bot/roles/ragRunMetadata",
+      "stage": "GA",
+      "title": "RAG service deployment metadata"
+    }
+  ],
+  "databases": [
+    {
+      "appEngineIntegrationMode": "DISABLED",
+      "concurrencyMode": "PESSIMISTIC",
+      "createTime": "2026-10-09T18:47:25.184390Z",
+      "databaseEdition": "STANDARD",
+      "deleteProtectionState": "DELETE_PROTECTION_ENABLED",
+      "earliestVersionTime": "2026-10-10T05:25:03.701193Z",
+      "etag": "INbByrPorpcDMM3Vi7HQrZcD",
+      "freeTier": false,
+      "locationId": "nam5",
+      "name": "projects/anti-harassment-bot/databases/admin-private-dev",
+      "pointInTimeRecoveryEnablement": "POINT_IN_TIME_RECOVERY_DISABLED",
+      "realtimeUpdatesMode": "REALTIME_UPDATES_MODE_ENABLED",
+      "type": "FIRESTORE_NATIVE",
+      "uid": "476d74b7-7b9a-47c8-9fa5-77097b34c906",
+      "updateTime": "2026-10-09T18:47:25.184390Z",
+      "versionRetentionPeriod": "3600s"
+    },
+    {
+      "appEngineIntegrationMode": "DISABLED",
+      "concurrencyMode": "PESSIMISTIC",
+      "createTime": "2026-10-09T18:47:23.979501Z",
+      "databaseEdition": "STANDARD",
+      "deleteProtectionState": "DELETE_PROTECTION_ENABLED",
+      "earliestVersionTime": "2026-10-10T05:25:03.701207Z",
+      "etag": "IOjByrPorpcDMNjfibHQrZcD",
+      "freeTier": false,
+      "locationId": "nam5",
+      "name": "projects/anti-harassment-bot/databases/admin-private",
+      "pointInTimeRecoveryEnablement": "POINT_IN_TIME_RECOVERY_DISABLED",
+      "realtimeUpdatesMode": "REALTIME_UPDATES_MODE_ENABLED",
+      "type": "FIRESTORE_NATIVE",
+      "uid": "6fbcd5ad-8c4f-4a37-a9e3-f0311b27451b",
+      "updateTime": "2026-10-09T18:47:23.979501Z",
+      "versionRetentionPeriod": "3600s"
+    },
+    {
+      "appEngineIntegrationMode": "DISABLED",
+      "backupConfig": {
+        "backupSchedulesEnabled": true
+      },
+      "concurrencyMode": "PESSIMISTIC",
+      "createTime": "2026-06-26T21:01:04.835468Z",
+      "databaseEdition": "STANDARD",
+      "deleteProtectionState": "DELETE_PROTECTION_DISABLED",
+      "earliestVersionTime": "2026-10-03T06:26:00Z",
+      "etag": "IOrByrPorpcDMPPoxPr3uZUD",
+      "freeTier": true,
+      "keyPrefix": "s",
+      "locationId": "nam5",
+      "name": "projects/anti-harassment-bot/databases/(default)",
+      "pointInTimeRecoveryEnablement": "POINT_IN_TIME_RECOVERY_ENABLED",
+      "realtimeUpdatesMode": "REALTIME_UPDATES_MODE_ENABLED",
+      "type": "FIRESTORE_NATIVE",
+      "uid": "07e5300c-f96f-4293-813f-d0d34f9bcb78",
+      "updateTime": "2026-07-04T21:12:22.599524Z",
+      "versionRetentionPeriod": "604800s"
+    },
+    {
+      "appEngineIntegrationMode": "DISABLED",
+      "concurrencyMode": "PESSIMISTIC",
+      "createTime": "2026-10-09T18:47:22.818436Z",
+      "databaseEdition": "STANDARD",
+      "deleteProtectionState": "DELETE_PROTECTION_ENABLED",
+      "earliestVersionTime": "2026-10-10T05:25:03.701217Z",
+      "etag": "IOzByrPorpcDMN3AirHQrZcD",
+      "freeTier": false,
+      "locationId": "nam5",
+      "name": "projects/anti-harassment-bot/databases/app-dev",
+      "pointInTimeRecoveryEnablement": "POINT_IN_TIME_RECOVERY_DISABLED",
+      "realtimeUpdatesMode": "REALTIME_UPDATES_MODE_ENABLED",
+      "type": "FIRESTORE_NATIVE",
+      "uid": "c304f885-95b3-4063-8cf8-ccdd082f26c1",
+      "updateTime": "2026-10-09T18:47:22.818436Z",
+      "versionRetentionPeriod": "3600s"
+    }
+  ],
+  "function-api": {
+    "buildConfig": {
+      "dockerRepository": "projects/anti-harassment-bot/locations/asia-east1/repositories/gcf-artifacts",
+      "serviceAccount": "projects/anti-harassment-bot/serviceAccounts/rag-build-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "source": {
+        "storageSource": {
+          "bucket": "gcf-v2-sources-741986685144-asia-east1",
+          "generation": "1791613343570216",
+          "object": "api/function-source.zip"
+        }
+      }
+    },
+    "name": "projects/anti-harassment-bot/locations/asia-east1/functions/api",
+    "serviceConfig": {
+      "service": "projects/anti-harassment-bot/locations/asia-east1/services/api",
+      "serviceAccountEmail": "741986685144-compute@developer.gserviceaccount.com",
+      "uri": "https://api-yo7yyh4ofa-de.a.run.app"
+    },
+    "state": "ACTIVE",
+    "updateTime": "2026-10-10T06:24:46.131164692Z"
+  },
+  "function-policy-api": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragFunctionUpdater"
+      }
+    ],
+    "etag": "BwZddgJp3Hs=",
+    "version": 1
+  },
+  "function-api_preview": {
+    "buildConfig": {
+      "dockerRepository": "projects/anti-harassment-bot/locations/asia-east1/repositories/gcf-artifacts",
+      "serviceAccount": "projects/anti-harassment-bot/serviceAccounts/rag-build-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "source": {
+        "storageSource": {
+          "bucket": "gcf-v2-sources-741986685144-asia-east1",
+          "generation": "1791613402395977",
+          "object": "api_preview/function-source.zip"
+        }
+      }
+    },
+    "name": "projects/anti-harassment-bot/locations/asia-east1/functions/api_preview",
+    "serviceConfig": {
+      "secretEnvironmentVariables": [
+        {
+          "key": "RAG_OPENROUTER_DEV",
+          "projectId": "anti-harassment-bot",
+          "secret": "RAG_OPENROUTER_DEV",
+          "version": "1"
+        },
+        {
+          "key": "RAG_CLARIFICATION_DEV",
+          "projectId": "anti-harassment-bot",
+          "secret": "RAG_CLARIFICATION_DEV",
+          "version": "1"
+        },
+        {
+          "key": "RAG_CLARIFICATION_LEGACY_DEV",
+          "projectId": "anti-harassment-bot",
+          "secret": "RAG_CLARIFICATION_LEGACY_DEV",
+          "version": "1"
+        }
+      ],
+      "service": "projects/anti-harassment-bot/locations/asia-east1/services/api-preview",
+      "serviceAccountEmail": "rag-client-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "uri": "https://api-preview-yo7yyh4ofa-de.a.run.app"
+    },
+    "state": "ACTIVE",
+    "updateTime": "2026-10-10T06:24:14.400938919Z"
+  },
+  "function-policy-api_preview": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragFunctionUpdater"
+      }
+    ],
+    "etag": "BwZddgKugbs=",
+    "version": 1
+  },
+  "function-admin_api": {
+    "buildConfig": {
+      "dockerRepository": "projects/anti-harassment-bot/locations/asia-east1/repositories/gcf-artifacts",
+      "serviceAccount": "projects/anti-harassment-bot/serviceAccounts/rag-build-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "source": {
+        "storageSource": {
+          "bucket": "gcf-v2-sources-741986685144-asia-east1",
+          "generation": "1791613274118799",
+          "object": "admin_api/function-source.zip"
+        }
+      }
+    },
+    "name": "projects/anti-harassment-bot/locations/asia-east1/functions/admin_api",
+    "serviceConfig": {
+      "secretEnvironmentVariables": [
+        {
+          "key": "RAG_OPENROUTER_PROD",
+          "projectId": "anti-harassment-bot",
+          "secret": "RAG_OPENROUTER_PROD",
+          "version": "1"
+        },
+        {
+          "key": "RAG_CLARIFICATION_PROD",
+          "projectId": "anti-harassment-bot",
+          "secret": "RAG_CLARIFICATION_PROD",
+          "version": "1"
+        },
+        {
+          "key": "RAG_CLARIFICATION_LEGACY_PROD",
+          "projectId": "anti-harassment-bot",
+          "secret": "RAG_CLARIFICATION_LEGACY_PROD",
+          "version": "1"
+        }
+      ],
+      "service": "projects/anti-harassment-bot/locations/asia-east1/services/admin-api",
+      "serviceAccountEmail": "rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com",
+      "uri": "https://admin-api-yo7yyh4ofa-de.a.run.app"
+    },
+    "state": "ACTIVE",
+    "updateTime": "2026-10-10T06:22:10.462448187Z"
+  },
+  "function-policy-admin_api": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragFunctionUpdater"
+      }
+    ],
+    "etag": "BwZddgLtD0g=",
+    "version": 1
+  },
+  "function-admin_api_preview": {
+    "buildConfig": {
+      "dockerRepository": "projects/anti-harassment-bot/locations/asia-east1/repositories/gcf-artifacts",
+      "serviceAccount": "projects/anti-harassment-bot/serviceAccounts/rag-build-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "source": {
+        "storageSource": {
+          "bucket": "gcf-v2-sources-741986685144-asia-east1",
+          "generation": "1791613330338184",
+          "object": "admin_api_preview/function-source.zip"
+        }
+      }
+    },
+    "name": "projects/anti-harassment-bot/locations/asia-east1/functions/admin_api_preview",
+    "serviceConfig": {
+      "secretEnvironmentVariables": [
+        {
+          "key": "RAG_OPENROUTER_DEV",
+          "projectId": "anti-harassment-bot",
+          "secret": "RAG_OPENROUTER_DEV",
+          "version": "1"
+        },
+        {
+          "key": "RAG_CLARIFICATION_DEV",
+          "projectId": "anti-harassment-bot",
+          "secret": "RAG_CLARIFICATION_DEV",
+          "version": "1"
+        },
+        {
+          "key": "RAG_CLARIFICATION_LEGACY_DEV",
+          "projectId": "anti-harassment-bot",
+          "secret": "RAG_CLARIFICATION_LEGACY_DEV",
+          "version": "1"
+        }
+      ],
+      "service": "projects/anti-harassment-bot/locations/asia-east1/services/admin-api-preview",
+      "serviceAccountEmail": "rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com",
+      "uri": "https://admin-api-preview-yo7yyh4ofa-de.a.run.app"
+    },
+    "state": "ACTIVE",
+    "updateTime": "2026-10-10T06:22:59.507190579Z"
+  },
+  "function-policy-admin_api_preview": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragFunctionUpdater"
+      }
+    ],
+    "etag": "BwZddgMrlAM=",
+    "version": 1
+  },
+  "sa-rag-deploy": {
+    "bindings": [
+      {
+        "members": [
+          "principalSet://iam.googleapis.com/projects/741986685144/locations/global/workloadIdentityPools/rag-github/attribute.repository_id/1253167044"
+        ],
+        "role": "roles/iam.workloadIdentityUser"
+      }
+    ],
+    "etag": "BwZddgF75nk=",
+    "version": 1
+  },
+  "sa-rag-client-dev": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      }
+    ],
+    "etag": "BwZddgRFUGs=",
+    "version": 1
+  },
+  "sa-rag-client-prod": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      }
+    ],
+    "etag": "BwZddgQWuXg=",
+    "version": 1
+  },
+  "sa-rag-admin-dev": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      }
+    ],
+    "etag": "BwZddgSku6E=",
+    "version": 1
+  },
+  "sa-rag-admin-prod": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      }
+    ],
+    "etag": "BwZddgR3ZsA=",
+    "version": 1
+  },
+  "sa-rag-tasks-dev": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      }
+    ],
+    "etag": "BwZdbaGuytE=",
+    "version": 1
+  },
+  "sa-rag-tasks-prod": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      }
+    ],
+    "etag": "BwZdckor0EE=",
+    "version": 1
+  },
+  "sa-rag-build-dev": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      }
+    ],
+    "etag": "BwZddnHZrPU=",
+    "version": 1
+  },
+  "sa-rag-build-prod": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/iam.serviceAccountUser"
+      }
+    ],
+    "etag": "BwZddniLZIc=",
+    "version": 1
+  },
+  "secret-RAG_OPENROUTER_DEV": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-client-dev@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.secretAccessor"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.viewer"
+      }
+    ],
+    "etag": "BwZddgOI4FE=",
+    "version": 1
+  },
+  "secret-RAG_CLARIFICATION_DEV": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-client-dev@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.secretAccessor"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.viewer"
+      }
+    ],
+    "etag": "BwZddgO5xQQ=",
+    "version": 1
+  },
+  "secret-RAG_CLARIFICATION_LEGACY_DEV": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-client-dev@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.secretAccessor"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.viewer"
+      }
+    ],
+    "etag": "BwZddgPqOz0=",
+    "version": 1
+  },
+  "secret-RAG_OPENROUTER_PROD": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-client-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.secretAccessor"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.viewer"
+      }
+    ],
+    "etag": "BwZddgNu00s=",
+    "version": 1
+  },
+  "secret-RAG_CLARIFICATION_PROD": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-client-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.secretAccessor"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.viewer"
+      }
+    ],
+    "etag": "BwZddgOg7P4=",
+    "version": 1
+  },
+  "secret-RAG_CLARIFICATION_LEGACY_PROD": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-client-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.secretAccessor"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/secretmanager.viewer"
+      }
+    ],
+    "etag": "BwZddgPSNvo=",
+    "version": 1
+  },
+  "bucket-anti-harassment-bot-admin-dev": {
+    "bindings": [
+      {
+        "members": [
+          "projectEditor:anti-harassment-bot",
+          "projectOwner:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyBucketOwner"
+      },
+      {
+        "members": [
+          "projectViewer:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyBucketReader"
+      },
+      {
+        "members": [
+          "projectEditor:anti-harassment-bot",
+          "projectOwner:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyObjectOwner"
+      },
+      {
+        "members": [
+          "projectViewer:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyObjectReader"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/storage.objectAdmin"
+      }
+    ],
+    "etag": "CAQ="
+  },
+  "bucket-anti-harassment-bot-admin-prod": {
+    "bindings": [
+      {
+        "members": [
+          "projectEditor:anti-harassment-bot",
+          "projectOwner:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyBucketOwner"
+      },
+      {
+        "members": [
+          "projectViewer:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyBucketReader"
+      },
+      {
+        "members": [
+          "projectEditor:anti-harassment-bot",
+          "projectOwner:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyObjectOwner"
+      },
+      {
+        "members": [
+          "projectViewer:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyObjectReader"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/storage.objectAdmin"
+      }
+    ],
+    "etag": "CAM="
+  },
+  "bucket-gcf-v2-sources-741986685144-asia-east1": {
+    "bindings": [
+      {
+        "members": [
+          "projectEditor:anti-harassment-bot",
+          "projectOwner:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyBucketOwner"
+      },
+      {
+        "members": [
+          "projectViewer:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyBucketReader"
+      },
+      {
+        "members": [
+          "projectEditor:anti-harassment-bot",
+          "projectOwner:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyObjectOwner"
+      },
+      {
+        "members": [
+          "projectViewer:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyObjectReader"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-build-dev@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-build-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/storage.objectViewer"
+      }
+    ],
+    "etag": "CAQ="
+  },
+  "bucket-gcf-v2-uploads-741986685144.asia-east1.cloudfunctions.appspot.com": {
+    "bindings": [
+      {
+        "members": [
+          "projectEditor:anti-harassment-bot",
+          "projectOwner:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyBucketOwner"
+      },
+      {
+        "members": [
+          "projectViewer:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyBucketReader"
+      },
+      {
+        "members": [
+          "projectEditor:anti-harassment-bot",
+          "projectOwner:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyObjectOwner"
+      },
+      {
+        "members": [
+          "projectViewer:anti-harassment-bot"
+        ],
+        "role": "roles/storage.legacyObjectReader"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-build-dev@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-build-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/storage.objectViewer"
+      }
+    ],
+    "etag": "CAQ="
+  },
+  "artifacts": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragArtifactMetadata"
+      },
+      {
+        "members": [
+          "serviceAccount:rag-build-dev@anti-harassment-bot.iam.gserviceaccount.com",
+          "serviceAccount:rag-build-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/artifactregistry.writer"
+      }
+    ],
+    "etag": "BwZddngiFYs=",
+    "version": 1
+  },
+  "queue-dev": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-dev@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/cloudtasks.enqueuer"
+      }
+    ],
+    "etag": "BwZdbaG_l8Y=",
+    "version": 1
+  },
+  "queue-prod": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-admin-prod@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "roles/cloudtasks.enqueuer"
+      }
+    ],
+    "etag": "BwZdcko9i1A=",
+    "version": 1
+  },
+  "run-api": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragRunMetadata"
+      },
+      {
+        "members": [
+          "allUsers"
+        ],
+        "role": "roles/run.invoker"
+      }
+    ],
+    "etag": "BwZddgKTBEo=",
+    "version": 1
+  },
+  "run-api_preview": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragRunMetadata"
+      },
+      {
+        "members": [
+          "allUsers"
+        ],
+        "role": "roles/run.invoker"
+      }
+    ],
+    "etag": "BwZddgLTQNA=",
+    "version": 1
+  },
+  "run-admin_api": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragRunMetadata"
+      },
+      {
+        "members": [
+          "allUsers"
+        ],
+        "role": "roles/run.invoker"
+      }
+    ],
+    "etag": "BwZddgMRrvE=",
+    "version": 1
+  },
+  "run-admin_api_preview": {
+    "bindings": [
+      {
+        "members": [
+          "serviceAccount:rag-deploy@anti-harassment-bot.iam.gserviceaccount.com"
+        ],
+        "role": "projects/anti-harassment-bot/roles/ragRunMetadata"
+      },
+      {
+        "members": [
+          "allUsers"
+        ],
+        "role": "roles/run.invoker"
+      }
+    ],
+    "etag": "BwZddgNOlYU=",
+    "version": 1
+  },
+  "collected_at": "2026-10-10T06:25:17.664276+00:00"
+}

@@ -40,11 +40,24 @@ def run(args, *, env=None, capture=False):
         if capture:
             # Firebase JSON errors are operational; do not dump arbitrary SDK
             # metadata or a credential-bearing subprocess environment.
-            try:
-                message = json.loads(result.stdout).get("error", "command_failed")
-            except (ValueError, TypeError):
-                message = "command_failed"
-            raise RuntimeError(f"{args[0:2]}: {message}")
+            # Never print arbitrary Firebase error objects: nested metadata may
+            # include environment variables. Extract known permission names only.
+            permissions = sorted(
+                set(
+                    re.findall(
+                        r"\b(?:iam\.serviceAccounts\.actAs|cloudfunctions\.functions\.update|"
+                        r"secretmanager\.versions\.access|artifactregistry\.repositories\.uploadArtifacts|"
+                        r"storage\.objects\.get)\b",
+                        result.stdout + result.stderr,
+                    )
+                )
+            )
+            detail = f"; permissions referenced: {', '.join(permissions)}" if permissions else ""
+            raise RuntimeError(
+                f"{args[0:2]} exited {result.returncode}{detail}. "
+                "Inspect Cloud Audit Logs for this deployment time and principal; "
+                "verify both runtime and build service-account actAs grants."
+            )
         raise RuntimeError(f"{args[0:2]} exited {result.returncode}")
     return result.stdout
 
@@ -58,7 +71,7 @@ def firebase(project, *args, env=None):
     return json.loads(value)["result"]
 
 
-def function_info(project, function):
+def function_info(project, function, *, include_build=False):
     result = subprocess.run(
         [
             "gcloud",
@@ -78,7 +91,22 @@ def function_info(project, function):
         if "not found" in result.stderr.lower() or "NOT_FOUND" in result.stderr:
             return None
         raise RuntimeError(f"Cannot inspect function {function}")
-    return json.loads(result.stdout)["serviceConfig"]
+    value = json.loads(result.stdout)
+    return value if include_build else value["serviceConfig"]
+
+
+def verify_build_account(project, environment, function):
+    value = function_info(project, function, include_build=True)
+    suffix = "prod" if environment == "production" else "dev"
+    expected = (
+        f"projects/{project}/serviceAccounts/rag-build-{suffix}@{project}.iam.gserviceaccount.com"
+    )
+    if value is None or value.get("buildConfig", {}).get("serviceAccount") != expected:
+        raise RuntimeError(
+            f"{function}: dedicated build account is not configured. An infrastructure operator "
+            f"must run scripts/provision_build.py --project {project} "
+            f"--environment {environment} --apply before deploying."
+        )
 
 
 def environment_values(project, environment, service, worker_url=""):
@@ -184,6 +212,8 @@ def main():
         "hosting": {},
     }
     if not args.frontend_only:
+        for service in services:
+            verify_build_account(args.project, args.environment, functions[service])
         run(
             [
                 sys.executable,

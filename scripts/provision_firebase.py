@@ -92,6 +92,8 @@ class Provisioner:
             "rag-tasks-prod",
             "rag-tasks-dev",
             "rag-deploy",
+            "rag-build-dev",
+            "rag-build-prod",
         ]:
             if self.sa(identity) not in existing:
                 self.run(
