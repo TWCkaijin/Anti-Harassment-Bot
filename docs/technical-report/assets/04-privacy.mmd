@@ -1,0 +1,12 @@
+flowchart TD
+    raw["前端本機文字遮罩<br/>完成後自動送出"]
+    backend["Flask 接收審閱文字<br/>第二層遮罩依設定"]
+    outside["OpenRouter／供應商<br/>接收處理後的內容"]
+    image["原圖可直接傳送<br/>沒有自動去識別"]
+    logs["日誌與分析<br/>操作指標白名單"]
+    limits["姓名／地址／特殊細節<br/>仍可能重新識別"]
+    raw --> backend
+    backend --> outside
+    image --> backend
+    backend --> logs
+    outside --> limits
