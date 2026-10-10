@@ -2,15 +2,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const require = createRequire(path.resolve("frontend/package.json"));
+if (!process.argv[2]) {
+  console.error("Usage: node scripts/quality/render_adaptive_review.mjs <results-directory>");
+  process.exit(2);
+}
+const require = createRequire(fileURLToPath(new URL("../../client/frontend/package.json", import.meta.url)));
 const React = (await import(pathToFileURL(require.resolve("react")).href)).default;
 const { renderToStaticMarkup } = await import(pathToFileURL(require.resolve("react-dom/server")).href);
 const ReactMarkdown = (await import(pathToFileURL(require.resolve("react-markdown")).href)).default;
 const remarkGfm = (await import(pathToFileURL(require.resolve("remark-gfm")).href)).default;
 const h = React.createElement;
-const directory = path.resolve(process.argv[2] ?? "docs/evaluation/adaptive-response");
+const directory = path.resolve(process.argv[2]);
 const data = JSON.parse(fs.readFileSync(path.join(directory, "review-data.json"), "utf8"));
 const labels = { before: "修改前", candidate: "修改後" };
 const style = `:root{font-family:system-ui,sans-serif;color:#31291f;background:#faf7f2;line-height:1.75}body{margin:0}header{padding:32px max(24px,5vw);background:#573b28;color:white}main{max-width:1450px;margin:auto;padding:24px}nav{display:flex;flex-wrap:wrap;gap:12px}a{color:#934600}header a{color:white}.case{margin:35px 0 70px;scroll-margin-top:20px}.prompt{background:#fff1df;border-radius:16px;padding:18px 24px}.row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:20px 0}.answer{background:white;border:1px solid #e5d8c9;padding:24px;border-radius:20px;min-width:0;overflow-wrap:anywhere}h1,h2,h3{line-height:1.35}.meta{font-size:13px;color:#75695e}.error{color:#a23016}.markdown-message strong{font-weight:800;color:#31291f}.markdown-message ul,.markdown-message ol{margin:.5rem 0 .8rem;padding-left:1.4rem}.markdown-message ul{list-style:disc}.markdown-message ol{list-style:decimal}.markdown-message li{margin:.3rem 0;padding-left:.1rem}.markdown-message li>p{margin:.25rem 0}.markdown-message blockquote{border-left:3px solid #dbb483;padding-left:16px}.markdown-message pre{white-space:pre-wrap}details{margin:12px 0}footer{padding:25px;background:#efe6da}@media(max-width:900px){.row{grid-template-columns:1fr}main{padding:14px}.answer{padding:18px}}`;

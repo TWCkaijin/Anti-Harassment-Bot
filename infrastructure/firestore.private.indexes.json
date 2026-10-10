@@ -1,0 +1,45 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "admin_jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updated_at",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "admin_jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "environment", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "updated_at", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "admin_jobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "environment", "order": "ASCENDING"},
+        {"fieldPath": "kind", "order": "ASCENDING"},
+        {"fieldPath": "created_at", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "corpus_imports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "expires_at", "order": "ASCENDING"}
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
