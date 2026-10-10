@@ -1,52 +1,35 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# 當發生錯誤時立即退出
-set -e
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
-# 確保腳本在專案根目錄執行
-cd "$(dirname "$0")"
-
-echo "=============================================="
-echo "      🚀 Local Linting & Checking Script       "
-echo "=============================================="
-
-if [ "$1" == "--fix" ]; then
-    echo "1. [Backend] 執行 Ruff Check (自動修復)..."
-    uv run ruff check --fix main.py backend/ scripts/ tests/ || true
-
-    echo "2. [Backend] 執行 Ruff Format (自動格式化)..."
-    uv run ruff format main.py backend/ scripts/ tests/
-
-    echo "3. [Frontend] 執行 ESLint (自動修復)..."
-    cd frontend
-    npm run lint -- --fix || true
-    cd ..
-
-    echo "=============================================="
-    echo "✅ 自動修復與格式化完成！"
-    echo "=============================================="
-else
-    echo "1. [Backend] 執行 Ruff Check (僅檢查)..."
-    uv run ruff check main.py backend/ scripts/ tests/
-
-    echo "2. [Backend] 執行 Ruff Format (僅檢查)..."
-    uv run ruff format --check main.py backend/ scripts/ tests/
-
-    echo "3. [Frontend] 執行 ESLint (僅檢查)..."
-    cd frontend
-    npm run lint
-    cd ..
-
-    echo "=============================================="
-    echo "✅ 所有檢查皆通過！"
-    echo "=============================================="
-    echo "💡 提示：若要自動修復錯誤，請執行: ./lint.sh --fix"
+if [[ $# -gt 1 || ( ${1:-} != "" && ${1:-} != "--fix" ) ]]; then
+    echo "Usage: ./lint.sh [--fix]" >&2
+    exit 2
 fi
 
-echo "4. [Frontend] 執行 TypeScript 型別檢查..."
-cd frontend
-# 使用 npx 執行 tsc 進行型別檢查 (不編譯出檔案，僅檢查)
-npx tsc -b
-cd ..
+python_targets=(
+    client/backend admin/backend shared/python
+    client/tests admin/tests shared/tests scripts conftest.py
+)
 
-echo "🎉 一切正常，您可以安心推送程式碼了！"
+if [[ ${1:-} == "--fix" ]]; then
+    echo "修復 Python 與前端 lint 問題..."
+    uv run --frozen --all-extras ruff check --fix "${python_targets[@]}"
+    uv run --frozen --all-extras ruff format "${python_targets[@]}"
+    pnpm -r lint --fix
+fi
+
+echo "檢查 Python lint 與格式..."
+uv run --frozen --all-extras ruff check "${python_targets[@]}"
+uv run --frozen --all-extras ruff format --check "${python_targets[@]}"
+
+echo "檢查 shared、Client 與 Admin 前端 lint..."
+pnpm -r lint
+
+echo "檢查 shared、Client 與 Admin TypeScript 型別..."
+pnpm --filter @rag/shared build
+pnpm --filter @rag/client exec tsc -b
+pnpm --filter @rag/admin exec tsc -b
+
+echo "所有 lint、格式與型別檢查皆通過。"

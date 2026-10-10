@@ -1,0 +1,143 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import AdminCorpus from "./AdminCorpus";
+import * as corpus from "../services/corpus";
+
+vi.mock("../services/corpus", () => ({ listSources: vi.fn(), listRecords: vi.fn(), getSource: vi.fn(), downloadSource: vi.fn(), previewImport: vi.fn(), confirmImport: vi.fn(), deleteSource: vi.fn(), getCorpusJob: vi.fn(), listCorpusJobs: vi.fn(), listImports: vi.fn(), getImport: vi.fn(), mapImport: vi.fn(), resumeParse: vi.fn(), cancelCorpusJob: vi.fn(), retryCorpusJob: vi.fn(), mappingLabels: { content: "片段內容（必填）", source_url: "來源網址" } }));
+const record: corpus.CorpusRecord = { id: "chunk-1", kind: "law", content: "完整合成條文。", metadata: { source_url: "https://example.test/law" }, embedding: { dimensions: 1536 }, source_id: "source-1" };
+const source: corpus.CorpusSource = { source_id: "source-1", title: "合成法規", filename: "synthetic.txt", kind: "law", status: "active", revision: 3, chunk_count: 2, original_available: true, chunks: [record], next_cursor: "next-chunk" };
+const preview: corpus.ImportPreview & corpus.ImportDraft = { import_id: "preview-1", status: "preview", parse_revision: 1, plan_hash: "frozen-plan", filename: "new.txt", title: "新來源", kind: "law", chunk_count: 1, chunks: [{ content: "擷取後完整文字", metadata: {} }], warnings: ["請檢查擷取內容。"], duplicate_source_id: null, expires_at: "2099-01-01T00:00:00Z", limits: {} };
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(corpus.listSources).mockResolvedValue({ items: [source], next_cursor: null });
+  vi.mocked(corpus.listRecords).mockResolvedValue({ items: [{ ...record, source_id: null }], next_cursor: null });
+  vi.mocked(corpus.getSource).mockResolvedValue(source);
+  vi.mocked(corpus.listCorpusJobs).mockResolvedValue({ items: [], next_cursor: null });
+  vi.mocked(corpus.listImports).mockResolvedValue({ items: [], next_cursor: null });
+  vi.mocked(corpus.getImport).mockResolvedValue(preview);
+  vi.mocked(corpus.previewImport).mockResolvedValue(preview);
+  vi.mocked(corpus.confirmImport).mockResolvedValue({ job_id: "import-job", status: "queued" });
+  vi.mocked(corpus.deleteSource).mockResolvedValue({ job_id: "delete-job", status: "queued" });
+  vi.mocked(corpus.getCorpusJob).mockResolvedValue({ job_id: "job", status: "succeeded", result: { source_id: "source-1" } });
+});
+
+describe("corpus source management", () => {
+  it("shows complete stored content and pages through all chunks of a source", async () => {
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(await screen.findByRole("button", { name: "合成法規" }));
+    expect(await screen.findByText("完整合成條文。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下載完整原始檔" })).toBeEnabled();
+    vi.mocked(corpus.getSource).mockResolvedValueOnce({ ...source, chunks: [{ ...record, id: "chunk-2", content: "第二片段全文" }], next_cursor: null });
+    fireEvent.click(screen.getByRole("button", { name: /載入更多來源片段/ }));
+    expect(await screen.findByText("第二片段全文")).toBeInTheDocument();
+    expect(screen.getByText("完整合成條文。")).toBeInTheDocument();
+    expect(corpus.getSource).toHaveBeenLastCalledWith("source-1", expect.any(AbortSignal), "next-chunk");
+  });
+  it("requires exact source-name confirmation and includes revision for a full-source deletion", async () => {
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(await screen.findByRole("button", { name: "合成法規" }));
+    const confirm = await screen.findByRole("button", { name: "確認刪除完整來源" });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("刪除來源確認名稱"), { target: { value: "其他來源" } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("刪除來源確認名稱"), { target: { value: "合成法規" } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(corpus.deleteSource).toHaveBeenCalledExactlyOnceWith(source, "csrf"));
+  });
+  it("shows ungrouped legacy chunks without inventing source deletion controls", async () => {
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(screen.getByRole("button", { name: "所有資料片段" }));
+    expect(await screen.findByText(/未核對完整來源/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "確認刪除完整來源" })).not.toBeInTheDocument();
+    expect(corpus.deleteSource).not.toHaveBeenCalled();
+  });
+  it("previews the whole parsed source without embedding and confirms only after review", async () => {
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(screen.getByRole("button", { name: "加入資料" }));
+    const file = new File(["合成內容"], "new.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("來源檔案"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "產生匯入預覽" }));
+    expect(await screen.findByText("擷取後完整文字")).toBeInTheDocument();
+    expect(corpus.previewImport).toHaveBeenCalledExactlyOnceWith(file, "law", "", {}, "csrf", expect.any(AbortSignal));
+    expect(corpus.confirmImport).not.toHaveBeenCalled();
+    const confirm = screen.getByRole("button", { name: "確認並開始 embedding" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /我已檢查全部片段/ }));
+    fireEvent.click(confirm);
+    await waitFor(() => expect(corpus.confirmImport).toHaveBeenCalledExactlyOnceWith(preview, "csrf"));
+    await waitFor(() => expect(corpus.getCorpusJob).toHaveBeenCalledWith("import-job", expect.any(AbortSignal)));
+  });
+  it("handles a deduplicated confirmation without attempting to poll a nonexistent job", async () => {
+    vi.mocked(corpus.confirmImport).mockResolvedValue({ status: "succeeded", duplicate: true, source_id: "existing" });
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(screen.getByRole("button", { name: "加入資料" }));
+    fireEvent.change(screen.getByLabelText("來源檔案"), { target: { files: [new File(["text"], "new.txt")] } });
+    fireEvent.click(screen.getByRole("button", { name: "產生匯入預覽" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /我已檢查全部片段/ }));
+    fireEvent.click(screen.getByRole("button", { name: "確認並開始 embedding" }));
+    expect(await screen.findByText(/未重複 embedding/)).toBeInTheDocument();
+    expect(corpus.getCorpusJob).not.toHaveBeenCalled();
+  });
+  it("queues structured parsing, requires explicit field mapping, and reviews the mapped preview before embedding", async () => {
+    const queued: corpus.ImportDraft = { import_id: "preview-1", filename: "rows.csv", title: "試算表", kind: "law", status: "parse_queued", parse_revision: 1, parse_job_id: "scan-job" };
+    const mapping: corpus.ImportDraft = { ...queued, status: "mapping_required", available_fields: ["自訂本文", "網址"], suggested_mapping: {}, sample_rows: [{ 自訂本文: "合成內容", 網址: "https://example.test" }] };
+    vi.mocked(corpus.previewImport).mockResolvedValue(queued);
+    vi.mocked(corpus.getImport).mockResolvedValueOnce(mapping).mockResolvedValueOnce({ ...preview, parse_revision: 2 });
+    vi.mocked(corpus.mapImport).mockResolvedValue({ ...queued, parse_revision: 2, parse_job_id: "mapped-job" });
+    vi.mocked(corpus.getCorpusJob).mockImplementation(async id => ({ job_id: id, kind: "corpus_parse", status: "succeeded", result: { import_id: "preview-1" } }));
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(screen.getByRole("button", { name: "加入資料" }));
+    fireEvent.change(screen.getByLabelText("來源檔案"), { target: { files: [new File(["自訂本文,網址\n合成內容,https://example.test"], "rows.csv")] } });
+    fireEvent.click(screen.getByRole("button", { name: "產生匯入預覽" }));
+    const submit = await screen.findByRole("button", { name: "確認欄位並產生預覽" });
+    expect(submit).toBeDisabled();
+    expect(corpus.confirmImport).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("片段內容（必填）"), { target: { value: "自訂本文" } });
+    fireEvent.change(screen.getByLabelText("來源網址"), { target: { value: "網址" } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(corpus.mapImport).toHaveBeenCalledExactlyOnceWith(mapping, { content: "自訂本文", source_url: "網址" }, "csrf"));
+    expect(await screen.findByText("擷取後完整文字")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "確認並開始 embedding" })).toBeDisabled();
+    expect(corpus.confirmImport).not.toHaveBeenCalled();
+  });
+  it("recovers a server draft after remount without requiring the local file again", async () => {
+    vi.mocked(corpus.listImports).mockResolvedValue({ items: [{ ...preview, chunks: undefined }], next_cursor: null });
+    const initial = render(<AdminCorpus csrfToken="csrf" />);
+    initial.unmount();
+    render(<AdminCorpus csrfToken="new-session-csrf" />);
+    fireEvent.click(screen.getByRole("button", { name: "加入資料" }));
+    fireEvent.click(await screen.findByRole("button", { name: /新來源/ }));
+    expect(await screen.findByText("擷取後完整文字")).toBeInTheDocument();
+    expect(corpus.getImport).toHaveBeenCalledWith("preview-1", expect.any(AbortSignal));
+    expect(corpus.previewImport).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", { name: /我已檢查全部片段/ })).not.toBeChecked();
+  });
+  it("keeps failed structured mapping editable using the saved mapping and current revision", async () => {
+    const failed: corpus.ImportDraft = { import_id: "failed-import", filename: "rows.csv", title: "失敗草稿", kind: "law", status: "parse_failed", parse_revision: 2, parse_job_id: "failed-parse", available_fields: ["錯誤欄", "正確欄"], column_mapping: { content: "錯誤欄" }, error: { detail: "內容欄位無有效文字" } };
+    vi.mocked(corpus.listImports).mockResolvedValue({ items: [failed], next_cursor: null });
+    vi.mocked(corpus.getImport).mockResolvedValue(failed);
+    vi.mocked(corpus.getCorpusJob).mockResolvedValue({ job_id: "failed-parse", kind: "corpus_parse", status: "failed" });
+    vi.mocked(corpus.mapImport).mockResolvedValue({ ...failed, status: "parse_queued", parse_revision: 3, parse_job_id: "new-parse" });
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(screen.getByRole("button", { name: "加入資料" }));
+    fireEvent.click(await screen.findByRole("button", { name: /失敗草稿/ }));
+    expect(await screen.findByLabelText("片段內容（必填）")).toHaveValue("錯誤欄");
+    fireEvent.change(screen.getByLabelText("片段內容（必填）"), { target: { value: "正確欄" } });
+    fireEvent.click(screen.getByRole("button", { name: "確認欄位並產生預覽" }));
+    await waitFor(() => expect(corpus.mapImport).toHaveBeenCalledWith(expect.objectContaining({ parse_revision: 2 }), { content: "正確欄" }, "csrf"));
+    expect(corpus.confirmImport).not.toHaveBeenCalled();
+  });
+  it("reconciles a cancelled parse on recovered draft and restarts its stored upload", async () => {
+    const cancelled: corpus.ImportDraft = { import_id: "cancelled-import", filename: "text.txt", title: "取消草稿", kind: "law", status: "parse_queued", parse_revision: 1, parse_job_id: "cancelled-parse" };
+    vi.mocked(corpus.listImports).mockResolvedValue({ items: [cancelled], next_cursor: null });
+    vi.mocked(corpus.getImport).mockResolvedValue(cancelled);
+    vi.mocked(corpus.getCorpusJob).mockResolvedValue({ job_id: "cancelled-parse", kind: "corpus_parse", status: "cancelled" });
+    vi.mocked(corpus.resumeParse).mockResolvedValue({ ...cancelled, parse_revision: 2, parse_job_id: "resumed-parse" });
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(screen.getByRole("button", { name: "加入資料" }));
+    fireEvent.click(await screen.findByRole("button", { name: /取消草稿/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "使用已上傳檔案重新解析" }));
+    await waitFor(() => expect(corpus.resumeParse).toHaveBeenCalledExactlyOnceWith("cancelled-import", "csrf"));
+    expect(corpus.previewImport).not.toHaveBeenCalled();
+  });
+});

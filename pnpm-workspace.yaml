@@ -1,0 +1,5 @@
+packages:
+  - client/frontend
+  - admin/frontend
+  - shared/frontend
+  - infrastructure/tests

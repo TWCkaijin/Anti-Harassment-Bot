@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "description": "Existing-function updates only. Initial infrastructure, IAM, indexes, rules, secret grants, and artifact cleanup remain operator-managed.",
+  "roles": {
+    "ragDeployMetadata": {
+      "title": "RAG deployment discovery and source upload",
+      "description": "Project metadata and signed source uploads; no function creation, deletion, IAM modification, build submission, database data access, or secret payload access.",
+      "stage": "GA",
+      "includedPermissions": [
+        "cloudfunctions.functions.list",
+        "cloudfunctions.functions.sourceCodeSet",
+        "cloudfunctions.locations.list",
+        "cloudfunctions.operations.get",
+        "firebase.clients.get",
+        "firebase.projects.get",
+        "resourcemanager.projects.get",
+        "serviceusage.services.get",
+        "serviceusage.services.list",
+        "serviceusage.services.use"
+      ]
+    },
+    "ragFunctionUpdater": {
+      "title": "RAG existing function updater",
+      "description": "Bind directly to the four pre-existing application functions.",
+      "stage": "GA",
+      "includedPermissions": [
+        "cloudfunctions.functions.get",
+        "cloudfunctions.functions.getIamPolicy",
+        "cloudfunctions.functions.update"
+      ]
+    },
+    "ragRunMetadata": {
+      "title": "RAG service deployment metadata",
+      "description": "Inspect only the four pre-existing application Run services; cannot modify service IAM.",
+      "stage": "GA",
+      "includedPermissions": ["run.services.get", "run.services.getIamPolicy"]
+    },
+    "ragArtifactMetadata": {
+      "title": "RAG function artifact policy metadata",
+      "description": "Read the operator-managed cleanup policy of the existing gcf-artifacts repository.",
+      "stage": "GA",
+      "includedPermissions": ["artifactregistry.repositories.get"]
+    }
+  },
+  "function_ids": ["api", "api_preview", "admin_api", "admin_api_preview"],
+  "runtime_service_accounts": ["rag-client-prod", "rag-client-dev", "rag-admin-prod", "rag-admin-dev"],
+  "secret_ids": ["RAG_OPENROUTER_PROD", "RAG_OPENROUTER_DEV", "RAG_CLARIFICATION_PROD", "RAG_CLARIFICATION_DEV", "RAG_CLARIFICATION_LEGACY_PROD", "RAG_CLARIFICATION_LEGACY_DEV"],
+  "unresolved_hosting_grant": {
+    "role": "roles/firebasehosting.admin",
+    "scope": "project",
+    "reason": "Firebase Hosting does not support custom roles or site-level IAM policies. This includes creating/deleting sites and changing any Hosting channel in the project.",
+    "applied_by_default": false
+  }
+}

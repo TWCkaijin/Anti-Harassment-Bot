@@ -1,98 +1,165 @@
 {
-  "hosting": {
-    "public": "frontend/dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "/api/**",
-        "function": "api"
-      },
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ],
-    "headers": [
-      {
-        "source": "**/*.@(js|css|woff2)",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "public, max-age=31536000, immutable"
-          }
-        ]
-      },
-      {
-        "source": "**",
-        "headers": [
-          {
-            "key": "X-Content-Type-Options",
-            "value": "nosniff"
-          },
-          {
-            "key": "X-Frame-Options",
-            "value": "DENY"
-          },
-          {
-            "key": "X-XSS-Protection",
-            "value": "1; mode=block"
-          }
-        ]
-      }
-    ]
-  },
   "functions": [
     {
-      "source": ".",
+      "source": "build/functions/client",
       "codebase": "api",
       "runtime": "python313",
       "ignore": [
-        ".git",
-        ".github",
-        ".venv",
         "venv",
-        "node_modules",
-        "frontend",
-        "tests",
-        "docs",
-        "data",
-        "resource",
-        "scripts",
-        ".firebase",
-        ".pnpm-store",
-        ".code-review-graph",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".mypy_cache",
+        "__pycache__",
         "**/__pycache__/**",
         "**/*.pyc",
-        "**/*.pyo",
-        "**/.DS_Store",
-        ".DS_Store",
         ".env",
         ".env.*",
-        "**/.env",
-        "**/.env.*",
-        "firebase_admin.json",
-        "**/firebase_admin*.json",
-        "**/*.pem",
-        "**/*.key",
-        "*.log",
-        "**/*.log",
-        "build",
-        "dist",
-        "wheels",
-        "**/*.egg-info/**",
-        "Agent.md",
-        "TODO.md",
-        "implementation.md",
-        "lint.sh",
-        "README.md"
+        "**/*.log"
+      ]
+    },
+    {
+      "source": "build/functions/admin",
+      "codebase": "admin",
+      "runtime": "python313",
+      "ignore": [
+        "venv",
+        "__pycache__",
+        "**/__pycache__/**",
+        "**/*.pyc",
+        ".env",
+        ".env.*",
+        "**/*.log"
       ]
     }
-  ]
+  ],
+  "hosting": [
+    {
+      "public": "client/frontend/dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "function": {
+            "functionId": "api",
+            "region": "asia-east1"
+          }
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "headers": [
+        {
+          "source": "**/*.@(js|css|woff2)",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=31536000, immutable"
+            }
+          ]
+        },
+        {
+          "source": "**",
+          "headers": [
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "DENY"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "1; mode=block"
+            }
+          ]
+        }
+      ],
+      "target": "client"
+    },
+    {
+      "public": "admin/frontend/dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "function": {
+            "functionId": "admin_api",
+            "region": "asia-east1"
+          }
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "headers": [
+        {
+          "source": "**/*.@(js|css|woff2)",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=31536000, immutable"
+            }
+          ]
+        },
+        {
+          "source": "**",
+          "headers": [
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "DENY"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "1; mode=block"
+            }
+          ]
+        }
+      ],
+      "target": "admin"
+    }
+  ],
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "infrastructure/firestore.rules",
+      "indexes": "infrastructure/firestore.indexes.json"
+    },
+    {
+      "database": "app-dev",
+      "rules": "infrastructure/firestore.rules",
+      "indexes": "infrastructure/firestore.indexes.json"
+    },
+    {
+      "database": "admin-private",
+      "rules": "infrastructure/firestore.rules",
+      "indexes": "infrastructure/firestore.private.indexes.json"
+    },
+    {
+      "database": "admin-private-dev",
+      "rules": "infrastructure/firestore.rules",
+      "indexes": "infrastructure/firestore.private.indexes.json"
+    }
+  ],
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
 }

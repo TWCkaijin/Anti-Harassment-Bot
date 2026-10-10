@@ -74,10 +74,10 @@ async def execute(args):
     load_dotenv(args.env_file, override=False)
     from openai import AsyncOpenAI
 
-    from backend.app.agents import openrouter_agent as module
-    from backend.app.core.chat_response import AssistantChatResponse
-    from backend.app.core.runtime_config import RuntimeConfig
-    from backend.app.rag.base import RAGDocument
+    from rag_core.agents import openrouter_agent as module
+    from rag_core.core.chat_response import AssistantChatResponse
+    from rag_core.core.runtime_config import RuntimeConfig
+    from rag_core.rag.base import RAGDocument
 
     if not Path(module.__file__).resolve().is_relative_to(args.engine.resolve()):
         raise RuntimeError("Engine imports escaped the requested snapshot")

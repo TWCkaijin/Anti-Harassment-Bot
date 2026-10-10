@@ -1,5 +1,17 @@
 {
   "projects": {
     "default": "anti-harassment-bot"
+  },
+  "targets": {
+    "anti-harassment-bot": {
+      "hosting": {
+        "client": [
+          "anti-harassment-bot"
+        ],
+        "admin": [
+          "anti-harassment-bot-admin"
+        ]
+      }
+    }
   }
 }

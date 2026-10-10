@@ -1,0 +1,483 @@
+/**
+ * Sidebar — Stitch 風格暖色系側邊欄 (v0.1)
+ * 導航式設計：品牌標識 → 滿版橘色新增對話按鈕 → 對話歷史清單 (卡片式) → 底部工具列。
+ * RWD：桌面端固定左側，行動端可透過漢堡按鈕展開覆蓋。
+ */
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import MaterialIcon from "./MaterialIcon";
+import BrandMark from "./BrandMark";
+import { useI18n } from "../i18n";
+import type { ConversationSession } from "../hooks/useConversation";
+import { formatConversationText } from "../services/conversationExport";
+import { hasCaseContext } from "../services/caseFacts";
+
+interface SidebarProps {
+  sessions: ConversationSession[];
+  currentSessionId: string;
+  isOpen: boolean;
+  isCollapsed: boolean;
+  onClose: () => void;
+  onToggleCollapsed: () => void;
+  onSelectSession: (id: string) => void;
+  onNewSession: () => void;
+  onDeleteSession: (id: string) => void;
+  onRenameSession: (id: string, newTitle: string) => void;
+  onOpenSettings: () => void;
+}
+
+function formatDate(timestamp: number, t: ReturnType<typeof useI18n>["t"]): string {
+  const d = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  const diffHour = Math.floor(diffMs / 3_600_000);
+  const diffDay = Math.floor(diffMs / 86_400_000);
+
+  if (diffMin < 1) return t.timeJustNow;
+  if (diffMin < 60) return t.timeMinAgo(diffMin);
+  if (diffHour < 24) return t.timeHourAgo(diffHour);
+  if (diffDay < 7) return t.timeDayAgo(diffDay);
+  return d.toLocaleDateString("zh-TW", { month: "short", day: "numeric" });
+}
+
+function getSessionPreview(session: ConversationSession, t: ReturnType<typeof useI18n>["t"]): string {
+  const lastUserMsg = [...session.messages]
+    .reverse()
+    .find((m) => m.role === "user");
+  if (lastUserMsg) {
+    return lastUserMsg.content.length > 28
+      ? lastUserMsg.content.slice(0, 28) + "…"
+      : lastUserMsg.content;
+  }
+  return session.title || t.newConversation;
+}
+
+export default function Sidebar({
+  sessions,
+  currentSessionId,
+  isOpen,
+  isCollapsed,
+  onClose,
+  onToggleCollapsed,
+  onSelectSession,
+  onNewSession,
+  onDeleteSession,
+  onRenameSession,
+  onOpenSettings,
+}: SidebarProps) {
+  const { t } = useI18n();
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [isEmergencyMenuOpen, setIsEmergencyMenuOpen] = useState(false);
+  const [desktop, setDesktop] = useState(() => window.matchMedia?.("(min-width: 1024px) and (pointer: fine)").matches ?? false);
+  const [peek, setPeek] = useState(false);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const hoverInside = useRef(false);
+  const emergencyMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia?.("(min-width: 1024px) and (pointer: fine)");
+    if (!media) return;
+    const update = () => setDesktop(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  const cancelHide = () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+  };
+  const scheduleHide = () => {
+    cancelHide();
+    hideTimer.current = setTimeout(() => {
+      if (hoverInside.current || asideRef.current?.contains(document.activeElement) || document.activeElement === triggerRef.current || menuOpenId || editingId || isEmergencyMenuOpen) return;
+      setPeek(false);
+    }, 200);
+  };
+  useEffect(() => () => { if (hideTimer.current) clearTimeout(hideTimer.current); }, []);
+  useEffect(() => { if (menuOpenId) menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [menuOpenId]);
+  // Closing a portal menu/rename must resume hover behaviour without requiring
+  // a second mouseleave from the underlying panel.
+  useEffect(() => {
+    if (menuOpenId || editingId || isEmergencyMenuOpen) return;
+    const timer = setTimeout(() => {
+      if (!hoverInside.current && !asideRef.current?.contains(document.activeElement) && document.activeElement !== triggerRef.current) setPeek(false);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [menuOpenId, editingId, isEmergencyMenuOpen]);
+  useEffect(() => {
+    if (desktop || !isOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    asideRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => {
+      const target = previous?.isConnected ? previous : document.querySelector<HTMLButtonElement>("[data-sidebar-trigger]");
+      target?.focus();
+    };
+  }, [isOpen, desktop]);
+  const visible = desktop ? !isCollapsed || peek : isOpen;
+  const close = () => { setPeek(false); onClose(); };
+
+  useEffect(() => {
+    if (!isEmergencyMenuOpen) return;
+
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      if (!emergencyMenuRef.current?.contains(event.target as Node)) {
+        setIsEmergencyMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", closeOnOutsidePointerDown);
+    return () => window.removeEventListener("pointerdown", closeOnOutsidePointerDown);
+  }, [isEmergencyMenuOpen]);
+
+  // 只顯示有訊息的對話，由新到舊排序
+  const sortedSessions = [...sessions]
+    .filter((s) => s.messages.length > 0 || (s.caseFacts && hasCaseContext(s.caseFacts)))
+    .sort((a, b) => b.createdAt - a.createdAt);
+  const openMenuSession = sortedSessions.find((session) => session.id === menuOpenId);
+
+  const handleExport = (session: ConversationSession) => {
+    const exportData = formatConversationText(session, t);
+    const blob = new Blob([exportData], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chat-${session.title || session.id.slice(0, 8)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMenuOpenId(null);
+  };
+
+  const handleRenameSubmit = (id: string) => {
+    if (editingTitle.trim()) {
+      onRenameSession(id, editingTitle.trim());
+    }
+    setEditingId(null);
+  };
+
+  return (
+    <>
+      {/* 行動端遮罩 */}
+      {!desktop && isOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-40"
+          onClick={close}
+        />
+      )}
+
+      <aside
+        ref={asideRef}
+        id="conversation-sidebar"
+        aria-label={t.openSidebar}
+        aria-modal={!desktop && isOpen && !menuOpenId ? true : undefined}
+        role={!desktop && isOpen ? "dialog" : "complementary"}
+        inert={!visible}
+        onPointerEnter={() => { hoverInside.current = true; cancelHide(); }}
+        onPointerLeave={() => { hoverInside.current = false; scheduleHide(); }}
+        onFocus={cancelHide}
+        onBlur={scheduleHide}
+        onKeyDown={event => {
+          if (event.key === "Escape") { event.stopPropagation(); setMenuOpenId(null); setEditingId(null); setIsEmergencyMenuOpen(false); close(); if (desktop && !isCollapsed) onToggleCollapsed(); triggerRef.current?.focus(); }
+          if (desktop || event.key !== "Tab") return;
+          const controls = Array.from(asideRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, a[href], [tabindex="0"]') ?? []).filter(element => element.getClientRects().length > 0);
+          const first = controls[0], last = controls.at(-1);
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+        }}
+        className={`${desktop && !isCollapsed ? "relative shrink-0" : "fixed inset-y-0 left-0"} z-50 flex w-[min(320px,90vw)] flex-col gap-5 border-r border-outline/20 bg-white p-6 ${desktop && isCollapsed ? "pl-11 shadow-xl" : ""} ${visible ? "translate-x-0" : "-translate-x-full invisible"} transition-transform duration-200`}
+      >
+        <div className="flex min-h-0 flex-1 flex-col gap-5">
+        {/* 頂部 Logo */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <BrandMark size={48} />
+            <div>
+              <h1 className="text-lg font-bold text-primary leading-tight">{t.brandName}</h1>
+              <p className="text-xs text-on-surface/60">{t.brandSub}</p>
+            </div>
+          </div>
+          <button
+            onClick={close}
+            className={`${desktop ? "hidden" : "flex"} h-11 w-11 items-center justify-center rounded-lg hover:bg-surface-container transition-colors`}
+            aria-label={t.close}
+          >
+            <MaterialIcon icon="close" size={20} className="text-on-surface/60" />
+          </button>
+        </div>
+
+        {/* 新增對話按鈕 */}
+        <button
+          onClick={() => {
+            onNewSession();
+            close();
+          }}
+          className="w-full py-4 px-4 bg-primary text-white font-bold rounded-2xl shadow-sm hover:opacity-90 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
+        >
+          <MaterialIcon icon="add" size={20} />
+          <span>{t.newChat}</span>
+        </button>
+
+        {/* 對話歷史列表 */}
+        <div className="flex-1 overflow-y-auto space-y-3 -mx-2 px-2 chat-scrollbar">
+          {sortedSessions.length === 0 && (
+            <p className="text-sm text-on-surface/50 text-center py-8">
+              {t.noHistory}
+            </p>
+          )}
+          {sortedSessions.map((session) => {
+            const isActive = session.id === currentSessionId;
+            return (
+              <div
+                key={session.id}
+                role="button"
+                tabIndex={0}
+                aria-label={session.title || getSessionPreview(session, t)}
+                aria-current={isActive ? "page" : undefined}
+                onKeyDown={event => {
+                  if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault(); onSelectSession(session.id); close();
+                  }
+                }}
+                className={`
+                  group p-4 rounded-2xl cursor-pointer transition-all duration-200 border relative
+                  ${
+                    isActive
+                      ? "bg-primary-container border-primary/20"
+                      : "bg-surface hover:bg-surface-container border-transparent"
+                  }
+                `}
+                onClick={() => {
+                  if (editingId !== session.id) {
+                    onSelectSession(session.id);
+                    setIsEmergencyMenuOpen(false);
+                    close();
+                  }
+                }}
+              >
+                <div className="flex gap-3 pr-8">
+                  <MaterialIcon
+                    icon="chat_bubble"
+                    size={20}
+                    className={`shrink-0 ${
+                      isActive ? "text-primary" : "text-on-surface/50"
+                    }`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    {editingId === session.id ? (
+                      <input
+                        type="text"
+                        autoFocus
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onBlur={() => handleRenameSubmit(session.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRenameSubmit(session.id);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                        className="w-full text-sm font-medium bg-transparent border-b border-primary outline-none text-on-surface"
+                      />
+                    ) : (
+                      <p
+                        className={`text-sm truncate font-medium ${
+                          isActive
+                            ? "text-primary"
+                            : "text-on-surface"
+                        }`}
+                      >
+                        {session.title || getSessionPreview(session, t)}
+                      </p>
+                    )}
+                    <p className={`text-[11px] mt-1 ${isActive ? "text-primary/60" : "text-on-surface/40"}`}>
+                      {formatDate(session.createdAt, t)}
+                      {session.messages.length > 0 &&
+                        ` · ${t.messagesCount(session.messages.length)}`}
+                    </p>
+                  </div>
+                </div>
+                {/* 更多功能選單按鈕 */}
+                <div className={`absolute right-2 top-1/2 -translate-y-1/2 transition-all ${
+                  menuOpenId === session.id 
+                    ? "opacity-100" 
+                    : "opacity-100 lg:opacity-0 lg:group-hover:opacity-100 lg:focus-within:opacity-100"
+                }`}>
+                  <button
+                    aria-label={`${t.conversationMenu}：${session.title || getSessionPreview(session, t)}`}
+                    aria-expanded={menuOpenId === session.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (menuOpenId === session.id) {
+                        setMenuOpenId(null);
+                        setMenuPosition(null);
+                        return;
+                      }
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      menuTriggerRef.current = e.currentTarget;
+                      setMenuOpenId(session.id);
+                      setMenuPosition({
+                        top: rect.bottom + 6,
+                        right: window.innerWidth - rect.right,
+                      });
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-surface-container-high text-on-surface/40 hover:text-on-surface"
+                  >
+                    <MaterialIcon icon="more_vert" size={16} />
+                  </button>
+
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 底部工具列 */}
+        <div className="mt-auto space-y-3">
+          {/* 隱私提示 */}
+          <div className="text-center">
+            <p className="flex items-center justify-center gap-1 text-[10px] text-on-surface/40">
+              <MaterialIcon icon="lock" size={14} />
+              <span>{t.privacyNote} · {t.privacyNoteSub}</span>
+            </p>
+          </div>
+
+          {/* 緊急求助選單 */}
+          <div ref={emergencyMenuRef} className="relative w-full">
+            <button
+              onClick={() => setIsEmergencyMenuOpen(!isEmergencyMenuOpen)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-secondary px-3 py-3 text-sm font-bold text-white shadow-sm transition-opacity hover:opacity-90"
+            >
+              <MaterialIcon icon="call" size={20} />
+              <span>{t.emergencyHelp}</span>
+              <MaterialIcon icon="expand_less" size={20} className={`ml-auto transition-transform ${isEmergencyMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {/* 展開選單 (往上展開，避免超出畫面) */}
+            <div className={`absolute bottom-full left-0 z-50 mb-2 flex w-full origin-bottom flex-col overflow-hidden rounded-xl border border-outline/20 bg-white shadow-lg transition-all ${
+              isEmergencyMenuOpen ? "opacity-100 visible" : "opacity-0 invisible"
+            }`}>
+              <a href="tel:113" className="flex items-center gap-3 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
+                <MaterialIcon icon="local_police" size={20} className="text-secondary" />
+                <div className="flex flex-col text-left">
+                  <span className="font-bold">113 保護專線</span>
+                  <span className="text-[10px] text-on-surface/60">24小時保護專線</span>
+                </div>
+              </a>
+              <a href="tel:110" className="flex items-center gap-3 border-t border-outline/10 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
+                <MaterialIcon icon="local_police" size={20} className="text-secondary" />
+                <div className="flex flex-col text-left">
+                  <span className="font-bold">110 報案專線</span>
+                  <span className="text-[10px] text-on-surface/60">緊急報案</span>
+                </div>
+              </a>
+              <a href="tel:02-2391-7133" className="flex items-center gap-3 border-t border-outline/10 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
+                <MaterialIcon icon="support_agent" size={20} className="text-secondary" />
+                <div className="flex flex-col text-left">
+                  <span className="font-bold">現代婦女基金會</span>
+                  <span className="text-[10px] text-on-surface/60">性別友善諮詢</span>
+                </div>
+              </a>
+            </div>
+          </div>
+
+          {/* 工具連結列 */}
+          <div className="grid grid-cols-2 gap-3 border-t border-outline/10 pt-3">
+            <button
+              onClick={() => {
+                setIsEmergencyMenuOpen(false);
+                onOpenSettings();
+              }}
+              className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
+            >
+              <MaterialIcon icon="settings" size={20} />
+              <span className="text-xs font-medium">
+                {t.settings}
+              </span>
+            </button>
+
+          </div>
+        </div>
+        </div>
+      </aside>
+      {desktop && <button
+        ref={triggerRef} type="button"
+        onPointerEnter={() => { hoverInside.current = true; cancelHide(); if (isCollapsed) setPeek(true); }}
+        onPointerLeave={() => { hoverInside.current = false; scheduleHide(); }}
+        onBlur={scheduleHide}
+        onClick={() => { cancelHide(); setPeek(false); onToggleCollapsed(); }}
+        aria-label={isCollapsed ? "固定開啟對話欄" : "收起對話欄"}
+        aria-expanded={visible} aria-controls="conversation-sidebar"
+        className="fixed top-1/2 z-[60] flex h-20 w-8 -translate-y-1/2 items-center justify-center rounded-r-2xl bg-primary text-white shadow-md hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        style={{ left: isCollapsed ? 0 : 320 }}>
+        <MaterialIcon icon={isCollapsed ? "chevron_right" : "chevron_left"} size={22} />
+      </button>}
+      {openMenuSession && menuPosition && createPortal(
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-[90] cursor-default"
+            aria-label="關閉對話選單"
+            onClick={() => {
+              setMenuOpenId(null);
+              setMenuPosition(null);
+              menuTriggerRef.current?.focus();
+            }}
+          />
+          <div
+            ref={menuRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.conversationMenu}
+            onPointerEnter={() => { hoverInside.current = true; cancelHide(); }}
+            onPointerLeave={() => { hoverInside.current = false; scheduleHide(); }}
+            onKeyDown={event => {
+              if (event.key === "Escape") { event.stopPropagation(); setMenuOpenId(null); setMenuPosition(null); menuTriggerRef.current?.focus(); }
+              if (event.key !== "Tab") return;
+              const controls = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+              const first = controls[0], last = controls.at(-1);
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }}
+            className="fixed z-[100] flex w-36 flex-col rounded-lg border border-outline/10 bg-white py-1.5 text-sm shadow-float"
+            style={{ top: menuPosition.top, right: menuPosition.right }}
+          >
+            <button
+              onClick={() => {
+                setEditingTitle(openMenuSession.title || getSessionPreview(openMenuSession, t));
+                setEditingId(openMenuSession.id);
+                setMenuOpenId(null);
+                setMenuPosition(null);
+              }}
+              className="flex items-center gap-2 px-4 py-2 text-left text-on-surface hover:bg-surface-container"
+            >
+              <MaterialIcon icon="edit" size={14} />
+              重新命名
+            </button>
+            <button
+              onClick={() => handleExport(openMenuSession)}
+              className="flex items-center gap-2 px-4 py-2 text-left text-on-surface hover:bg-surface-container"
+            >
+              <MaterialIcon icon="download" size={14} />
+              匯出紀錄
+            </button>
+            <div className="my-1 h-px bg-outline/10" />
+            <button
+              onClick={() => {
+                onDeleteSession(openMenuSession.id);
+                setMenuOpenId(null);
+                setMenuPosition(null);
+              }}
+              className="flex items-center gap-2 px-4 py-2 text-left text-error hover:bg-error-container/50"
+            >
+              <MaterialIcon icon="delete" size={14} />
+              {t.deleteChat}
+            </button>
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  );
+}

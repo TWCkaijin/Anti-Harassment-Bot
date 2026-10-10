@@ -18,6 +18,7 @@ venv/
 .env.local
 .env.*.local
 firebase_admin.json
+.admin-local/
 *.pem
 *.key
 data
@@ -25,9 +26,10 @@ data
 # ===== Node / Frontend =====
 node_modules/
 .pnpm-store/
-frontend/dist/
-frontend/.vite/
-frontend/coverage/
+client/frontend/dist/
+admin/frontend/dist/
+**/.vite/
+**/coverage/
 *.tsbuildinfo
 
 # ===== Firebase =====
@@ -46,17 +48,20 @@ ui-debug.log
 # ===== Logs & Temporary Files =====
 functions_error.json
 .code-review-graph/
-tests/reliability/results/applicable-laws*/
-tests/reliability/results/chatgpt-scene-*/
+admin/tests/reliability/results/applicable-laws*/
+admin/tests/reliability/results/chatgpt-scene-*/
 
 # Delivery: formal docs are versionable; private evidence and outputs are not.
 docs/technical-report/.*-build/
 docs/technical-report/.build/
 docs/technical-report/.chart-data-*/
 docs/technical-report/evidence/
-tests/reliability/results/
-tests/reliability/candidates/
-frontend/design/previews/
+admin/tests/reliability/results/
+admin/tests/reliability/candidates/
+client/frontend/design/previews/
 resource/*.predicted.xlsx
 resource/behavior-tests-*.json
 *.log
+
+# Workload Identity Federation credential files
+gha-creds-*.json

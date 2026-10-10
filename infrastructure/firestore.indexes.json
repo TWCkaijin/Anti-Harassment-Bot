@@ -1,0 +1,56 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "rag_documents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 1024,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "rag_judgments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 1024,
+            "flat": {}
+          }
+        }
+      ]
+    },
+    {
+      "collectionGroup": "rag_remedies",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "embedding",
+          "vectorConfig": {
+            "dimension": 1024,
+            "flat": {}
+          }
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

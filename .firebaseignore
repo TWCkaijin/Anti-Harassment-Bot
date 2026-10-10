@@ -1,43 +1,10 @@
-# Source exclusions mirror firebase.json functions[0].ignore.
-# Private handover credentials remain local; runtime configuration is separate.
-.git
-.github
-.venv
 venv
-node_modules
-frontend
-tests
-docs
-data
-resource
-scripts
-.firebase
-.pnpm-store
-.code-review-graph
-.pytest_cache
-.ruff_cache
-.mypy_cache
+__pycache__
 **/__pycache__/**
 **/*.pyc
-**/*.pyo
-**/.DS_Store
-.DS_Store
 .env
 .env.*
-**/.env
-**/.env.*
-firebase_admin.json
-**/firebase_admin*.json
-**/*.pem
-**/*.key
-*.log
 **/*.log
-build
-dist
-wheels
-**/*.egg-info/**
-Agent.md
-TODO.md
-implementation.md
-lint.sh
-README.md
+
+# Workload Identity Federation credential files
+gha-creds-*.json

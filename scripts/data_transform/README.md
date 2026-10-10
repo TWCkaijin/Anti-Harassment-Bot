@@ -8,6 +8,12 @@ data/judgments/*.csv
 data/remedy/*.md
 ```
 
+Run the ingestion modules from the repository root with the environment configured
+as described in the [operations guide](../../docs/OPERATIONS.md). The `--upload`
+examples below call the embedding provider and write to the selected business
+database; omit that flag for a dry run. See the [Admin data tools](../../admin/backend/admin_app/scripts/README.md)
+for source catalogs and migration commands.
+
 ## documents
 
 General law or guidance documents are Markdown files under `data/documents/`.
@@ -27,7 +33,7 @@ jurisdiction: 台灣
 Upload with:
 
 ```bash
-python backend/scripts/ingest/documents_to_firestore.py --upload
+PYTHONPATH=shared/python:admin/backend .venv/bin/python -m admin_app.scripts.ingest.documents_to_firestore --upload
 ```
 
 ## judgments
@@ -66,7 +72,7 @@ python scripts/data_transform/standardize_judgments.py --input-dir data/raw/judg
 Upload with:
 
 ```bash
-python backend/scripts/ingest/judgments_to_firestore.py --upload
+PYTHONPATH=shared/python:admin/backend .venv/bin/python -m admin_app.scripts.ingest.judgments_to_firestore --upload
 ```
 
 ## remedy
@@ -84,5 +90,5 @@ with a first-level heading as the source title.
 Upload with:
 
 ```bash
-python backend/scripts/ingest/remedies_to_firestore.py --upload
+PYTHONPATH=shared/python:admin/backend .venv/bin/python -m admin_app.scripts.ingest.remedies_to_firestore --upload
 ```
