@@ -14,10 +14,10 @@ interface ProcessingTraceProps {
 export default function ProcessingTrace({ trace, analysis = [], reasoning = [] }: ProcessingTraceProps) {
   const { t } = useI18n();
   const panelId = useId();
-  const [disclosure, setDisclosure] = useState({ outcome: trace.outcome, expanded: trace.outcome !== "complete" });
-  // Only an outcome transition resets the disclosure. New running events respect
-  // the user's choice, while a completed response always starts collapsed.
-  const expanded = disclosure.outcome === trace.outcome ? disclosure.expanded : trace.outcome !== "complete";
+  const [disclosure, setDisclosure] = useState({ outcome: trace.outcome, expanded: false });
+  // Default is collapsed (expanded = false). Only user interaction expands it.
+  // When outcome transitions, it starts collapsed.
+  const expanded = disclosure.outcome === trace.outcome ? disclosure.expanded : false;
   const running = trace.outcome === "running";
   const interrupted = trace.outcome === "error" || trace.outcome === "cancelled";
   const title = analysis.length > 0 ? t.analysisTitle : t.processingTraceTitle;
@@ -41,13 +41,21 @@ export default function ProcessingTrace({ trace, analysis = [], reasoning = [] }
         }}
       >
         <span aria-hidden="true" className="flex shrink-0">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" focusable="false" className={`transition-transform ${expanded ? "rotate-90" : ""}`}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" focusable="false" className={`transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}>
             <path d="m6 4 4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
         <span className="font-semibold">{title}</span>
-        <span role="status" className={`ml-auto ${interrupted ? "text-on-surface/75" : "text-on-surface/55"}`}>
-          {t.processingOutcomes[trace.outcome]}
+        <span role="status" className={`ml-auto inline-flex items-center gap-1.5 ${interrupted ? "text-on-surface/75" : "text-on-surface/55"}`}>
+          <span>{t.processingOutcomes[trace.outcome]}</span>
+          {running && (
+            <span aria-hidden="true" className="inline-flex items-center text-primary" title="運作中">
+              <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" strokeLinecap="round" d="M12 2a10 10 0 0 1 10 10" />
+              </svg>
+            </span>
+          )}
         </span>
       </button>
       <div id={panelId} hidden={!expanded}>

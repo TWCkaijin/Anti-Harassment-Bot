@@ -19,10 +19,14 @@ const running: ProcessingTraceData = {
 describe("ProcessingTrace", () => {
   beforeEach(() => localStorage.clear());
 
-  it("starts expanded and shows only observed phases in order, including repeated phases", () => {
+  it("starts collapsed and shows observed phases after expanding, including repeated phases", () => {
     render(<ProcessingTrace trace={running} />, { wrapper: I18nProvider });
-    expect(screen.getByRole("button", { name: "處理過程" })).toHaveAttribute("aria-expanded", "true");
+    const toggle = screen.getByRole("button", { name: "處理過程" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("status")).toHaveTextContent("處理中");
+    expect(screen.getByTitle("運作中")).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("顯示系統處理步驟，不代表完整內部推理或法律正確性驗證。")).toBeVisible();
     const steps = screen.getAllByRole("listitem");
     expect(steps.map(step => step.textContent)).toEqual([
@@ -34,22 +38,23 @@ describe("ProcessingTrace", () => {
     expect(screen.queryByText("檢查回覆格式與引用")).not.toBeInTheDocument();
   });
 
-  it("preserves manual collapse during new events and automatically collapses on completion", () => {
+  it("preserves manual expansion during new events and automatically collapses on completion", () => {
     const { rerender } = render(<ProcessingTrace trace={running} />, { wrapper: I18nProvider });
     const toggle = screen.getByRole("button", { name: "處理過程" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     const updated: ProcessingTraceData = {
       ...running, duration_ms: 3000,
       steps: [...running.steps, { phase: "validating", elapsed_ms: 2800, attempt: 0 }],
     };
     rerender(<ProcessingTrace trace={updated} />);
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("list")).not.toBeInTheDocument();
-    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("檢查回覆格式與引用")).toBeVisible();
     rerender(<ProcessingTrace trace={{ ...updated, outcome: "complete" }} />);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("status")).toHaveTextContent("回覆完成");
+    expect(screen.queryByTitle("運作中")).not.toBeInTheDocument();
     fireEvent.click(toggle);
     expect(screen.getAllByRole("listitem")).toHaveLength(5);
     rerender(<ProcessingTrace trace={{ ...updated, outcome: "complete", duration_ms: 3200 }} />);
@@ -74,20 +79,24 @@ describe("ProcessingTrace", () => {
 
   it.each([
     ["cancelled", "已停止"], ["error", "處理中斷"],
-  ] as const)("preserves observed steps with a truthful %s outcome", (outcome, label) => {
+  ] as const)("preserves observed steps with a truthful %s outcome after expanding", (outcome, label) => {
     const { rerender } = render(<ProcessingTrace trace={running} />, { wrapper: I18nProvider });
+    const toggle = screen.getByRole("button", { name: "處理過程" });
     rerender(<ProcessingTrace trace={{ ...running, outcome }} />);
     expect(screen.getByRole("status")).toHaveTextContent(label);
+    expect(screen.queryByTitle("運作中")).not.toBeInTheDocument();
+    fireEvent.click(toggle);
     expect(screen.getAllByRole("listitem")).toHaveLength(running.steps.length);
     expect(screen.getAllByRole("listitem").every(step => !step.hasAttribute("aria-current"))).toBe(true);
     expect(screen.queryByText("回覆完成")).not.toBeInTheDocument();
     expect(screen.queryByText(/check|done/)).not.toBeInTheDocument();
   });
 
-  it("shows a zero-based retry attempt of 1 as the second request in Chinese", () => {
+  it("shows a zero-based retry attempt of 1 as the second request in Chinese after expanding", () => {
     render(<ProcessingTrace trace={{
       ...running, steps: [...running.steps, { phase: "retrying", elapsed_ms: 2400, attempt: 1 }],
     }} />, { wrapper: I18nProvider });
+    fireEvent.click(screen.getByRole("button", { name: "處理過程" }));
     expect(screen.getByText("第 2 次請求")).toBeVisible();
     expect(screen.queryByText("第 1 次請求")).not.toBeInTheDocument();
   });
@@ -107,7 +116,9 @@ describe("ProcessingTrace", () => {
       facts: { subject_role: "secret fact" },
     } as ProcessingTraceData;
     render(<ProcessingTrace trace={trace} />, { wrapper: I18nProvider });
-    expect(screen.getByRole("button", { name: "Processing steps" })).toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: "Processing steps" });
+    expect(toggle).toBeInTheDocument();
+    fireEvent.click(toggle);
     const steps = screen.getByRole("list", { name: "Observed processing steps" });
     expect(within(steps).getAllByText("Request attempt 2")).toHaveLength(5);
     expect(screen.getByText("Applying text masking")).toBeVisible();
@@ -123,9 +134,11 @@ describe("ProcessingTrace", () => {
     expect(screen.getByRole("status")).toHaveTextContent("處理中斷");
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
-  it("shows public analysis summaries, facts, sources and limits instead of timing rows", () => {
+  it("shows public analysis summaries, facts, sources and limits instead of timing rows after expanding", () => {
     render(<ProcessingTrace trace={running} analysis={[{ stage: "sources", summary: "找到兩個可供參考的條文", facts: ["與工作場合有關"], source_labels: ["測試法第1條"], limitations: ["尚未確認事發時間"] }]} />, { wrapper: I18nProvider });
-    expect(screen.getByRole("button", { name: "分析摘要與依據" })).toBeVisible();
+    const toggle = screen.getByRole("button", { name: "分析摘要與依據" });
+    expect(toggle).toBeVisible();
+    fireEvent.click(toggle);
     expect(screen.getByText("找到兩個可供參考的條文")).toBeVisible();
     expect(screen.getByText("與工作場合有關")).toBeVisible();
     expect(screen.getByText("測試法第1條")).toBeVisible();
@@ -136,12 +149,13 @@ describe("ProcessingTrace", () => {
   it.each([
     ["zh-TW", "回答重點：", "已知條件："],
     ["en", "Answer highlights：", "Confirmed details："],
-  ])("labels answer facts separately from known conditions in %s", (locale, highlights, knownFacts) => {
+  ])("labels answer facts separately from known conditions in %s after expanding", (locale, highlights, knownFacts) => {
     localStorage.setItem("harass_bot_locale", locale);
     render(<ProcessingTrace trace={running} analysis={[
       { stage: "understanding", summary: "條件整理", facts: ["合成情境"], source_labels: [], limitations: [] },
       { stage: "answer", summary: "答案整理", facts: ["合成法律分析"], source_labels: [], limitations: [] },
     ]} />, { wrapper: I18nProvider });
+    fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "Analysis summary and basis" : "分析摘要與依據" }));
     const steps = screen.getAllByRole("listitem");
     expect(steps[0]).toHaveTextContent(knownFacts);
     expect(steps[0]).not.toHaveTextContent(highlights);
@@ -156,6 +170,9 @@ it("separates transient provider explanations from observed analysis and collaps
   const reasoning = [{ text: "供應商公開回傳的簡短說明。", kind: "summary" as const, stage: "understanding" as const }];
   const view = (complete: boolean) => <I18nProvider><ProcessingTrace trace={{ ...trace, outcome: complete ? "complete" : "running" }} reasoning={reasoning} /></I18nProvider>;
   const { rerender } = render(view(false));
+  const toggle = screen.getByRole("button", { name: "處理過程" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(toggle);
   expect(screen.getByRole("region", { name: "模型提供的推理說明" })).toBeVisible();
   expect(screen.getByText(reasoning[0].text)).toBeVisible();
   expect(screen.getByText(/並非已驗證答案/)).toBeVisible();

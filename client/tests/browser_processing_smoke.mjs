@@ -153,8 +153,11 @@ try {
       await page.locator('textarea').fill('請說明一般法律資訊');
       await page.getByRole('button', { name: '傳送訊息', exact: true }).click();
       const toggle = page.getByRole('button', { name: /^(處理過程|分析摘要與依據)$/ }).first();
-      await page.getByText('正在等待模型回應', { exact: true }).waitFor();
+      await page.getByText('處理中', { exact: true }).waitFor();
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+      await toggle.click();
       assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+      await page.getByText('正在等待模型回應', { exact: true }).waitFor();
       await page.getByText('理解你的情況', { exact: true }).waitFor();
       await screenshotPanel(page, `${viewport}-waiting.png`);
       const beforeCollapse = await page.getByRole('list', { name: '分析摘要' }).getByRole('listitem').count();

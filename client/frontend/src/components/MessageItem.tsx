@@ -94,7 +94,6 @@ const getSourceStyle = (type: RagSourceType) => {
 
 export default function MessageItem({ message, streamingStatus, showEmotions = false, showReasoning = false, onOpenSummary }: MessageItemProps) {
   const { t } = useI18n();
-  const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
   const isUser = message.role === "user";
   const isError = message.isError;
   const isCancelled = message.isCancelled;
@@ -107,6 +106,12 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
     ? message.replyContext.answers.filter((item) => item && typeof item.question === "string"
       && item.question.trim() && typeof item.answer === "string" && item.answer.trim())
     : [];
+  const hasRetrieval = Boolean(
+    message.ragUsed?.retrieval &&
+    ["ok", "empty", "failed"].includes(message.ragUsed.retrieval.status) &&
+    message.ragUsed.retrieval.data_types.length > 0
+  );
+  const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
   const sourceGroups = React.useMemo(() => {
     const sources = message.ragUsed?.sources ?? [];
     const groups = new Map<RagSourceType, RagSource[]>();
@@ -265,36 +270,39 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
           </details>
         )}
         {/* 底部標示列 */}
-        {isCompleteAssistant && (message.ragUsed?.status || (message.ragUsed?.retrieval && ["ok", "empty", "failed"].includes(message.ragUsed.retrieval.status)) || message.anonymized || resourceActions.length > 0) && (
+        {isCompleteAssistant && (hasRetrieval || (message.ragUsed?.status && sourceGroups.length > 0) || message.anonymized || resourceActions.length > 0) && (
           <div className="mt-4 space-y-3 border-t border-outline/10 pt-4">
-            <RetrievalSources retrieval={message.ragUsed?.retrieval} />
-            {message.ragUsed?.status && sourceGroups.length > 0 && (
-              <div className="min-w-0 space-y-2">
-                <p className="text-xs font-semibold text-on-surface/65">{sourceLabel}</p>
-                <div className="flex flex-wrap items-center gap-2">
-                {sourceGroups.map(({ type, sources }) => {
-                  const style = getSourceStyle(type);
-                  const isActive = activeSourceType === type;
-                  return (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setActiveSourceType(isActive ? null : type)}
-                      className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${style.className}`}
-                      aria-expanded={isActive}
-                      aria-label={`${sourceLabel}：${getSourceTypeLabel(type)}`}
-                    >
-                      <MaterialIcon icon={style.icon} size={14} />
-                      <span>{getSourceTypeLabel(type)}</span>
-                      <span className="tabular-nums opacity-70">{sources.length}</span>
-                    </button>
-                  );
-                })}
+            {hasRetrieval ? (
+              <RetrievalSources retrieval={message.ragUsed?.retrieval} />
+            ) : (
+              message.ragUsed?.status && sourceGroups.length > 0 && (
+                <div className="min-w-0 space-y-2">
+                  <p className="text-xs font-semibold text-on-surface/65">{sourceLabel}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                  {sourceGroups.map(({ type, sources }) => {
+                    const style = getSourceStyle(type);
+                    const isActive = activeSourceType === type;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setActiveSourceType(isActive ? null : type)}
+                        className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${style.className}`}
+                        aria-expanded={isActive}
+                        aria-label={`${sourceLabel}：${getSourceTypeLabel(type)}`}
+                      >
+                        <MaterialIcon icon={style.icon} size={14} />
+                        <span>{getSourceTypeLabel(type)}</span>
+                        <span className="tabular-nums opacity-70">{sources.length}</span>
+                      </button>
+                    );
+                  })}
+                  </div>
                 </div>
-              </div>
+              )
             )}
             {resourceActions.length > 0 && <ActionButtons actions={resourceActions} />}
-            {message.ragUsed?.status && activeSourceGroup && (
+            {!hasRetrieval && message.ragUsed?.status && activeSourceGroup && (
               <div className="min-w-0 overflow-hidden rounded-lg border border-outline/15 bg-surface-container-low text-xs text-on-surface">
                 <div className="flex items-center gap-2 border-b border-outline/10 px-3 py-2 font-semibold">
                   <MaterialIcon icon={getSourceStyle(activeSourceGroup.type).icon} size={15} />

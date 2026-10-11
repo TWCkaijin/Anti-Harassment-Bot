@@ -11,19 +11,26 @@ export default function RetrievalSources({ retrieval }: { retrieval?: RagInfo["r
     <div className="flex flex-wrap items-start gap-2">
       {retrieval.data_types.map(type => {
         const sources = retrieval.sources.filter(source => typeof source === "string" ? type === "law" : source.type === type);
-        return <details key={type} className="min-w-0 max-w-full rounded-xl border border-primary/15 bg-primary/5 text-xs">
-          <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2 font-semibold text-primary">
+        return <details key={type} className="group min-w-0 max-w-full rounded-xl border border-primary/15 bg-primary/5 text-xs">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 font-semibold text-primary [&::-webkit-details-marker]:hidden">
             <MaterialIcon icon={type === "law" ? "menu_book" : type === "judgment" ? "gavel" : "support_agent"} size={14} />
             <span>{t.retrievalCompleted}{labels[type]}</span>
             <span className="tabular-nums opacity-70">{sources.length}</span>
-            <MaterialIcon icon="expand_more" size={14} />
+            <span className="transition-transform duration-200 group-open:rotate-180">
+              <MaterialIcon icon="expand_more" size={14} />
+            </span>
           </summary>
           {sources.length ? <ul className="max-h-52 space-y-2 overflow-y-auto border-t border-primary/10 p-3">
-            {sources.map((source, index) => <li key={index} className="break-words leading-relaxed">
-              <span>{typeof source === "string" ? source : source.label}</span>
+            {sources.map((source, index) => <li key={index} className="break-words leading-relaxed rounded-md bg-white p-2.5 shadow-xs border border-primary/10">
+              <span className="font-semibold text-on-surface">{typeof source === "string" ? source : source.label}</span>
               {typeof source !== "string" && <>
-                {source.article && <p className="mt-1 whitespace-pre-wrap">{source.article}</p>}
-                {source.source_url && /^https?:\/\//i.test(source.source_url) && <a href={source.source_url} target="_blank" rel="noreferrer" className="ml-2 text-primary underline">{t.answerBasis}</a>}
+                {source.article && <p className="mt-1 whitespace-pre-wrap text-on-surface/80">{source.article}</p>}
+                {source.version && <p className="mt-1 text-[11px] text-on-surface/60">{source.version}</p>}
+                {typeof source.promulgated_date === "string" && <p className="mt-1 text-[11px] text-on-surface/60">{t.sourcePromulgatedDate}：{source.promulgated_date}</p>}
+                {typeof source.effective_date === "string" && <p className="mt-1 text-[11px] text-on-surface/60">{t.sourceEffectiveDate}：{source.effective_date}</p>}
+                {typeof source.checked_at === "string" && <p className="mt-1 text-[11px] text-on-surface/60">{t.sourceCheckedAt}：{source.checked_at}</p>}
+                {typeof source.effective_note === "string" && <p className="mt-1 text-[11px] text-on-surface/60">{source.effective_note}</p>}
+                {source.source_url && /^https?:\/\//i.test(source.source_url) && <a href={source.source_url} target="_blank" rel="noreferrer" className="mt-1 inline-block text-primary underline">{t.answerBasis}</a>}
               </>}
             </li>)}
           </ul> : <p className="border-t border-primary/10 p-3 text-on-surface/65">{t.retrievalEmpty}</p>}
