@@ -125,3 +125,24 @@ it("returns a v4 freeform question's signed revision without a legacy fact key",
   fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
   expect(send.mock.calls[0][1].clarificationAnswer).toEqual({ question_id: "open.2", context_revision: 2, status: "provided", value: ["校外"], selection_mode: "multiple", max_selections: 2, validation_token: "signed-v4" });
 });
+
+it("submits when pressing Enter in the 自行補充 input, but not during IME composition", () => {
+  const send = vi.fn();
+  render(<I18nProvider><TypedClarification clarification={question} revision={2} isLoading={false} onSend={send} onHide={vi.fn()} /></I18nProvider>);
+  fireEvent.click(screen.getByRole("radio", { name: "自行補充" }));
+  const input = screen.getByRole("textbox", { name: "自行補充" });
+  fireEvent.change(input, { target: { value: "外部合作夥伴" } });
+
+  // During IME composition (e.g. selecting Chinese characters)
+  fireEvent.keyDown(input, { key: "Enter", keyCode: 229, isComposing: true });
+  expect(send).not.toHaveBeenCalled();
+
+  // Plain Enter
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(send).toHaveBeenCalledWith(
+    expect.stringContaining("外部合作夥伴"),
+    expect.objectContaining({
+      clarificationAnswer: expect.objectContaining({ status: "provided", value: "外部合作夥伴" }),
+    })
+  );
+});

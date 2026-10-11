@@ -27,6 +27,28 @@ it("shows actual searched collections and uncited results without inventing cita
   expect(screen.getByText("合成條文")).toBeVisible();
 });
 
+it("renders only one knowledge base tag row even when both retrieval and cited sources exist", () => {
+  renderMessage({
+    ...base, role: "assistant", contractVersion: 4, content: "回答內容",
+    ragUsed: {
+      status: true,
+      sources: [{ type: "law", label: "性騷擾防治法第2條" }],
+      retrieval: {
+        status: "ok",
+        data_types: ["law", "remedy"],
+        sources: [
+          { type: "law", label: "性騷擾防治法第2條" },
+          { type: "remedy", label: "通報管道指引" },
+        ],
+      },
+    },
+  });
+  expect(screen.getByText("已檢索法律知識庫")).toBeVisible();
+  expect(screen.getByText("已檢索救濟管道")).toBeVisible();
+  expect(screen.queryByText("本次引用來源")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "本次引用來源：法律條文" })).not.toBeInTheDocument();
+});
+
 it.each(["failed", "empty", "not_requested", "disabled"] as const)("reports retrieval %s accurately", status => {
   renderMessage({ ...base, role: "assistant", contractVersion: 4, content: "一般方向", ragUsed: { status: false, sources: [], retrieval: { status, data_types: status === "disabled" || status === "not_requested" ? [] : ["law"], sources: [] } } });
   if (status === "empty") {
@@ -119,6 +141,9 @@ describe("MessageItem streaming state", () => {
     }} /></I18nProvider>);
     const toggle = screen.getByRole("button", { name: "處理過程" });
     expect(screen.getByText("部分答案").compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("正在接收回覆內容")).toBeVisible();
     expect(screen.queryByText("舊進度文字")).not.toBeInTheDocument();
     expect(screen.getAllByRole("status")).toHaveLength(1);
@@ -144,6 +169,8 @@ describe("MessageItem streaming state", () => {
     };
     const { rerender } = renderMessage(message);
     const toggle = screen.getByRole("button", { name: "處理過程" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("正在等待模型回應")).toBeVisible();
     const panelId = toggle.getAttribute("aria-controls");
@@ -178,6 +205,9 @@ describe("MessageItem streaming state", () => {
     expect(warning.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "分析摘要與依據" })).toEqual([toggle]);
     expect(screen.getByRole("status")).toHaveTextContent(outcome === "error" ? "處理中斷" : "已停止");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("合成分析資訊")).toBeVisible();
   });
 });
@@ -203,7 +233,7 @@ describe("MessageItem Markdown and analysis ordering", () => {
     for (const label of labels) expect(within(list).getByText(label).tagName).toBe("STRONG");
     const streamedMarkup = markdown().innerHTML;
     const toggle = screen.getByRole("button", { name: "處理過程" });
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
     rerender(<I18nProvider><MessageItem message={{ ...message, content, isStreaming: false, processingTrace: { ...message.processingTrace!, outcome: "complete" } }} /></I18nProvider>);
     expect(markdown().innerHTML).toBe(streamedMarkup);
     expect(screen.getByRole("button", { name: "處理過程" })).toBe(toggle);

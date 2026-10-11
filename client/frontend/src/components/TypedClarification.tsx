@@ -43,6 +43,13 @@ export default function TypedClarification({ clarification, revision, isLoading,
     } }), () => {}, () => setSent(false)); }
     catch { setSent(false); }
   };
+  const handleOtherKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent?.isComposing || (event as unknown as { isComposing?: boolean }).isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submit();
+    }
+  };
   return <section className="my-3 overflow-hidden rounded-2xl border border-primary/20 bg-white shadow-sm" aria-label={t.clarificationTitle}>
     <div className="flex items-center justify-between gap-3 border-b border-primary/10 px-4 py-2">
       <p className="min-w-0 text-xs leading-relaxed text-on-surface/65">{t.clarificationTitle}</p>
@@ -57,7 +64,18 @@ export default function TypedClarification({ clarification, revision, isLoading,
         {choices.map(option => <label key={option.value} className={`flex min-h-11 min-w-0 items-center gap-2 rounded-xl border px-3 py-2 leading-5 transition-colors ${checked(option.value) ? "border-primary/40 bg-primary/5" : "border-outline/15 hover:bg-surface-container-low"} ${isLoading || sent ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
           <input className="h-4 w-4 shrink-0 accent-primary" type={multiple ? "checkbox" : "radio"} name={clarification.question_id} checked={checked(option.value)} disabled={multiple && !checked(option.value) && !["unknown", "declined"].includes(option.value) && selectedValues.length + Number(draft.includeOther) >= maximum} onChange={() => choose(option.value)} /><span className="min-w-0 break-words">{option.label}</span>
         </label>)}
-        {draft.includeOther && <input autoFocus aria-label={t.clarificationOther} value={draft.other} maxLength={MAX_FACT_VALUE_LENGTH} onChange={event => updateDraft({ ...draft, other: event.target.value })} className="min-h-11 w-full min-w-0 rounded-lg border border-outline/20 p-2 min-[360px]:col-span-2" />}
+        {draft.includeOther && (
+          <input
+            autoFocus
+            aria-label={t.clarificationOther}
+            placeholder="請輸入補充內容…"
+            value={draft.other}
+            maxLength={MAX_FACT_VALUE_LENGTH}
+            onChange={event => updateDraft({ ...draft, other: event.target.value })}
+            onKeyDown={handleOtherKeyDown}
+            className="min-h-11 w-full min-w-0 rounded-lg border border-outline/20 p-2 min-[360px]:col-span-2 focus:border-primary/40 focus:outline-2 focus:outline-primary/20"
+          />
+        )}
       </div>
     </fieldset>
     </div>
