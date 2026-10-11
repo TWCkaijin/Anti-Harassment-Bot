@@ -77,3 +77,41 @@ def test_lookup_is_exact_and_stale_references_cannot_delete_replacement():
 def test_lookup_rejects_invalid_keys_before_storage_access(key):
     with pytest.raises(ValueError, match="Invalid immutable object key"):
         ObjectStore(Bucket()).lookup_reference(key)
+
+
+def test_storage_reuses_firebase_credentials_instead_of_unrelated_adc(monkeypatch):
+    from types import SimpleNamespace
+
+    from google.cloud import storage
+
+    from admin_app import infrastructure
+    from rag_core import firestore_clients
+
+    credential = object()
+    observed = {}
+    bucket = Bucket()
+
+    def client(**kwargs):
+        observed.update(kwargs)
+        return SimpleNamespace(bucket=lambda name: bucket)
+
+    monkeypatch.setattr(storage, "Client", client)
+    monkeypatch.setattr(firestore_clients, "initialize_firebase", lambda: None)
+    monkeypatch.setattr(
+        infrastructure.firebase_admin,
+        "get_app",
+        lambda: SimpleNamespace(credential=SimpleNamespace(get_credential=lambda: credential)),
+    )
+    monkeypatch.setattr(
+        infrastructure,
+        "get_admin_settings",
+        lambda: SimpleNamespace(
+            google_cloud_project="fixture-project", admin_storage_bucket=bucket.name
+        ),
+    )
+    infrastructure.object_store.cache_clear()
+    try:
+        assert infrastructure.object_store().bucket is bucket
+        assert observed == {"project": "fixture-project", "credentials": credential}
+    finally:
+        infrastructure.object_store.cache_clear()

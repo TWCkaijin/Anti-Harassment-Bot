@@ -94,6 +94,12 @@ def object_store() -> ObjectStore:
     config = get_admin_settings()
     if not config.admin_storage_bucket:
         raise RuntimeError("Admin object storage is not configured")
+    from rag_core.firestore_clients import initialize_firebase
+
+    initialize_firebase()
     return ObjectStore(
-        storage.Client(project=config.google_cloud_project).bucket(config.admin_storage_bucket)
+        storage.Client(
+            project=config.google_cloud_project,
+            credentials=firebase_admin.get_app().credential.get_credential(),
+        ).bucket(config.admin_storage_bucket)
     )

@@ -56,12 +56,17 @@ class Collection:
         self.db, self.path = db, path
         self.maximum, self.after = None, None
         self.filter = None
+        self.fields = None
 
     def document(self, name):
         return Reference(self.db, f"{self.path}/{name}")
 
     def order_by(self, field):
         assert field == "__name__"
+        return self
+
+    def select(self, fields):
+        self.fields = fields
         return self
 
     def where(self, *, filter):
@@ -88,7 +93,12 @@ class Collection:
                     if value != self.filter.value:
                         continue
                 if self.after is None or ref.id > self.after:
-                    records.append(ref.get())
+                    snapshot = ref.get()
+                    if self.fields is not None:
+                        snapshot.data = {
+                            key: value for key, value in snapshot.data.items() if key in self.fields
+                        }
+                    records.append(snapshot)
         return iter(records[: self.maximum] if self.maximum is not None else records)
 
 

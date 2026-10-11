@@ -5,7 +5,9 @@ import hmac
 import re
 import secrets
 import uuid
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 from urllib.parse import urlsplit
 
 from flask import Blueprint, g, jsonify, request
@@ -21,6 +23,12 @@ COOKIE_NAME = "__session"
 SESSION_COLLECTION = "admin_sessions"
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{40,100}$")
 logger = get_logger(__name__)
+# Cache rate-budget reservations only; authorization always reads Firestore.
+_read_budgets = OrderedDict()
+_read_budget_lock = Lock()
+_READ_RESERVATION = 8
+_MAX_READ_BUDGETS = 1024
+_SESSION_TOUCH_SECONDS = 30
 _GOOGLE_HTTP_STATUSES = {400, 401, 403, 404, 409, 412, 429, 499, 500, 501, 503, 504}
 _TRACE_FIELDS = {
     "logging.googleapis.com/trace",
@@ -155,23 +163,39 @@ def consume_limits(*, login=False, session_id=None) -> bool:
         for key, limit in limits
     ]
 
-    def update(transaction):
+    def update(transaction, amount=1):
         rows = [
             (ref, limit, ref.get(transaction=transaction).to_dict() or {}) for ref, limit in refs
         ]
         if any(row.get("count", 0) >= limit for _, limit, row in rows):
-            return False
+            return 0
+        granted = min(amount, *(limit - row.get("count", 0) for _, limit, row in rows))
         for ref, _, row in rows:
             transaction.set(
                 ref,
                 {
-                    "count": row.get("count", 0) + 1,
+                    "count": row.get("count", 0) + granted,
                     "expires_at": current + timedelta(seconds=window * 2),
                 },
             )
-        return True
+        return granted
 
-    return infrastructure.atomic(update)
+    if not login and request.method in {"GET", "HEAD"}:
+        # Reserve a small, globally counted budget, then serve it locally. Lost
+        # reservations can reduce availability but can never exceed the limit.
+        # Serialize refills within a process to avoid a burst of transactions.
+        key = (db, config.environment, session_id, epoch, config.admin_read_limit)
+        with _read_budget_lock:
+            remaining = _read_budgets.pop(key, 0)
+            if not remaining:
+                remaining = infrastructure.atomic(lambda tx: update(tx, _READ_RESERVATION))
+            if not remaining:
+                return False
+            _read_budgets[key] = remaining - 1
+            while len(_read_budgets) > _MAX_READ_BUDGETS:
+                _read_budgets.popitem(last=False)
+            return True
+    return bool(infrastructure.atomic(update))
 
 
 def _public_session(session):
@@ -188,27 +212,47 @@ def authenticate_session():
     if not TOKEN_RE.fullmatch(token):
         return None
     session_id = digest(token)
-    ref = infrastructure.private_db().collection(SESSION_COLLECTION).document(session_id)
+    db = infrastructure.private_db()
+    ref = db.collection(SESSION_COLLECTION).document(session_id)
+    credentials = credential_ref()
     current = now()
     config = get_admin_settings()
 
-    def verify(transaction):
-        session = ref.get(transaction=transaction).to_dict()
-        credential = credential_ref().get(transaction=transaction).to_dict()
+    def valid(session, credential):
         if not session or not credential or not credential.get("enabled") or session.get("revoked"):
-            return None
+            return False
         if session.get("environment") != config.environment or session.get(
             "auth_version"
         ) != credential.get("auth_version"):
-            return None
-        if current >= session["expires_at"] or current - session["last_seen_at"] >= timedelta(
+            return False
+        return current < session["expires_at"] and current - session["last_seen_at"] < timedelta(
             seconds=config.admin_idle_seconds
-        ):
-            return None
-        transaction.update(ref, {"last_seen_at": current})
-        return {**session, "session_id": session_id}
+        )
 
-    return infrastructure.atomic(verify)
+    # BatchGet does not guarantee response order. No read/write transaction is
+    # needed for the common case, and no authorization state is cached locally.
+    rows = {
+        snapshot.reference.path: snapshot.to_dict() for snapshot in db.get_all([ref, credentials])
+    }
+    session, credential = rows.get(ref.path), rows.get(credentials.path)
+    if not valid(session, credential):
+        return None
+    touch_interval = timedelta(seconds=min(_SESSION_TOUCH_SECONDS, config.admin_idle_seconds / 2))
+    if current - session["last_seen_at"] >= touch_interval:
+
+        def touch(transaction):
+            latest = ref.get(transaction=transaction).to_dict()
+            credential = credentials.get(transaction=transaction).to_dict()
+            if not valid(latest, credential):
+                return None
+            if current - latest["last_seen_at"] >= touch_interval:
+                transaction.update(ref, {"last_seen_at": current})
+            return latest
+
+        session = infrastructure.atomic(touch)
+        if session is None:
+            return None
+    return {**session, "session_id": session_id}
 
 
 def protect_admin_request():
