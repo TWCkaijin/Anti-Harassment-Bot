@@ -143,6 +143,9 @@ class FakeDB:
     def collection(self, name):
         return Collection(self, name)
 
+    def get_all(self, references):
+        return [ref.get() for ref in reversed(references)]
+
     def atomic(self, callback):
         with self.lock:
             transaction = Transaction()

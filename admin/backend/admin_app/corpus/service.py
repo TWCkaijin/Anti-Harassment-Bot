@@ -43,6 +43,20 @@ ASSETS = "corpus_source_assets"
 MAX_COMMIT_BYTES = 4 * 1024 * 1024
 MAX_PARSE_REVISIONS = 20
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,160}$")
+SOURCE_PUBLIC_FIELDS = (
+    "source_id",
+    "title",
+    "filename",
+    "kind",
+    "status",
+    "revision",
+    "chunk_count",
+    "original_available",
+    "created_at",
+    "deleted_at",
+    "legacy",
+    "operation_id",
+)
 
 
 def now():
@@ -70,10 +84,12 @@ def _cursor(scope, last_id):
     )
 
 
-def _page(collection, scope, limit, cursor):
+def _page(collection, scope, limit, cursor, fields=None):
     if not isinstance(limit, int) or not 1 <= limit <= 100:
         raise CorpusError("limit 必須介於 1 與 100", status=400)
     query = collection.order_by("__name__")
+    if fields is not None:
+        query = query.select(fields)
     if cursor:
         try:
             value = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
@@ -113,23 +129,7 @@ def record(snapshot, kind):
 
 
 def source_public(data):
-    return {
-        key: data.get(key)
-        for key in (
-            "source_id",
-            "title",
-            "filename",
-            "kind",
-            "status",
-            "revision",
-            "chunk_count",
-            "original_available",
-            "created_at",
-            "deleted_at",
-            "legacy",
-            "operation_id",
-        )
-    }
+    return {key: data.get(key) for key in SOURCE_PUBLIC_FIELDS}
 
 
 def import_summary(data):
@@ -192,7 +192,9 @@ class CorpusService:
         }
 
     def list_sources(self, limit=50, cursor=None):
-        snapshots, next_cursor = _page(self.business.collection(SOURCES), SOURCES, limit, cursor)
+        snapshots, next_cursor = _page(
+            self.business.collection(SOURCES), SOURCES, limit, cursor, fields=SOURCE_PUBLIC_FIELDS
+        )
         return {
             "items": [source_public(snapshot.to_dict()) for snapshot in snapshots],
             "next_cursor": next_cursor,

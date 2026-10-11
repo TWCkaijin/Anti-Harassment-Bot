@@ -168,3 +168,92 @@ def test_bootstrap_hash_is_argon2id_and_requires_explicit_reset(services):
     assert document["password_hash"].startswith("$argon2id$")
     with pytest.raises(ValueError, match="--reset"):
         configure_password("another-long-password")
+
+
+def test_read_burst_reuses_budget_but_checks_live_authorization(signed_in, services, monkeypatch):
+    from admin_app import infrastructure
+
+    client, _ = signed_in
+    db = services[0]
+    session_path = next(key for key in db.documents if key.startswith("admin_sessions/"))
+    before = dict(db.documents[session_path])
+    reads, transactions = [], []
+    get_all, atomic = db.get_all, db.atomic
+
+    def tracked_read(refs):
+        reads.append(1)
+        return get_all(refs)
+
+    def tracked_atomic(callback):
+        transactions.append(1)
+        return atomic(callback)
+
+    monkeypatch.setattr(db, "get_all", tracked_read)
+    monkeypatch.setattr(infrastructure, "atomic", tracked_atomic)
+    for _ in range(16):
+        assert client.get("/api/v1/admin/auth/session").status_code == 200
+    assert len(reads) == 16
+    assert len(transactions) == 2  # Two eight-request reservations, no session writes.
+    assert db.documents[session_path] == before
+    db.documents[session_path]["revoked"] = True
+    assert client.get("/api/v1/admin/auth/session").status_code == 401
+
+
+def test_heartbeat_is_throttled_and_never_revives_a_revoked_session(
+    signed_in, services, monkeypatch
+):
+    from admin_app import infrastructure
+
+    client, _ = signed_in
+    db = services[0]
+    path = next(key for key in db.documents if key.startswith("admin_sessions/"))
+    initial = db.documents[path]["last_seen_at"]
+    monkeypatch.setattr(auth, "now", lambda: initial + timedelta(seconds=31))
+    assert client.get("/api/v1/admin/auth/session").status_code == 200
+    assert db.documents[path]["last_seen_at"] == initial + timedelta(seconds=31)
+    monkeypatch.setattr(auth, "now", lambda: initial + timedelta(seconds=62))
+
+    def revoke_before_touch(callback):
+        db.documents[path]["revoked"] = True
+        return db.atomic(callback)
+
+    monkeypatch.setattr(infrastructure, "atomic", revoke_before_touch)
+    assert client.get("/api/v1/admin/auth/session").status_code == 401
+    assert db.documents[path]["last_seen_at"] == initial + timedelta(seconds=31)
+
+
+def test_read_reservations_preserve_limit_after_cache_loss_and_new_window(
+    signed_in, services, monkeypatch
+):
+    client, _ = signed_in
+    services[2].admin_read_limit = 10
+    current = auth.now()
+    monkeypatch.setattr(auth, "now", lambda: current)
+    assert client.get("/api/v1/admin/auth/session").status_code == 200  # reserves 8
+    auth._read_budgets.clear()  # A different instance cannot spend that unused reservation.
+    for _ in range(2):
+        assert client.get("/api/v1/admin/auth/session").status_code == 200
+    assert client.get("/api/v1/admin/auth/session").status_code == 429
+    monkeypatch.setattr(auth, "now", lambda: current + timedelta(seconds=60))
+    assert client.get("/api/v1/admin/auth/session").status_code == 200
+
+
+def test_concurrent_read_budget_never_exceeds_global_limit(app, services, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    services[2].admin_read_limit = 19
+    current = auth.now()
+    monkeypatch.setattr(auth, "now", lambda: current)
+
+    def read(_):
+        with app.test_request_context("/api/v1/admin/config", method="GET"):
+            return auth.consume_limits(session_id="parallel-fixture")
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        assert sum(pool.map(read, range(40))) == 19
+    rows = [
+        row
+        for path, row in services[0].documents.items()
+        if "request-read-parallel-fixture" in path
+    ]
+    assert len(rows) == 1 and rows[0]["count"] == 19

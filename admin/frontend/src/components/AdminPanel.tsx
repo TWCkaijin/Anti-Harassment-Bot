@@ -135,6 +135,8 @@ export default function AdminPanel({ session, onLogout }: AdminPanelProps) {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [skillsLoaded, setSkillsLoaded] = useState(false);
+  const [loadErrors, setLoadErrors] = useState<{ config?: string; skills?: string }>({});
   const [batchHasData, setBatchHasData] = useState(false);
   const [behaviorHasData, setBehaviorHasData] = useState(false);
 
@@ -172,22 +174,44 @@ export default function AdminPanel({ session, onLogout }: AdminPanelProps) {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([getRuntimeConfig(verifiedCsrf), getScenarioSkills(verifiedCsrf)])
-      .then(([nextConfig, skillResult]) => {
+    const failed = (section: "config" | "skills", err: unknown) => {
+      if (!active) return;
+      const detail = err instanceof ApiError
+        ? err.debugMessage ?? err.detail ?? err.message
+        : err instanceof Error ? err.message : "服務暫時無法使用";
+      setLoadErrors(current => ({ ...current, [section]: detail }));
+    };
+    void Promise.allSettled([
+      getRuntimeConfig(verifiedCsrf).then(nextConfig => {
         if (!active) return;
         applyConfig(nextConfig);
+      }, err => failed("config", err)),
+      getScenarioSkills(verifiedCsrf).then(skillResult => {
+        if (!active) return;
         setSkills(skillResult.skills);
         setSkillsRevision(skillResult.revision);
         setSelectedSkillId(skillResult.skills[0]?.id ?? null);
-        setStatus("已載入目前環境設定；儲存後 Client 最晚於快取期限內更新。");
-        setError("");
-      }).catch(err => { if (active) handleError(err, "讀取設定失敗"); })
-      .finally(() => { if (active) setIsLoading(false); });
+        setSkillsLoaded(true);
+      }, err => failed("skills", err)),
+    ]).then(() => {
+      if (active) {
+        setIsLoading(false);
+        setStatus("儲存後 Client 最晚於快取期限內更新。");
+      }
+    });
     return () => { active = false; };
   }, [verifiedCsrf, reloadVersion]);
 
+  const reloadSettings = () => {
+    if (runtimeDirty && !window.confirm("重新載入會捨棄尚未儲存的設定草稿，確定繼續？")) return;
+    setIsLoading(true);
+    setError("");
+    setLoadErrors({});
+    setReloadVersion(value => value + 1);
+  };
+
   const saveRuntime = async () => {
-    if (!verifiedCsrf) return;
+    if (!verifiedCsrf || !lastLoadedConfig || isLoading) return;
     setIsSaving(true);
     setError("");
     try {
@@ -201,7 +225,7 @@ export default function AdminPanel({ session, onLogout }: AdminPanelProps) {
   };
 
   const seedRuntime = async () => {
-    if (!verifiedCsrf) return;
+    if (!verifiedCsrf || !lastLoadedConfig || isLoading) return;
     setIsSaving(true);
     try {
       applyConfig(await seedRuntimeConfig(verifiedCsrf, lastLoadedConfig?.revision));
@@ -214,7 +238,7 @@ export default function AdminPanel({ session, onLogout }: AdminPanelProps) {
   };
 
   const resetRuntime = async () => {
-    if (!verifiedCsrf) return;
+    if (!verifiedCsrf || !lastLoadedConfig || isLoading) return;
     setIsSaving(true);
     try {
       applyConfig(await resetRuntimeConfig(verifiedCsrf, lastLoadedConfig?.revision));
@@ -239,7 +263,7 @@ export default function AdminPanel({ session, onLogout }: AdminPanelProps) {
   };
 
   const saveSkill = async () => {
-    if (!verifiedCsrf || !selectedSkill) return;
+    if (!verifiedCsrf || !selectedSkill || !skillsLoaded || isLoading) return;
     setIsSaving(true);
     try {
       await updateScenarioSkill(verifiedCsrf, selectedSkill.id, skillToInput(selectedSkill, skillsRevision));
@@ -255,7 +279,7 @@ export default function AdminPanel({ session, onLogout }: AdminPanelProps) {
   };
 
   const removeSkill = async () => {
-    if (!verifiedCsrf || !selectedSkill) return;
+    if (!verifiedCsrf || !selectedSkill || !skillsLoaded || isLoading) return;
     if (!window.confirm(`刪除「${selectedSkill.name}」？內建 Skill 會改為停用。`)) return;
     setIsSaving(true);
     try {
@@ -276,7 +300,7 @@ export default function AdminPanel({ session, onLogout }: AdminPanelProps) {
   };
 
   const seedSkill = async () => {
-    if (!verifiedCsrf) return;
+    if (!verifiedCsrf || !skillsLoaded || isLoading) return;
     setIsSaving(true);
     try {
       await seedScenarioScripts(verifiedCsrf, skillsRevision);
@@ -305,11 +329,12 @@ export default function AdminPanel({ session, onLogout }: AdminPanelProps) {
             <h2 className="flex items-center gap-2 text-lg font-bold text-on-surface"><MaterialIcon icon="admin_panel_settings" size={21} />管理後台</h2>
             <p className="mt-1 text-xs text-on-surface/50">{session.environment} · {config.environment_document_id ?? "設定載入中"} · {config.updated_at ?? "已登入"}</p>
           </div>
-          <div className="flex items-center gap-3"><button className="text-sm text-primary underline" onClick={() => { if (!runtimeDirty || window.confirm("重新載入會捨棄尚未儲存的設定草稿，確定繼續？")) setReloadVersion(value => value + 1); }}>重新載入設定</button><button onClick={close} className="rounded-lg p-2 hover:bg-surface-container" aria-label="登出">登出</button></div>
+          <div className="flex items-center gap-3"><button className="text-sm text-primary underline" onClick={reloadSettings}>重新載入設定</button><button onClick={close} className="rounded-lg p-2 hover:bg-surface-container" aria-label="登出">登出</button></div>
         </header>
 
         {isLoading && <p className="px-6 py-2 text-sm" role="status">載入環境設定…</p>}
-          {!isLoading && <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+          {Object.entries(loadErrors).map(([section, detail]) => <p key={section} role="alert" className="px-6 py-2 text-sm text-error">{section === "config" ? "Runtime／Prompt" : "Skills"} 載入失敗：{detail}。請按「重新載入設定」重試；已載入的資料與草稿仍保留。</p>)}
+          <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
             <nav className="flex w-full shrink-0 flex-col border-b border-outline/15 bg-surface-container-low p-3 sm:w-44 sm:border-r sm:border-b-0">
               <div className="w-full space-y-3">
                 {[{ title: "設定", items: tabs.slice(0, 3) }, { title: "驗證及測試", items: tabs.slice(3, 6) }, { title: "資料管理", items: tabs.slice(6) }].map((group, index) => <div key={group.title} role="group" aria-label={group.title} className={index ? "border-t border-outline/20 pt-3" : ""}>
@@ -323,19 +348,20 @@ export default function AdminPanel({ session, onLogout }: AdminPanelProps) {
               <div className="mt-auto hidden whitespace-pre-line border-t border-outline/10 pt-3 text-xs leading-5 text-on-surface/50 sm:block">{activeTab === "skills" ? "目前環境 Skills" : activeTab === "behavior" ? "本機紀錄與人工覆核\n離開前請下載 JSON" : activeTab === "batch" ? "檔案在本機讀取\n逐筆預測並下載副本" : activeTab === "test" ? `僅本次請求\n基準：${config.environment_document_id ?? "local fallback"}` : `目前環境\nruntime_config/${config.environment_document_id ?? "local fallback"}`}</div>
             </nav>
             <div className="min-w-0 flex-1 overflow-y-auto p-6">
+              {(["system", "prompts", "test"].includes(activeTab) && !lastLoadedConfig || activeTab === "skills" && !skillsLoaded) && <p className="text-sm text-on-surface/60">{isLoading ? "正在讀取目前環境資料…" : "尚未取得目前環境設定，請重新載入。"}</p>}
               {corpusVisited && <div hidden={activeTab !== "corpus"}><AdminCorpus csrfToken={verifiedCsrf} /></div>}
-              {activeTab === "system" && <SystemSettings csrfToken={verifiedCsrf} config={config} savedMaintenanceMessage={lastLoadedConfig?.maintenance_message} onChange={setConfig} />}
-              {activeTab === "prompts" && <PromptSettings config={config} onChange={setConfig} />}
-              {activeTab === "skills" && <SkillsSettings skills={skills} selectedSkill={selectedSkill} onSelect={setSelectedSkillId} onCreate={createSkill} onChange={updateSkill} />}
-              {activeTab === "test" && <AdminChatTest key={`${lastLoadedConfig?.environment_document_id}-${lastLoadedConfig?.updated_at}`} csrfToken={verifiedCsrf} config={lastLoadedConfig ?? config} />}
+              {activeTab === "system" && lastLoadedConfig && <SystemSettings csrfToken={verifiedCsrf} config={config} savedMaintenanceMessage={lastLoadedConfig?.maintenance_message} onChange={setConfig} />}
+              {activeTab === "prompts" && lastLoadedConfig && <PromptSettings config={config} onChange={setConfig} />}
+              {activeTab === "skills" && skillsLoaded && <SkillsSettings skills={skills} selectedSkill={selectedSkill} onSelect={setSelectedSkillId} onCreate={createSkill} onChange={updateSkill} />}
+              {activeTab === "test" && lastLoadedConfig && <AdminChatTest key={`${lastLoadedConfig?.environment_document_id}-${lastLoadedConfig?.updated_at}`} csrfToken={verifiedCsrf} config={lastLoadedConfig ?? config} />}
               <div hidden={activeTab !== "batch"}><AdminBatchPrediction csrfToken={verifiedCsrf} onHasDataChange={setBatchHasData} /></div>
               <div hidden={activeTab !== "behavior"}><AdminBehaviorTests csrfToken={verifiedCsrf} onHasDataChange={setBehaviorHasData} /></div>
             </div>
-          </div>}
+          </div>
 
           {!isLoading && activeTab !== "corpus" && activeTab !== "test" && activeTab !== "batch" && activeTab !== "behavior" && <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-outline/15 px-5 py-3">
           <p className={`text-xs ${error ? "text-error" : "text-on-surface/55"}`}>{error || status || (activeTab === "skills" ? "Skills 只作用於目前環境" : "Runtime 設定只會寫入目前環境")}</p>
-          {activeTab === "skills" ? <div className="flex flex-wrap gap-2"><button onClick={seedSkill} disabled={isSaving} className="rounded-lg border border-secondary/25 px-3 py-2 text-sm font-semibold text-secondary disabled:opacity-50">建立範例</button><button onClick={removeSkill} disabled={isSaving || !selectedSkill} className="rounded-lg border border-error/25 px-3 py-2 text-sm font-semibold text-error disabled:opacity-50">刪除</button><button onClick={saveSkill} disabled={isSaving || !selectedSkill} className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{isSaving ? "儲存中" : "儲存 Skill"}</button></div> : <div className="flex flex-wrap gap-2"><button onClick={seedRuntime} disabled={isSaving} className="rounded-lg px-3 py-2 text-sm font-semibold text-on-surface hover:bg-surface-container disabled:opacity-50">補齊設定</button><button onClick={resetRuntime} disabled={isSaving} className="rounded-lg border border-error/25 px-3 py-2 text-sm font-semibold text-error disabled:opacity-50">重置設定</button><button onClick={saveRuntime} disabled={isSaving || !runtimeDirty} className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{isSaving ? "儲存中" : runtimeDirty ? "儲存變更" : "已同步"}</button></div>}
+          {activeTab === "skills" ? <div className="flex flex-wrap gap-2"><button onClick={seedSkill} disabled={isSaving || !skillsLoaded} className="rounded-lg border border-secondary/25 px-3 py-2 text-sm font-semibold text-secondary disabled:opacity-50">建立範例</button><button onClick={removeSkill} disabled={isSaving || !skillsLoaded || !selectedSkill} className="rounded-lg border border-error/25 px-3 py-2 text-sm font-semibold text-error disabled:opacity-50">刪除</button><button onClick={saveSkill} disabled={isSaving || !skillsLoaded || !selectedSkill} className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{isSaving ? "儲存中" : "儲存 Skill"}</button></div> : <div className="flex flex-wrap gap-2"><button onClick={seedRuntime} disabled={isSaving || !lastLoadedConfig} className="rounded-lg px-3 py-2 text-sm font-semibold text-on-surface hover:bg-surface-container disabled:opacity-50">補齊設定</button><button onClick={resetRuntime} disabled={isSaving || !lastLoadedConfig} className="rounded-lg border border-error/25 px-3 py-2 text-sm font-semibold text-error disabled:opacity-50">重置設定</button><button onClick={saveRuntime} disabled={isSaving || !lastLoadedConfig || !runtimeDirty} className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{isSaving ? "儲存中" : runtimeDirty ? "儲存變更" : "已同步"}</button></div>}
         </footer>}
       </section>
     </>

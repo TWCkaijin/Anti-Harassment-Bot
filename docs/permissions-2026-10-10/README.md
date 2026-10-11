@@ -4,6 +4,8 @@
 
 本報告區分「雲端實際綁定」、「應用程式驗證」與「尚未切換的設計」。身分名稱省略 `@anti-harassment-bot.iam.gserviceaccount.com` 時，均指同專案服務帳號。IAM 原始資料僅保存在本機忽略目錄；本報告不包含密碼、Token、金鑰或 Secret payload。
 
+> **後續更新（2026-10-10 14:56 台灣時間）：** 已確認向量搜尋使用 Firestore；閒置 Cloud SQL 實例已停止並保留資料。停機後 6 組向量查詢與 4 個健康端點均通過。詳見 [Cloud SQL 相依追查與停機紀錄](CLOUD_SQL_AUDIT.md)。
+
 ## 1. 部署錯誤與修正
 
 原失敗工作：[Preview run 38021319103](https://github.com/TWCkaijin/Anti-Harassment-Bot/actions/runs/38021319103)，第 3 次執行、commit `65073092f3a5442fda8a38f110e2040ded378603`。WIF 驗證與三項 CI Gate 已通過，但 Admin Function 更新失敗。

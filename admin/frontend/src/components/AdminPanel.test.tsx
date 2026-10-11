@@ -373,3 +373,48 @@ it("groups models and workflow controls and preserves custom mask scope when tog
   fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
   await waitFor(() => expect(updateRuntimeConfig).toHaveBeenCalledWith("admin-token", expect.objectContaining({ rag_rerank_enabled: true, enable_anonymization: true, pipeline: expect.objectContaining({ mask_retrieval_query: false }) })));
 });
+
+it("keeps dev prompts when Skills loading fails and blocks Skills mutations", async () => {
+  vi.mocked(getRuntimeConfig).mockResolvedValue({ ...runtimeConfig, agent_prompt_sections: { core_mission: "DEV prompt fixture" } });
+  vi.mocked(getScenarioSkills).mockRejectedValue(new ApiError(503, "Skills unavailable"));
+  render(<AdminPanel session={session} onLogout={vi.fn()} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Skills 載入失敗");
+  fireEvent.click(screen.getByRole("button", { name: /Prompt 設定/ }));
+  expect(screen.getByDisplayValue("DEV prompt fixture")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: /Skills 設定/ }));
+  expect(screen.getByRole("button", { name: "建立範例" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "儲存 Skill" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "新增 Skill" })).not.toBeInTheDocument();
+});
+
+it("keeps Skills when runtime loading fails and recovers dev settings on reload", async () => {
+  vi.mocked(getRuntimeConfig).mockRejectedValueOnce(new ApiError(503, "Runtime unavailable"));
+  vi.mocked(getScenarioSkills).mockResolvedValue({ skills: [{
+    id: "dev_skill", name: "DEV skill fixture", enabled: true, priority: 1,
+    trigger_keywords: [], instruction: "DEV instruction", actions: [],
+  }] });
+  render(<AdminPanel session={session} onLogout={vi.fn()} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Runtime／Prompt 載入失敗");
+  expect(screen.queryByLabelText("OpenRouter Model")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "補齊設定" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "重置設定" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: /Skills 設定/ }));
+  expect(screen.getByLabelText("情境指令")).toHaveValue("DEV instruction");
+  fireEvent.click(screen.getByRole("button", { name: "重新載入設定" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: /系統設定/ }));
+  expect(await screen.findByLabelText("OpenRouter Model")).toHaveValue("test/model");
+  expect(updateRuntimeConfig).not.toHaveBeenCalled();
+});
+
+it("retains a loaded runtime draft when reloading that section fails", async () => {
+  render(<AdminPanel session={session} onLogout={vi.fn()} />);
+  const model = await screen.findByLabelText("OpenRouter Model");
+  fireEvent.change(model, { target: { value: "unsaved/draft" } });
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  vi.mocked(getRuntimeConfig).mockRejectedValueOnce(new ApiError(503, "Runtime unavailable"));
+  fireEvent.click(screen.getByRole("button", { name: "重新載入設定" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Runtime／Prompt 載入失敗");
+  expect(screen.getByLabelText("OpenRouter Model")).toHaveValue("unsaved/draft");
+  expect(updateRuntimeConfig).not.toHaveBeenCalled();
+});
