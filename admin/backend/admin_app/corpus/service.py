@@ -191,6 +191,16 @@ class CorpusService:
             "next_cursor": next_cursor,
         }
 
+    def get_record(self, kind, record_id):
+        snapshot = (
+            self.business.collection(collection_for_kind(kind))
+            .document(identifier(record_id))
+            .get()
+        )
+        if not snapshot.exists:
+            raise CorpusError("此片段已不存在，請重新整理列表", "not_found", 404)
+        return record(snapshot, kind)
+
     def list_sources(self, limit=50, cursor=None):
         snapshots, next_cursor = _page(
             self.business.collection(SOURCES), SOURCES, limit, cursor, fields=SOURCE_PUBLIC_FIELDS

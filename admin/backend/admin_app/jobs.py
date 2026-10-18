@@ -1,6 +1,6 @@
 """Durable, fenced jobs dispatched to this same HTTP function by Cloud Tasks.
 
-No work continues after an HTTP response. External calls are marked before they
+In deployed runtimes no work continues after an HTTP response. External calls are marked before they
 start; an abandoned call requires an explicit operator retry instead of silently
 charging the provider twice.
 """
@@ -75,6 +75,12 @@ def job_ref(job_id):
 
 
 def enqueue_job(job):
+    from admin_app.local_dispatch import current_dispatcher
+
+    local = current_dispatcher()
+    if local is not None:
+        local.enqueue(job)
+        return
     from google.api_core.exceptions import AlreadyExists
     from google.cloud import tasks_v2
     from google.protobuf.duration_pb2 import Duration
@@ -160,6 +166,8 @@ def _check_job_access(job):
 
 
 def submit_job(kind, payload, snapshot=None, idempotency_key=None):
+    from admin_app.local_dispatch import current_dispatcher
+
     if kind not in HANDLERS:
         raise JobFailure("unknown_job_kind", "Unsupported job type")
     if idempotency_key is not None and (
@@ -228,6 +236,9 @@ def submit_job(kind, payload, snapshot=None, idempotency_key=None):
         else "system",
         "owner_session_id": owner_session_id,
     }
+    local = current_dispatcher()
+    if local is not None:
+        job["local_dispatch_id"] = local.id
 
     def create(transaction):
         current_job = ref.get(transaction=transaction).to_dict()

@@ -15,7 +15,8 @@ export function parseReferenceAnswer(raw?: string): ReferenceAnswer {
   if (!parts.length || parts.some(part => !Object.hasOwn(aliases, part))) return { raw, laws: [], status: "invalid" };
   return { raw, laws: [...new Set(parts.map(part => aliases[part]))], status: "valid" };
 }
-export function evaluateLawRow(row: BatchRow) {
+export type ScorableLawRow = Pick<BatchRow, 'reference' | 'status' | 'laws'>;
+export function evaluateLawRow(row: ScorableLawRow) {
   const reference = row.reference ?? parseReferenceAnswer();
   const matches = row.status === "predicted" ? reference.laws.filter(law => row.laws.includes(law)) : [];
   const labels = { unselected: "未設定參考答案", missing: "參考答案空白", invalid: "參考答案無法識別" };
@@ -31,7 +32,7 @@ export interface BatchMetric { label: string; numerator: number; denominator: nu
 export function formatBatchRate(metric: BatchMetric): string {
   return metric.value === null ? "—" : `${(metric.value * 100).toFixed(2)}%`;
 }
-export function scoreLawBatch(rows: BatchRow[]) {
+export function scoreLawBatch(rows: ScorableLawRow[]) {
   const evaluated = rows.map(evaluateLawRow);
   const N = rows.length, R = evaluated.filter(row => row.reference.status === "valid").length;
   const A = rows.filter(row => row.status === "predicted" && row.laws.length > 0).length;

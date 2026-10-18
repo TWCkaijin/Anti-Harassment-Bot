@@ -720,6 +720,13 @@ def test_corpus_http_upload_preview_download_and_validation(system, queued, monk
     assert "attachment" in download.headers["Content-Disposition"]
     assert client.get("/corpus/records?kind=admin_credentials").status_code == 400
     assert client.get("/corpus/records?limit=oops").status_code == 400
+    chunk = client.get("/corpus/records?kind=law").json["items"][0]
+    detail = client.get(f"/corpus/records/{chunk['id']}?kind=law")
+    assert detail.status_code == 200 and detail.json["content"] == "hello"
+    assert detail.headers["Cache-Control"] == "no-store"
+    assert client.get("/corpus/records/missing?kind=law").status_code == 404
+    assert client.get(f"/corpus/records/{chunk['id']}?kind=admin_credentials").status_code == 400
+
     assert (
         client.post(f"/corpus/imports/{preview['import_id']}/confirm", json={}).status_code == 422
     )

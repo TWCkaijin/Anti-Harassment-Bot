@@ -70,6 +70,10 @@ def create_app(*, include_corpus=True):
         )
         return jsonify({"detail": "Admin service unavailable", "error_id": error_id}), 503
 
+    if get_admin_settings().admin_local_jobs:
+        from admin_app.local_dispatch import install
+
+        install(app)
     return app
 
 

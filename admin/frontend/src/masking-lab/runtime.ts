@@ -16,7 +16,10 @@ export class BrowserMaskingRuntime {
         if (!pending || message.id !== pending.id) return;
         if (message.kind === "progress") { pending.progress?.(message.progress, message.text); return; }
         clearTimeout(pending.timer); this.pending = null;
-        if (message.kind === "error") pending.reject(new MaskingError(message.code));
+        if (message.kind === "error") {
+          const failure = new MaskingError(message.code); failure.rounds = message.rounds ?? [];
+          pending.reject(failure);
+        }
         else pending.resolve(message);
       };
       this.worker.onerror = () => this.dispose("worker_failed");

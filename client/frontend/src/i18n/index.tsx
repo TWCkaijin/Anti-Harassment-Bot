@@ -48,13 +48,14 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 
 // ── Provider ──
 
-export function I18nProvider({ children }: { children: ReactNode }) {
+export function I18nProvider({ children, manageDocument = true }: { children: ReactNode; manageDocument?: boolean }) {
   const [locale, setLocaleState] = useState<Locale>(getInitialLocale);
 
   useEffect(() => {
+    if (!manageDocument) return;
     document.title = `${locales[locale].appTitle}｜${locales[locale].appSubtitle}`;
     document.documentElement.lang = locale;
-  }, [locale]);
+  }, [locale, manageDocument]);
 
   const setLocale = useCallback((newLocale: Locale) => {
     setLocaleState(newLocale);

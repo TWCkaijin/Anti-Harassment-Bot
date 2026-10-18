@@ -1,6 +1,2 @@
-import { createRoot } from "react-dom/client";
-import ValidationPage from "./ValidationPage";
-import App from "../App";
-import "../index.css";
-
-createRoot(document.getElementById("root")!).render(<App><ValidationPage /></App>);
+// The legacy entry shares the existing Admin session and integrated navigation.
+window.location.replace("/#masking");

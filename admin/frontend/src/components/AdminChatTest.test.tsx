@@ -1,291 +1,164 @@
-import { RETRIEVAL_DEFAULTS } from "../services/retrievalSettings";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminChatTest from "./AdminChatTest";
-import { runAdminApplicableLawTest, runAdminChatTest, type AdminApplicableLawTestResult, type AdminChatTestResult, type ApplicableLawName, type ChatRequest, type RuntimeConfig } from "../services/api";
+import { getRerankModels, runAdminApplicableLawTest, runAdminChatTest, updateRuntimeConfig, type AdminApplicableLawTestResult, type AdminChatTestResult, type ChatRequest, type RuntimeConfig } from "../services/api";
 import { DEFAULT_PIPELINE } from "../services/pipeline";
 import { preparePrivateRequest } from "../services/privateRequest";
-vi.mock("../services/api", async () => ({ ...await vi.importActual<typeof import("../services/api")>("../services/api"), runAdminChatTest: vi.fn(), runAdminApplicableLawTest: vi.fn() }));
+
+vi.mock("../services/api", async () => ({ ...await vi.importActual<typeof import("../services/api")>("../services/api"), getRerankModels: vi.fn(), runAdminChatTest: vi.fn(), runAdminApplicableLawTest: vi.fn(), updateRuntimeConfig: vi.fn() }));
 vi.mock("../services/privateRequest", () => ({ preparePrivateRequest: vi.fn() }));
-const config: RuntimeConfig = { openrouter_model: "synthetic/model", rag_retrieval_top_k: 3, rag_distance_threshold: 0.7, enable_anonymization: true, temperature: 0.2, top_p: 0.9, max_tokens: 1200, reasoning_effort: "low", agent_prompt_sections: { role: "synthetic prompt" }, rag_collections: { law: "laws", judgment: "judgments", remedy: "remedies" }, maintenance_message: "", enable_image_upload: true, development_mode: false, source: "firestore", pipeline: DEFAULT_PIPELINE };
-const testResult = (id: number, masking = true): AdminChatTestResult => ({ response: { reply: `合成回答 ${id}`, session_id: "test", anonymized: masking, rag_used: { status: false, sources: [] }, suggested_replies: [], action_buttons: [], interaction_mode: "answer", clarifying_questions: [] }, diagnostics: { effective_config: { ...config, enable_anonymization: masking, updated_by: "admin-metadata" }, pii: { message: { changed_values: masking ? 1 : 0 } }, input_stages: { summary: { before: "原始摘要", after: masking ? "遮罩摘要" : "原始摘要", changed: masking } }, history: { removed_messages: 0 }, retrieval: { sources: [] }, rewrites: [] } });
-const lawResult = (laws: ApplicableLawName[] = ["性騷法", "性工法"], status: AdminApplicableLawTestResult["prediction"]["decision_status"] = "predicted", masking = true): AdminApplicableLawTestResult => ({ output_contract: "applicable_laws_v1", prediction: { predicted_laws: laws, decision_status: status, decision_reason: status === "predicted" ? null : "缺少當事人關係或適用情境。" }, diagnostics: testResult(0, masking).diagnostics });
+const config: RuntimeConfig = { openrouter_model: "synthetic/model", rag_retrieval_top_k: 3, rag_distance_threshold: 0.7, enable_anonymization: true, temperature: 0.2, top_p: 0.9, max_tokens: 1200, reasoning_effort: "low", agent_prompt_sections: { core_mission: "synthetic prompt" }, rag_collections: { law: "laws", judgment: "judgments", remedy: "remedies" }, maintenance_message: "", enable_image_upload: true, development_mode: false, source: "firestore", pipeline: DEFAULT_PIPELINE, environment_document_id: "app_dev" };
+const result = (request?: ChatRequest, reply = "合成回答", extra: Partial<AdminChatTestResult["response"]> = {}): AdminChatTestResult => ({ response: { reply, session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, suggested_replies: [], action_buttons: [], interaction_mode: "answer", clarifying_questions: [], contract_version: 4, context_revision: request?.case_context?.revision ?? 0, summary_update: null, clarification: null, ...extra }, diagnostics: { effective_config: { ...config, maintenance_message: null, updated_by: "metadata" }, pii: { masked: true } } });
+const lawResult = (status: AdminApplicableLawTestResult["prediction"]["decision_status"] = "predicted"): AdminApplicableLawTestResult => ({ output_contract: "applicable_laws_v1", prediction: { predicted_laws: status === "predicted" ? ["性工法", "性騷法"] : [], decision_status: status, decision_reason: status === "predicted" ? null : "合成原因" }, diagnostics: { effective_config: config } });
+const timeline = () => within(screen.getByLabelText("診斷對話訊息"));
+const send = (text = "合成情境") => { fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: text } }); fireEvent.click(screen.getByRole("button", { name: "傳送訊息" })); };
+const diagnostics = () => fireEvent.click(screen.getByRole("tab", { name: /診斷結果/ }));
+const editSummary = () => { fireEvent.click(screen.getByRole("button", { name: "顯示及更改摘要" })); fireEvent.click(screen.getByRole("button", { name: "修改摘要" })); };
+
 beforeEach(() => {
-  vi.mocked(runAdminChatTest).mockReset();
-  vi.mocked(runAdminApplicableLawTest).mockReset();
+  vi.mocked(getRerankModels).mockReset().mockResolvedValue({ data: [] });
+  vi.mocked(runAdminChatTest).mockReset().mockImplementation(async (_token, request) => result(request));
+  vi.mocked(runAdminApplicableLawTest).mockReset().mockResolvedValue(lawResult());
   vi.mocked(preparePrivateRequest).mockReset().mockImplementation(async request => request);
-  localStorage.clear();
+  vi.mocked(updateRuntimeConfig).mockReset();
+  localStorage.clear(); sessionStorage.clear();
 });
+afterEach(() => vi.restoreAllMocks());
 
-describe("admin PII comparison", () => {
-  it("accepts the runtime public_dict null maintenance message and normalizes it for comparison", async () => {
-    const first = testResult(1);
-    first.diagnostics.effective_config = { ...config, maintenance_message: null, environment_document_id: "synthetic-runtime", updated_at: null, updated_by: null };
-    vi.mocked(runAdminChatTest).mockResolvedValueOnce(first).mockResolvedValueOnce(testResult(2, false));
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    expect(screen.getByRole("combobox", { name: "測試模式" })).toHaveValue("chat");
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成情境" } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("合成回答 1");
-    const compare = screen.getByRole("button", { name: "只切換後端 PII 再測一次" });
-    expect(compare).toBeEnabled();
-    fireEvent.click(compare);
-    await screen.findByText("合成回答 2");
-    const requests = vi.mocked(runAdminChatTest).mock.calls;
-    expect(requests[1][1]).toBe(requests[0][1]);
-    expect(requests[1][2]).toMatchObject({ maintenance_message: "", enable_anonymization: false, pipeline: DEFAULT_PIPELINE });
-    expect(requests[1][2]).not.toHaveProperty("updated_at");
+describe("diagnostic conversation parity", () => {
+  it("sends successive turns with history and frozen temporary settings without saving them", async () => {
+    render(<AdminChatTest csrfToken="csrf" config={config} />);
+    fireEvent.change(screen.getByLabelText("本次模型"), { target: { value: "temporary/model" } });
+    send("第一個情境");
+    await timeline().findByText("合成回答");
+    send("接著補充");
+    await waitFor(() => expect(runAdminChatTest).toHaveBeenCalledTimes(2));
+    const [token, request, overrides] = vi.mocked(runAdminChatTest).mock.calls[1];
+    expect(token).toBe("csrf");
+    expect(request.history).toEqual([{ role: "user", content: "第一個情境" }, { role: "assistant", content: "合成回答" }]);
+    expect(overrides).toMatchObject({ openrouter_model: "temporary/model", pipeline: DEFAULT_PIPELINE });
+    expect(overrides).not.toHaveProperty("revision");
+    expect(updateRuntimeConfig).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
   });
-
-  it("reuses frozen inputs and every writable effective setting while only flipping PII, and retains two runs", async () => {
-    vi.mocked(runAdminChatTest).mockResolvedValueOnce(testResult(1)).mockResolvedValueOnce(testResult(2, false)).mockResolvedValueOnce(testResult(3));
-    const { unmount } = render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成原始訊息" } });
-    fireEvent.click(screen.getByText("測試歷史與情境摘要"));
-    fireEvent.change(screen.getByRole("textbox", { name: "文字情境摘要" }), { target: { value: "合成原始摘要" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "歷史 JSON" }), { target: { value: '[{"role":"user","content":"合成歷史"}]' } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("合成回答 1");
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "尚未執行的新訊息" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "文字情境摘要" }), { target: { value: "尚未執行的新摘要" } });
-    fireEvent.change(screen.getByRole("spinbutton", { name: "本次檢索 Top K" }), { target: { value: "9" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "精簡對話歷史" }));
-    fireEvent.click(screen.getByRole("button", { name: "只切換後端 PII 再測一次" }));
-    await screen.findByText("合成回答 2");
-    const first = vi.mocked(runAdminChatTest).mock.calls[0];
-    const second = vi.mocked(runAdminChatTest).mock.calls[1];
-    expect(second[1]).toBe(first[1]);
-    expect(preparePrivateRequest).toHaveBeenCalledTimes(1);
-    expect(second[2]).toEqual({ ...RETRIEVAL_DEFAULTS, openrouter_model: config.openrouter_model, rag_retrieval_top_k: 3, rag_distance_threshold: 0.7, enable_anonymization: false, temperature: 0.2, top_p: 0.9, max_tokens: 1200, reasoning_effort: "low", agent_prompt_sections: config.agent_prompt_sections, rag_collections: config.rag_collections, maintenance_message: "", enable_image_upload: true, development_mode: false, pipeline: DEFAULT_PIPELINE });
-    expect(second[2]).not.toHaveProperty("updated_by");
-    expect(first[1]).toMatchObject({ contract_version: 4, case_context: { schema_version: 3, summary: "合成原始摘要", facts: {} } });
-    expect(screen.getAllByText("生效設定")).toHaveLength(2);
-    expect(screen.getAllByText("輸入處理前後")).toHaveLength(2);
-    fireEvent.click(screen.getByRole("button", { name: "只切換後端 PII 再測一次" }));
-    await screen.findByText("合成回答 3");
-    expect(screen.queryByText("合成回答 1")).not.toBeInTheDocument();
-    expect(screen.getByText("合成回答 2")).toBeVisible();
-    expect(localStorage.length).toBe(0);
-    unmount();
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    expect(screen.queryByText("合成回答 3")).not.toBeInTheDocument();
+  it("uses shared typed choices and carries their signed answer and summary revision", async () => {
+    const question = { question_id: "open.work", context_revision: 1, question: "對方與您是什麼關係？", reason: "了解處理管道", options: [{ label: "主管", value: "主管" }, { label: "同事", value: "同事" }], selection_mode: "single" as const, max_selections: 1, validation_token: "signed-test-token" };
+    vi.mocked(runAdminChatTest).mockImplementationOnce(async (_token, request) => result(request, "請補充彼此關係。", { interaction_mode: "clarify", clarification: question, summary_update: { base_revision: 0, summary: "合成工作情境", evidence: [request.message] } }));
+    render(<AdminChatTest csrfToken="csrf" config={config} />);
+    send();
+    fireEvent.click(await screen.findByRole("radio", { name: "主管" }));
+    fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
+    await waitFor(() => expect(runAdminChatTest).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(runAdminChatTest).mock.calls[1][1]).toMatchObject({ case_context: { summary: "合成工作情境", revision: 1 }, clarification_answer: { question_id: question.question_id, context_revision: 1, validation_token: "signed-test-token", status: "provided", value: "主管" } });
   });
-
-  it("ignores late completion after stopping a test and permits a new run", async () => {
-    let finish!: (value: AdminChatTestResult) => void;
-    vi.mocked(runAdminChatTest).mockReturnValueOnce(new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce(testResult(2));
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成情境" } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await waitFor(() => expect(runAdminChatTest).toHaveBeenCalledTimes(1));
+  it("edits summary, supersedes stale answers and regenerates without old conflicting history", async () => {
+    render(<AdminChatTest csrfToken="csrf" config={config} />);
+    send("原先描述同事的問題"); await timeline().findByText("合成回答");
+    editSummary(); fireEvent.change(screen.getByLabelText("已知情境"), { target: { value: "更正：對方是主管。" } });
+    fireEvent.click(screen.getByRole("button", { name: "儲存並重新回答" }));
+    await waitFor(() => expect(runAdminChatTest).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(runAdminChatTest).mock.calls[1][1]).toMatchObject({ message: "原先描述同事的問題", history: [], regenerate_from_summary: true, case_context: { summary: "更正：對方是主管。", revision: 1, summary_origin: "user" } });
+  });
+  it("keeps current context when the server returns a stale summary revision", async () => {
+    vi.mocked(runAdminChatTest).mockImplementationOnce(async (_token, request) => result(request, "不應顯示", { context_revision: 99 }));
+    render(<AdminChatTest csrfToken="csrf" config={config} />); send();
+    await waitFor(() => expect(screen.getAllByText(/回覆的摘要版本不符/).length).toBeGreaterThan(0));
+    expect(timeline().queryByText("不應顯示")).not.toBeInTheDocument();
+    editSummary(); expect(screen.getByLabelText("已知情境")).toHaveValue("");
+  });
+  it("displays emotion and resource actions through the normal message component", async () => {
+    vi.mocked(runAdminChatTest).mockImplementationOnce(async (_token, request) => result(request, "可以先看看以下資源。", { emotion: "擔心", emotion_color: "orange", action_buttons: [{ action: "url", label: "合成資源網站", url: "https://example.org/resource" }] }));
+    render(<AdminChatTest csrfToken="csrf" config={config} />); send();
+    expect(await timeline().findByText("擔心")).toBeVisible();
+    expect(timeline().getByRole("link", { name: /合成資源網站/ })).toHaveAttribute("href", "https://example.org/resource");
+    fireEvent.click(screen.getByRole("checkbox", { name: "顯示心情分析" }));
+    expect(timeline().queryByText("擔心")).not.toBeInTheDocument();
+  });
+  it("attaches an image locally and sends it with the next turn only", async () => {
+    render(<AdminChatTest csrfToken="csrf" config={config} />);
+    const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=="), char => char.charCodeAt(0));
+    fireEvent.change(screen.getByLabelText("選擇圖片"), { target: { files: [new File([bytes], "fixture.png", { type: "image/png" })] } });
+    await screen.findByAltText("已選擇的圖片");
+    expect(runAdminChatTest).not.toHaveBeenCalled();
+    send("請看這張圖"); await timeline().findByText("合成回答");
+    expect(vi.mocked(runAdminChatTest).mock.calls[0][1].image_base64).toMatch(/^data:image\/png;base64,/);
+    send("下一個問題"); await waitFor(() => expect(runAdminChatTest).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(runAdminChatTest).mock.calls[1][1].image_base64).toBeUndefined();
+  });
+  it("disables image attachments with the temporary setting and restores the environment baseline", async () => {
+    render(<AdminChatTest csrfToken="csrf" config={config} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "允許圖片附件" }));
+    expect(screen.queryByRole("button", { name: "加入圖片" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "還原環境設定" }));
+    expect(screen.getByRole("button", { name: "加入圖片" })).toBeEnabled();
+    expect(updateRuntimeConfig).not.toHaveBeenCalled();
+  });
+  it("aborts on leaving and ignores a late completion after stopping and starting another turn", async () => {
+    let complete!: (value: AdminChatTestResult) => void;
+    vi.mocked(runAdminChatTest).mockReturnValueOnce(new Promise(resolve => { complete = resolve; }));
+    const { unmount } = render(<AdminChatTest csrfToken="csrf" config={config} />);
+    send("舊問題"); await waitFor(() => expect(runAdminChatTest).toHaveBeenCalledOnce());
     const signal = vi.mocked(runAdminChatTest).mock.calls[0][3];
-    fireEvent.click(screen.getByRole("button", { name: "停止測試" }));
+    fireEvent.click(screen.getByRole("button", { name: "停止回覆" }));
     expect(signal?.aborted).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("合成回答 2");
-    await act(async () => { finish(testResult(1)); });
-    await waitFor(() => expect(screen.queryByText("合成回答 1")).not.toBeInTheDocument());
+    send("新問題"); await timeline().findByText("合成回答");
+    await act(async () => complete(result(undefined, "過時回答")));
+    expect(timeline().queryByText("過時回答")).not.toBeInTheDocument();
+    vi.mocked(runAdminChatTest).mockReturnValueOnce(new Promise(() => {}));
+    send("離開前問題"); await waitFor(() => expect(runAdminChatTest).toHaveBeenCalledTimes(3));
+    const pending = vi.mocked(runAdminChatTest).mock.calls[2][3]; unmount(); expect(pending?.aborted).toBe(true);
   });
-
-  it("sends only the approved object and reuses it for backend PII comparison", async () => {
-    const approved: ChatRequest = {
-      message: "[姓名] 的合成情境",
-      history: [{ role: "user", content: "[電子郵件]" }],
-      use_rag: true,
-      contract_version: 4,
-      case_context: { schema_version: 3, revision: 0, facts: {}, summary: "[電話]", summary_origin: "user" },
-    };
-    Object.freeze(approved.history[0]);
-    Object.freeze(approved.history);
-    Object.freeze(approved.case_context);
-    Object.freeze(approved);
+  it("does not send or clear the draft when local preparation is cancelled", async () => {
+    vi.mocked(preparePrivateRequest).mockResolvedValueOnce(null);
+    render(<AdminChatTest csrfToken="csrf" config={config} />); send("保留草稿");
+    await waitFor(() => expect(screen.getByRole("button", { name: "傳送訊息" })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "測試訊息" })).toHaveValue("保留草稿");
+    expect(runAdminChatTest).not.toHaveBeenCalled(); expect(timeline().queryByText("保留草稿")).not.toBeInTheDocument();
+  });
+  it("only displays approved content and compares the same frozen request without changing conversation", async () => {
+    const approved = Object.freeze({ message: "[姓名] 的情境", history: [], use_rag: true, contract_version: 4, case_context: { schema_version: 3, revision: 0, facts: {}, summary: "[電話]", summary_origin: "user" } } satisfies ChatRequest);
     vi.mocked(preparePrivateRequest).mockResolvedValueOnce(approved);
-    vi.mocked(runAdminChatTest).mockResolvedValueOnce(testResult(1, false)).mockResolvedValueOnce(testResult(2));
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成測試者的原始情境" } });
-    fireEvent.click(screen.getByText("測試歷史與情境摘要"));
-    fireEvent.change(screen.getByRole("textbox", { name: "歷史 JSON" }), { target: { value: '[{"role":"user","content":"synthetic@example.com"}]' } });
-    fireEvent.change(screen.getByRole("textbox", { name: "文字情境摘要" }), { target: { value: "0912345678" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "後端 PII 遮罩（第二層）" }));
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("合成回答 1");
-    expect(preparePrivateRequest).toHaveBeenCalledWith(expect.objectContaining({ message: "合成測試者的原始情境", history: [{ role: "user", content: "synthetic@example.com" }] }), expect.any(AbortSignal));
-    const first = vi.mocked(runAdminChatTest).mock.calls[0];
-    expect(first[1]).toBe(approved);
-    expect(first[2].enable_anonymization).toBe(false);
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "未核准的新訊息" } });
-    fireEvent.click(screen.getByRole("button", { name: "只切換後端 PII 再測一次" }));
-    await screen.findByText("合成回答 2");
-    expect(vi.mocked(runAdminChatTest).mock.calls[1][1]).toBe(approved);
-    expect(vi.mocked(runAdminChatTest).mock.calls[1][2].enable_anonymization).toBe(true);
-    expect(preparePrivateRequest).toHaveBeenCalledTimes(1);
+    render(<AdminChatTest csrfToken="csrf" config={config} />); send("未遮罩姓名");
+    await timeline().findByText("合成回答");
+    expect(timeline().queryByText("未遮罩姓名")).not.toBeInTheDocument();
+    expect(vi.mocked(runAdminChatTest).mock.calls[0][1]).toBe(approved);
+    fireEvent.change(screen.getByLabelText("本次模型"), { target: { value: "other/model" } });
+    diagnostics(); fireEvent.click(screen.getByRole("button", { name: "只切換後端 PII 再測一次" }));
+    await waitFor(() => expect(runAdminChatTest).toHaveBeenCalledTimes(2));
+    const comparison = vi.mocked(runAdminChatTest).mock.calls[1];
+    expect(comparison[1]).toBe(approved); expect(comparison[2]).toMatchObject({ openrouter_model: "synthetic/model", maintenance_message: "", enable_anonymization: false });
+    expect(comparison[2]).not.toHaveProperty("updated_by");
+    expect(preparePrivateRequest).toHaveBeenCalledOnce();
+    expect(timeline().getAllByText("合成回答")).toHaveLength(1);
+    expect(screen.getAllByText("生效設定")).toHaveLength(2);
   });
-
-  it("makes no request and creates no result when the privacy review is cancelled", async () => {
-    vi.mocked(preparePrivateRequest).mockResolvedValueOnce(null);
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "未核准的合成原文" } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "執行本次測試" })).toBeEnabled());
-    expect(preparePrivateRequest).toHaveBeenCalledTimes(1);
-    expect(runAdminChatTest).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText("最近兩次測試比較")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "只切換後端 PII 再測一次" })).not.toBeInTheDocument();
+  it("clears conversation and summary while keeping temporary controls", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<AdminChatTest csrfToken="csrf" config={config} />);
+    fireEvent.change(screen.getByLabelText("本次模型"), { target: { value: "keep/model" } });
+    send(); await timeline().findByText("合成回答");
+    fireEvent.click(screen.getByRole("button", { name: "新對話" }));
+    expect(timeline().queryByText("合成回答")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("本次模型")).toHaveValue("keep/model");
     expect(localStorage.length).toBe(0);
-  });
-
-  it("requires another review for a new test after any message or summary edits", async () => {
-    vi.mocked(runAdminChatTest).mockResolvedValueOnce(testResult(1));
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "第一次合成情境" } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("合成回答 1");
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "修改後的合成情境" } });
-    fireEvent.click(screen.getByText("測試歷史與情境摘要"));
-    fireEvent.change(screen.getByRole("textbox", { name: "文字情境摘要" }), { target: { value: "修改後的合成摘要" } });
-    vi.mocked(preparePrivateRequest).mockResolvedValueOnce(null);
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "執行本次測試" })).toBeEnabled());
-    expect(preparePrivateRequest).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(preparePrivateRequest).mock.calls[1][0]).toMatchObject({ message: "修改後的合成情境", case_context: { summary: "修改後的合成摘要" } });
-    expect(runAdminChatTest).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("合成回答 1")).toBeVisible();
-  });
-
-  it("aborts a pending review and ignores a late approval", async () => {
-    let approve!: (value: ChatRequest) => void;
-    vi.mocked(preparePrivateRequest).mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成情境" } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    const [request, signal] = vi.mocked(preparePrivateRequest).mock.calls[0];
-    fireEvent.click(screen.getByRole("button", { name: "停止測試" }));
-    expect(signal?.aborted).toBe(true);
-    await act(async () => { approve(request); });
-    expect(runAdminChatTest).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText("最近兩次測試比較")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "執行本次測試" })).toBeEnabled();
   });
 });
 
-describe("admin applicable-law prediction", () => {
-  const selectPrediction = () => {
-    fireEvent.change(screen.getByRole("combobox", { name: "測試模式" }), { target: { value: "applicable_laws_v1" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成三法測試情境" } });
-  };
-
-  it("uses the independent prediction helper and displays law names in their returned order without a chat reply", async () => {
-    vi.mocked(runAdminApplicableLawTest).mockResolvedValueOnce(lawResult(["性工法", "性騷法", "性平法"]));
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    selectPrediction();
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("性工法、性騷法、性平法");
-    expect(screen.getByRole("heading", { name: "預測的適用法條" })).toBeVisible();
-    expect(screen.getByText("由左到右為順位；第一項是主要申訴、調查處理法規。")).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "測試回覆" })).not.toBeInTheDocument();
-    expect(runAdminChatTest).not.toHaveBeenCalled();
-    expect(runAdminApplicableLawTest).toHaveBeenCalledWith("admin-token", expect.objectContaining({ message: "合成三法測試情境", contract_version: 4 }), expect.objectContaining({ enable_anonymization: true }), expect.any(AbortSignal));
-    expect(preparePrivateRequest).toHaveBeenCalledTimes(1);
+describe("independent prediction and diagnostics", () => {
+  it.each([["predicted", "性工法、性騷法"], ["insufficient_facts", "資訊不足，無法判斷適用法規。"], ["no_target_law", "不適用三法。"]] as const)("renders %s without issuing a chat request", async (status, text) => {
+    vi.mocked(runAdminApplicableLawTest).mockResolvedValue(lawResult(status));
+    render(<AdminChatTest csrfToken="csrf" config={config} />);
+    fireEvent.change(screen.getByLabelText("測試模式"), { target: { value: "applicable_laws_v1" } }); send();
+    expect(await timeline().findByText(text)).toBeVisible(); expect(runAdminChatTest).not.toHaveBeenCalled();
+    diagnostics(); expect(screen.getByRole("heading", { name: "預測的適用法條" })).toBeVisible();
   });
-
-  it.each([
-    ["insufficient_facts", "資訊不足，無法判斷適用法規。"],
-    ["no_target_law", "不適用三法。"],
-  ] as const)("displays a distinct empty %s result", async (status, text) => {
-    vi.mocked(runAdminApplicableLawTest).mockResolvedValueOnce(lawResult([], status));
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    selectPrediction();
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    expect(await screen.findByText(text)).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "測試回覆" })).not.toBeInTheDocument();
-    expect(screen.queryByText("由左到右為順位；第一項是主要申訴、調查處理法規。")).not.toBeInTheDocument();
-  });
-
-  it("captures the mode before privacy approval and disables switching during a pending test", async () => {
-    let approve!: (request: ChatRequest) => void;
-    vi.mocked(preparePrivateRequest).mockReturnValueOnce(new Promise(resolve => { approve = resolve; }));
-    vi.mocked(runAdminApplicableLawTest).mockResolvedValueOnce(lawResult());
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    selectPrediction();
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    const selector = screen.getByRole("combobox", { name: "測試模式" });
-    expect(selector).toBeDisabled();
-    const approved = vi.mocked(preparePrivateRequest).mock.calls[0][0];
-    // Even a synthetic change event cannot reinterpret the pending request.
-    fireEvent.change(selector, { target: { value: "chat" } });
-    await act(async () => { approve(approved); });
-    await screen.findByText("性騷法、性工法");
-    expect(runAdminApplicableLawTest).toHaveBeenCalledTimes(1);
-    expect(runAdminChatTest).not.toHaveBeenCalled();
-    expect(screen.getByText("測試模式：適用法規預測")).toBeVisible();
-    expect(selector).toBeEnabled();
-  });
-
-  it("compares the original prediction mode and approved request after the selected mode and inputs change", async () => {
-    const approved: ChatRequest = Object.freeze({ message: "[姓名] 的已確認情境", history: [], use_rag: true, contract_version: 4 });
-    vi.mocked(preparePrivateRequest).mockResolvedValueOnce(approved);
-    vi.mocked(runAdminApplicableLawTest).mockResolvedValueOnce(lawResult(["性工法", "性騷法"])).mockResolvedValueOnce(lawResult(["性平法"], "predicted", false));
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    selectPrediction();
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("性工法、性騷法");
-    fireEvent.change(screen.getByRole("combobox", { name: "測試模式" }), { target: { value: "chat" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "尚未確認的新一般對話" } });
-    fireEvent.change(screen.getByRole("spinbutton", { name: "本次檢索 Top K" }), { target: { value: "9" } });
+  it("uses the original prediction mode for comparison even after switching the composer mode", async () => {
+    render(<AdminChatTest csrfToken="csrf" config={config} />);
+    fireEvent.change(screen.getByLabelText("測試模式"), { target: { value: "applicable_laws_v1" } }); send(); await timeline().findByText("性工法、性騷法");
+    fireEvent.change(screen.getByLabelText("測試模式"), { target: { value: "chat" } }); diagnostics();
     fireEvent.click(screen.getByRole("button", { name: "只切換後端 PII 再測一次" }));
-    await screen.findByText("性平法");
-    const calls = vi.mocked(runAdminApplicableLawTest).mock.calls;
-    expect(calls[0][1]).toBe(approved);
-    expect(calls[1][1]).toBe(approved);
-    expect(calls[1][2]).toMatchObject({ enable_anonymization: false, rag_retrieval_top_k: 3, pipeline: DEFAULT_PIPELINE, openrouter_model: config.openrouter_model });
+    await waitFor(() => expect(runAdminApplicableLawTest).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(runAdminApplicableLawTest).mock.calls[1][1]).toBe(vi.mocked(runAdminApplicableLawTest).mock.calls[0][1]);
     expect(runAdminChatTest).not.toHaveBeenCalled();
-    expect(preparePrivateRequest).toHaveBeenCalledTimes(1);
-    expect(screen.getAllByRole("heading", { name: "預測的適用法條" })).toHaveLength(2);
-    expect(localStorage.length).toBe(0);
-  });
-
-  it("cancels prediction privacy review without transport or a result", async () => {
-    vi.mocked(preparePrivateRequest).mockResolvedValueOnce(null);
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    selectPrediction();
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "執行本次測試" })).toBeEnabled());
-    expect(runAdminApplicableLawTest).not.toHaveBeenCalled();
-    expect(runAdminChatTest).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText("最近兩次測試比較")).not.toBeInTheDocument();
-  });
-
-  it("ignores a late stopped prediction and safely runs a new normal test", async () => {
-    let finish!: (result: AdminApplicableLawTestResult) => void;
-    vi.mocked(runAdminApplicableLawTest).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
-    vi.mocked(runAdminChatTest).mockResolvedValueOnce(testResult(2));
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    selectPrediction();
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await waitFor(() => expect(runAdminApplicableLawTest).toHaveBeenCalledTimes(1));
-    const signal = vi.mocked(runAdminApplicableLawTest).mock.calls[0][3];
-    fireEvent.click(screen.getByRole("button", { name: "停止測試" }));
-    expect(signal?.aborted).toBe(true);
-    fireEvent.change(screen.getByRole("combobox", { name: "測試模式" }), { target: { value: "chat" } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("合成回答 2");
-    await act(async () => { finish(lawResult()); });
-    expect(screen.queryByRole("heading", { name: "預測的適用法條" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "測試回覆" })).toBeVisible();
-  });
-
-  it("keeps normal and prediction results distinct in the recent-two comparison", async () => {
-    vi.mocked(runAdminChatTest).mockResolvedValueOnce(testResult(1));
-    vi.mocked(runAdminApplicableLawTest).mockResolvedValueOnce(lawResult());
-    render(<AdminChatTest csrfToken="admin-token" config={config} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成一般對話" } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("合成回答 1");
-    selectPrediction();
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    await screen.findByText("性騷法、性工法");
-    expect(screen.getByRole("heading", { name: "測試回覆" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "預測的適用法條" })).toBeVisible();
-    expect(preparePrivateRequest).toHaveBeenCalledTimes(2);
   });
 });

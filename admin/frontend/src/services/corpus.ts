@@ -1,3 +1,4 @@
+import { ApiError } from "@rag/shared/api";
 import { adminFetch } from "./session";
 import type { AdminJob } from "./api";
 
@@ -34,6 +35,7 @@ export interface CorpusOperation { job_id?: string; status: string; source_id?: 
 
 export const listSources = (cursor: string | null, signal?: AbortSignal): Promise<Page<CorpusSource>> => adminFetch(`/corpus/sources?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { signal });
 export const listRecords = (kind: CorpusKind, cursor: string | null, signal?: AbortSignal): Promise<Page<CorpusRecord>> => adminFetch(`/corpus/records?kind=${kind}&limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { signal });
+export const getRecord = (kind: CorpusKind, id: string, signal?: AbortSignal): Promise<CorpusRecord> => adminFetch(`/corpus/records/${encodeURIComponent(id)}?kind=${kind}`, { signal });
 export const getSource = (id: string, signal?: AbortSignal, cursor?: string | null): Promise<CorpusSource> => adminFetch(`/corpus/sources/${encodeURIComponent(id)}?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { signal });
 export const downloadSource = (id: string): Promise<Blob> => adminFetch(`/corpus/sources/${encodeURIComponent(id)}/download`);
 export function previewImport(file: File, kind: CorpusKind, title: string, metadata: Record<string, unknown>, csrfToken: string, signal?: AbortSignal): Promise<ImportDraft> {
@@ -41,7 +43,13 @@ export function previewImport(file: File, kind: CorpusKind, title: string, metad
   return adminFetch("/corpus/imports/preview", { method: "POST", body, signal }, csrfToken);
 }
 export const confirmImport = (preview: ImportPreview, csrfToken: string): Promise<CorpusOperation> => adminFetch(`/corpus/imports/${encodeURIComponent(preview.import_id)}/confirm`, { method: "POST", body: JSON.stringify({ plan_hash: preview.plan_hash }) }, csrfToken);
-export const deleteSource = (source: CorpusSource, csrfToken: string): Promise<CorpusOperation> => adminFetch(`/corpus/sources/${encodeURIComponent(source.source_id)}`, { method: "DELETE", body: JSON.stringify({ revision: source.revision }) }, csrfToken);
+export async function deleteSource(source: CorpusSource, csrfToken: string): Promise<CorpusOperation> {
+  const latest = await getSource(source.source_id);
+  if (latest.revision !== source.revision || latest.status !== source.status || latest.title !== source.title) {
+    throw new ApiError(409, "來源已更新", "來源狀態已變更，請重新開啟詳情並確認後再刪除。");
+  }
+  return adminFetch(`/corpus/sources/${encodeURIComponent(source.source_id)}`, { method: "DELETE", body: JSON.stringify({ revision: source.revision }) }, csrfToken);
+}
 export const getCorpusJob = (id: string, signal?: AbortSignal): Promise<CorpusJob> => adminFetch(`/jobs/${encodeURIComponent(id)}`, { signal });
 export const listCorpusJobs = (cursor: string | null, signal?: AbortSignal): Promise<Page<CorpusJob>> => adminFetch(`/corpus/jobs?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { signal });
 export const cancelCorpusJob = (id: string, csrfToken: string): Promise<CorpusJob> => adminFetch(`/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" }, csrfToken);

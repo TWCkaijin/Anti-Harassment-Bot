@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import AdminCorpus from "./AdminCorpus";
 import * as corpus from "../services/corpus";
 
-vi.mock("../services/corpus", () => ({ listSources: vi.fn(), listRecords: vi.fn(), getSource: vi.fn(), downloadSource: vi.fn(), previewImport: vi.fn(), confirmImport: vi.fn(), deleteSource: vi.fn(), getCorpusJob: vi.fn(), listCorpusJobs: vi.fn(), listImports: vi.fn(), getImport: vi.fn(), mapImport: vi.fn(), resumeParse: vi.fn(), cancelCorpusJob: vi.fn(), retryCorpusJob: vi.fn(), mappingLabels: { content: "片段內容（必填）", source_url: "來源網址" } }));
+vi.mock("../services/corpus", () => ({ listSources: vi.fn(), listRecords: vi.fn(), getSource: vi.fn(), getRecord: vi.fn(), downloadSource: vi.fn(), previewImport: vi.fn(), confirmImport: vi.fn(), deleteSource: vi.fn(), getCorpusJob: vi.fn(), listCorpusJobs: vi.fn(), listImports: vi.fn(), getImport: vi.fn(), mapImport: vi.fn(), resumeParse: vi.fn(), cancelCorpusJob: vi.fn(), retryCorpusJob: vi.fn(), mappingLabels: { content: "片段內容（必填）", source_url: "來源網址" } }));
 const record: corpus.CorpusRecord = { id: "chunk-1", kind: "law", content: "完整合成條文。", metadata: { source_url: "https://example.test/law" }, embedding: { dimensions: 1536 }, source_id: "source-1" };
 const source: corpus.CorpusSource = { source_id: "source-1", title: "合成法規", filename: "synthetic.txt", kind: "law", status: "active", revision: 3, chunk_count: 2, original_available: true, chunks: [record], next_cursor: "next-chunk" };
 const preview: corpus.ImportPreview & corpus.ImportDraft = { import_id: "preview-1", status: "preview", parse_revision: 1, plan_hash: "frozen-plan", filename: "new.txt", title: "新來源", kind: "law", chunk_count: 1, chunks: [{ content: "擷取後完整文字", metadata: {} }], warnings: ["請檢查擷取內容。"], duplicate_source_id: null, expires_at: "2099-01-01T00:00:00Z", limits: {} };
@@ -12,6 +12,7 @@ beforeEach(() => {
   vi.mocked(corpus.listSources).mockResolvedValue({ items: [source], next_cursor: null });
   vi.mocked(corpus.listRecords).mockResolvedValue({ items: [{ ...record, source_id: null }], next_cursor: null });
   vi.mocked(corpus.getSource).mockResolvedValue(source);
+  vi.mocked(corpus.getRecord).mockResolvedValue(record);
   vi.mocked(corpus.listCorpusJobs).mockResolvedValue({ items: [], next_cursor: null });
   vi.mocked(corpus.listImports).mockResolvedValue({ items: [], next_cursor: null });
   vi.mocked(corpus.getImport).mockResolvedValue(preview);
@@ -22,6 +23,30 @@ beforeEach(() => {
 });
 
 describe("corpus source management", () => {
+  it("refreshes a cached record whenever its detail is opened and hides deleted content", async () => {
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(screen.getByRole("button", { name: "所有資料片段" }));
+    const summary = await screen.findByText(/未核對完整來源/);
+    expect(corpus.getRecord).not.toHaveBeenCalled();
+    vi.mocked(corpus.getRecord).mockResolvedValue({ ...record, content: "伺服器最新片段" });
+    fireEvent.click(summary);
+    await waitFor(() => expect(screen.getByText("伺服器最新片段")).toBeVisible());
+    expect(corpus.getRecord).toHaveBeenCalledWith("law", "chunk-1", expect.any(AbortSignal));
+    fireEvent.click(summary);
+    vi.mocked(corpus.getRecord).mockRejectedValue(new Error("此片段已不存在"));
+    fireEvent.click(summary);
+    expect(await screen.findByRole("alert")).toHaveTextContent("此片段已不存在");
+    expect(screen.queryByText("伺服器最新片段")).not.toBeInTheDocument();
+  });
+  it("shows refreshed source content when the same source is reopened", async () => {
+    render(<AdminCorpus csrfToken="csrf" />);
+    fireEvent.click(await screen.findByRole("button", { name: "合成法規" }));
+    await screen.findByText("完整合成條文。");
+    vi.mocked(corpus.getSource).mockResolvedValueOnce({ ...source, chunks: [{ ...record, content: "更新後來源內容" }] });
+    fireEvent.click(screen.getByRole("button", { name: "合成法規" }));
+    expect(await screen.findByText("更新後來源內容")).toBeInTheDocument();
+    expect(screen.queryByText("完整合成條文。")).not.toBeInTheDocument();
+  });
   it("shows complete stored content and pages through all chunks of a source", async () => {
     render(<AdminCorpus csrfToken="csrf" />);
     fireEvent.click(await screen.findByRole("button", { name: "合成法規" }));

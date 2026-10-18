@@ -15,6 +15,20 @@ beforeEach(() => { FakeWorker.instances = []; vi.stubGlobal("Worker", FakeWorker
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("browser runtime failure boundary", () => {
+  it("preserves failed-stage evidence", async () => {
+    const runtime = new BrowserMaskingRuntime();
+    const loaded = runtime.load();
+    const worker = FakeWorker.instances[0];
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ id: 1, operation: "load" });
+    worker.emit({ id: 1, kind: "loaded", metrics: { elapsedMs: 1, fetchedBytes: 1, fetches: 1, failedFetches: 0, adapter: {} } });
+    await loaded;
+    const pending = runtime.detect("synthetic-only");
+    const rounds = [{ stage: "locate" as const, chunk: 0, raw: '{"spans":["not-in-source"]}' }];
+    const assertion = expect(pending).rejects.toMatchObject({ code: "invalid_entity_span", rounds });
+    worker.emit({ id: 2, kind: "error", code: "invalid_entity_span", rounds });
+    await assertion;
+    expect(fetch).not.toHaveBeenCalled(); runtime.dispose();
+  });
   it("keeps extraction text on the worker channel and forwards progress", async () => {
     const runtime = new BrowserMaskingRuntime();
     const progress = vi.fn();

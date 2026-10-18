@@ -3,6 +3,8 @@ import { LIBRARY_REVISION, MODEL_ID, MODEL_REVISION, PROMPT_VERSION, RUNTIME_VER
 import { MaskingError, previewMask } from "./extraction";
 import type { BrowserMaskingRuntime } from "./runtime";
 import type { LoadMetrics } from "./types";
+import type { BasicCheckReport } from "./selfCheck";
+import type { ExtractionRound } from "./pipeline";
 
 export type Split = "development" | "holdout";
 export interface Fixture { id: string; split: Split; category: string; text: string; expected: Entity[] }
@@ -11,6 +13,7 @@ export interface CaseResult {
   id: string; split: Split; category: string; characters: number; source: string;
   expected: Entity[]; detected: Entity[]; masked: string | null;
   missing: string[]; unexpected: string[]; elapsedMs: number; error: string | null;
+  rounds?: ExtractionRound[];
 }
 export interface Scores {
   cases: number; successfulChecks: number; truePositive: number; falsePositive: number; falseNegative: number;
@@ -20,6 +23,7 @@ export interface EvaluationReport {
   schemaVersion: 1; createdAt: string; userAgent: string;
   model: string; modelRevision: string; libraryRevision: string; runtimeVersion: string; promptVersion: string;
   coldLoad: LoadMetrics | null; cachedLoad: LoadMetrics | null;
+  basicCheck: BasicCheckReport | null;
   scores: { all: Scores; development: Scores; holdout: Scores };
   gatePassed: boolean; cases: CaseResult[];
   limitations: string[];
@@ -47,7 +51,7 @@ export function scoreCases(cases: CaseResult[]): Scores {
   };
 }
 
-export function createReport(cases: CaseResult[], coldLoad: LoadMetrics | null, cachedLoad: LoadMetrics | null): EvaluationReport {
+export function createReport(cases: CaseResult[], coldLoad: LoadMetrics | null, cachedLoad: LoadMetrics | null, basicCheck: BasicCheckReport | null = null): EvaluationReport {
   const development = scoreCases(cases.filter(item => item.split === "development"));
   const holdout = scoreCases(cases.filter(item => item.split === "holdout"));
   const all = scoreCases(cases);
@@ -55,7 +59,7 @@ export function createReport(cases: CaseResult[], coldLoad: LoadMetrics | null, 
     schemaVersion: 1, createdAt: new Date().toISOString(), userAgent: navigator.userAgent,
     model: MODEL_ID, modelRevision: MODEL_REVISION, libraryRevision: LIBRARY_REVISION,
     runtimeVersion: RUNTIME_VERSION, promptVersion: PROMPT_VERSION,
-    coldLoad, cachedLoad, scores: { all, development, holdout },
+    coldLoad, cachedLoad, basicCheck, scores: { all, development, holdout },
     gatePassed: development.cases === 80 && holdout.cases === 40 && all.passed && development.passed && holdout.passed,
     cases,
     limitations: [
@@ -73,12 +77,13 @@ export async function evaluateSplit(runtime: BrowserMaskingRuntime, split: Split
     if (signal.aborted) break;
     const start = performance.now();
     let detected: Entity[] = [], error: string | null = null;
-    try { detected = (await runtime.detect(fixture.text)).entities; }
-    catch (failure) { error = failure instanceof MaskingError ? failure.code : "evaluation_failed"; }
+    let rounds: ExtractionRound[];
+    try { const detection = await runtime.detect(fixture.text); detected = detection.entities; rounds = detection.rounds ?? []; }
+    catch (failure) { error = failure instanceof MaskingError ? failure.code : "evaluation_failed"; rounds = failure instanceof MaskingError ? failure.rounds : []; }
     if (signal.aborted) break;
     const result: CaseResult = {
       id: fixture.id, split, category: fixture.category, characters: Array.from(fixture.text).length, source: fixture.text,
-      expected: fixture.expected, detected, error, elapsedMs: performance.now() - start,
+      expected: fixture.expected, detected, rounds, error, elapsedMs: performance.now() - start,
       masked: error ? null : previewMask(fixture.text, detected),
       missing: fixture.expected.filter(expected => !detected.some(item => item.text === expected.text)).map(item => item.text),
       unexpected: detected.filter(item => !fixture.expected.some(expected => item.text === expected.text)).map(item => item.text),

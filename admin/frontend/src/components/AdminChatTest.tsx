@@ -1,106 +1,488 @@
-import { retrievalSettings } from "../services/retrievalSettings";
 import { useEffect, useRef, useState } from "react";
-import { ApiError, runAdminApplicableLawTest, runAdminChatTest, type AdminApplicableLawTestResult, type AdminChatTestResult, type ChatRequest, type RuntimeConfig, type RuntimeConfigUpdate } from "../services/api";
-import { isRecord, MAX_SUMMARY_LENGTH } from "../services/caseFacts";
-import { reproducibleOverrides } from "../services/adminDiagnostics";
-import { preparePrivateRequest } from "../services/privateRequest";
+import type { RuntimeConfig } from "../services/api";
 import { DEFAULT_PIPELINE } from "../services/pipeline";
-import PipelineSettingsEditor from "./PipelineSettingsEditor";
+import { reproducibleOverrides } from "../services/adminDiagnostics";
+import { temporaryOverrides } from "../services/runtimeConfig";
+import {
+  useDiagnosticChat,
+  predictionText,
+  type TestMode,
+  type TestRun,
+} from "../hooks/useDiagnosticChat";
+import { I18nProvider } from "../../../../client/frontend/src/i18n";
+import ChatInput from "../../../../client/frontend/src/components/ChatInput";
+import MessageItem from "../../../../client/frontend/src/components/MessageItem";
+import CaseSummary from "../../../../client/frontend/src/components/CaseSummary";
+import TypingIndicator from "../../../../client/frontend/src/components/TypingIndicator";
+import MaterialIcon from "./MaterialIcon";
+import DiagnosticSettings from "./DiagnosticSettings";
 
-type TestMode = "chat" | "applicable_laws_v1";
-interface TestRun { id: number; mode: TestMode; request: ChatRequest; result: AdminChatTestResult | AdminApplicableLawTestResult; comparison: boolean }
 const DIAGNOSTIC_SECTIONS = [
-  ["effective_config", "生效設定"], ["pii", "PII 處理"], ["input_stages", "輸入處理前後"],
-  ["history", "歷史裁切"], ["retrieval", "檢索結果"], ["rewrites", "內容改寫"],
+  ["effective_config", "生效設定"],
+  ["pii", "PII 處理"],
+  ["input_stages", "輸入處理前後"],
+  ["history", "歷史裁切"],
+  ["retrieval", "檢索結果"],
+  ["rewrites", "內容改寫"],
 ] as const;
 
-export default function AdminChatTest({ csrfToken, config }: { csrfToken: string; config: RuntimeConfig }) {
-  const [message, setMessage] = useState("");
+export default function AdminChatTest(props: {
+  csrfToken: string;
+  config: RuntimeConfig;
+  visible?: boolean;
+}) {
+  return (
+    <I18nProvider manageDocument={false}>
+      <DiagnosticConversation {...props} />
+    </I18nProvider>
+  );
+}
+
+function DiagnosticConversation({
+  csrfToken,
+  config,
+  visible = true,
+}: {
+  csrfToken: string;
+  config: RuntimeConfig;
+  visible?: boolean;
+}) {
+  const [temporary, setTemporary] = useState(() => ({
+    ...structuredClone(config),
+    pipeline: { ...DEFAULT_PIPELINE, ...config.pipeline },
+  }));
   const [mode, setMode] = useState<TestMode>("chat");
-  const [history, setHistory] = useState("[]");
-  const [summary, setSummary] = useState("");
-  const [pipeline, setPipeline] = useState(() => ({ ...DEFAULT_PIPELINE, ...config.pipeline }));
-  const [masking, setMasking] = useState(config.enable_anonymization);
-  const [topK, setTopK] = useState(config.rag_retrieval_top_k);
-  const [threshold, setThreshold] = useState(config.rag_distance_threshold);
-  const [runs, setRuns] = useState<TestRun[]>([]);
-  const [error, setError] = useState("");
-  const [running, setRunning] = useState(false);
-  const sequence = useRef(0);
-  const requestRef = useRef<AbortController | null>(null);
-  useEffect(() => () => requestRef.current?.abort(), []);
-  const latest = runs.at(-1);
+  const [showEmotions, setShowEmotions] = useState(true);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelTab, setPanelTab] = useState<"settings" | "diagnostics">("settings");
+  const [composerKey, setComposerKey] = useState(0);
+
+  const chat = useDiagnosticChat(csrfToken, temporary, mode);
+  const end = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLElement>(null);
+  const settingsForm = useRef<HTMLFormElement>(null);
+
+  const latest = chat.runs.at(-1);
+  const lastMessage = chat.messages.at(-1);
+  const replyPrompt =
+    mode === "chat" &&
+    lastMessage?.role === "assistant" &&
+    !lastMessage.isError &&
+    !lastMessage.isCancelled &&
+    !lastMessage.superseded
+      ? lastMessage
+      : undefined;
+  const latestAssistant = [...chat.messages]
+    .reverse()
+    .find(
+      (item) =>
+        item.role === "assistant" && !item.isError && !item.isCancelled && !item.superseded,
+    )?.id;
   const comparisonConfig = reproducibleOverrides(latest?.result.diagnostics.effective_config);
+  const changed =
+    JSON.stringify(temporaryOverrides(temporary)) !== JSON.stringify(temporaryOverrides(config));
+  const canRegenerate =
+    mode === "chat" &&
+    chat.messages.some(
+      (item) =>
+        item.role === "user" && item.requestKind === "request" && item.diagnosticMode === "chat",
+    );
 
-  const execute = async (request: ChatRequest, overrides: RuntimeConfigUpdate, selectedMode: TestMode, comparison = false) => {
-    if (requestRef.current) return;
-    const controller = new AbortController();
-    const frozenOverrides = structuredClone(overrides);
-    requestRef.current = controller;
-    setError(""); setRunning(true);
-    try {
-      const reviewedRequest = comparison ? request : await preparePrivateRequest(request, controller.signal);
-      if (!reviewedRequest || controller.signal.aborted || requestRef.current !== controller) return;
-      const result = selectedMode === "applicable_laws_v1"
-        ? await runAdminApplicableLawTest(csrfToken, reviewedRequest, frozenOverrides, controller.signal)
-        : await runAdminChatTest(csrfToken, reviewedRequest, frozenOverrides, controller.signal);
-      if (!controller.signal.aborted && requestRef.current === controller) {
-        const id = ++sequence.current;
-        setRuns(previous => [...previous, { id, mode: selectedMode, request: reviewedRequest, result, comparison }].slice(-2));
-      }
-    } catch (failure) {
-      if (!controller.signal.aborted && requestRef.current === controller) setError(failure instanceof ApiError ? failure.detail ?? failure.message : failure instanceof Error ? failure.message : "測試失敗");
-    } finally { if (requestRef.current === controller) { requestRef.current = null; setRunning(false); } }
-  };
-  const run = () => {
-    if (running || !message.trim()) return;
-    try {
-      const parsedHistory: unknown = JSON.parse(history);
-      if (!Array.isArray(parsedHistory) || parsedHistory.length > 200 || !parsedHistory.every(item => isRecord(item) && ["user", "assistant"].includes(String(item.role)) && typeof item.content === "string")) throw new Error("歷史必須是 user／assistant 訊息陣列，最多 200 筆。");
-      if (summary.length > MAX_SUMMARY_LENGTH) throw new Error("情境摘要最多 4000 字。");
-      const request: ChatRequest = { message: message.trim(), history: parsedHistory, use_rag: pipeline.enable_rag, contract_version: 4, case_context: { schema_version: 3, revision: 0, facts: {}, summary, summary_origin: "user" } };
-      void execute(request, { ...retrievalSettings(config), pipeline, enable_anonymization: masking, rag_retrieval_top_k: topK, rag_distance_threshold: threshold }, mode);
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "測試輸入格式不正確"); }
-  };
-  const compare = () => {
-    if (latest && comparisonConfig && !running) void execute(latest.request, { ...comparisonConfig, enable_anonymization: !comparisonConfig.enable_anonymization }, latest.mode, true);
-  };
-  const stop = () => { requestRef.current?.abort(); requestRef.current = null; setRunning(false); };
+  useEffect(() => {
+    if (visible) {
+      end.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
+    }
+  }, [chat.messages, chat.running, visible]);
 
-  return <section aria-label="本次診斷測試" className="mx-auto max-w-5xl space-y-5">
-    <div><h3 className="text-xl font-bold">本次診斷測試</h3><p className="mt-2 text-sm leading-relaxed text-on-surface/65">使用目前環境的模型；覆寫值只套用這次請求。最近兩次結果只保留在這個頁面的記憶體中。</p></div>
-    <label className="block text-sm font-medium">測試模式<select aria-label="測試模式" value={mode} disabled={running} onChange={event => setMode(event.target.value as TestMode)} className="input mt-2">
-      <option value="chat">一般對話</option><option value="applicable_laws_v1">適用法規預測</option>
-    </select></label>
-    {mode === "applicable_laws_v1" && <p className="text-sm leading-relaxed text-on-surface/65">依序列出主要處理法規與同案另有適用事項的法規；資訊不足時留空，不追問。</p>}
-    <label className="block text-sm font-medium">測試訊息<textarea aria-label="測試訊息" maxLength={2000} value={message} onChange={event => setMessage(event.target.value)} rows={4} className="input mt-2" placeholder="輸入合成測試情境" /></label>
-    <details className="rounded-lg border border-outline/15 p-3"><summary className="cursor-pointer text-sm">測試歷史與情境摘要</summary>
-      <label className="mt-3 block text-sm">歷史 JSON<textarea aria-label="歷史 JSON" value={history} onChange={event => setHistory(event.target.value)} rows={4} className="input mt-1 font-mono text-xs" /></label>
-      <label className="mt-3 block text-sm">文字情境摘要<textarea aria-label="文字情境摘要" maxLength={MAX_SUMMARY_LENGTH} value={summary} onChange={event => setSummary(event.target.value)} rows={4} className="input mt-1 text-sm" placeholder="輸入已確認的情境摘要" /></label>
-    </details>
-    <div className="space-y-2"><label className="flex items-center justify-between gap-3 text-sm">後端 PII 遮罩（第二層）<input aria-label="後端 PII 遮罩（第二層）" type="checkbox" checked={masking} onChange={event => setMasking(event.target.checked)} /></label>
-      <p className="text-xs leading-relaxed text-on-surface/65">瀏覽器會自動遮罩文字後送出。這個開關只控制後端的第二層遮罩，PII 比較會重用同一份送出資料。</p></div>
-    <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">本次檢索 Top K<input aria-label="本次檢索 Top K" type="number" min={1} max={20} value={topK} onChange={event => setTopK(Number(event.target.value))} className="input mt-1" /></label>
-      <label className="text-sm">本次相似度門檻<input aria-label="本次相似度門檻" type="number" min={0} max={2} step={0.01} value={threshold ?? ""} onChange={event => setThreshold(event.target.value === "" ? null : Number(event.target.value))} placeholder="停用" className="input mt-1" /></label></div>
-    <PipelineSettingsEditor value={pipeline} onChange={setPipeline} disabled={running} maskingEnabled={masking} />
-    <div className="flex flex-wrap gap-2"><button type="button" onClick={run} disabled={running || !message.trim()} className="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{running ? "測試中…" : "執行本次測試"}</button>
-      {latest && <button type="button" onClick={compare} disabled={running || !comparisonConfig} className="min-h-11 rounded-lg border border-primary/30 px-4 py-2 text-sm disabled:opacity-40">只切換後端 PII 再測一次</button>}
-      {running && <button type="button" onClick={stop} className="rounded-lg border border-outline/20 px-4 py-2 text-sm">停止測試</button>}</div>
-    {latest && !comparisonConfig && <p className="text-xs text-on-surface/60">這次診斷未提供完整設定，無法建立只切換後端 PII 的比較。</p>}
-    {error && <p role="alert" className="text-sm text-error">{error}</p>}
-    {runs.length > 0 && <div aria-label="最近兩次測試比較" className="grid min-w-0 gap-4 lg:grid-cols-2">{runs.map(item => <article key={item.id} aria-label={`測試 ${item.id}`} className="min-w-0 space-y-3 rounded-xl border border-outline/15 p-4">
-      <h4 className="font-semibold">測試 {item.id}{item.comparison ? " · 僅切換後端 PII" : ""}</h4>
-      <p className="text-xs text-on-surface/60">測試模式：{item.mode === "applicable_laws_v1" ? "適用法規預測" : "一般對話"}</p>
-      <p className="text-xs text-on-surface/60">後端 PII：{item.result.diagnostics.effective_config && isRecord(item.result.diagnostics.effective_config) ? item.result.diagnostics.effective_config.enable_anonymization ? "開啟" : "關閉" : "未提供"}</p>
-      {"prediction" in item.result ? <div>
-        <h5 className="text-sm font-semibold">預測的適用法條</h5>
-        <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{item.result.prediction.decision_status === "predicted"
-          ? item.result.prediction.predicted_laws.join("、")
-          : item.result.prediction.decision_status === "insufficient_facts" ? "資訊不足，無法判斷適用法規。" : "不適用三法。"}</p>
-        {item.result.prediction.decision_reason && <p className="mt-2 whitespace-pre-wrap break-words text-sm">無法預測原因：{item.result.prediction.decision_reason}</p>}
-        {item.result.prediction.decision_status === "predicted" && <p className="mt-1 text-xs text-on-surface/60">由左到右為順位；第一項是主要申訴、調查處理法規。</p>}
-      </div> : <div><h5 className="text-sm font-semibold">測試回覆</h5><p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{item.result.response.reply}</p></div>}
-      {DIAGNOSTIC_SECTIONS.map(([key, label]) => <details key={key} open={key === "input_stages"} className="rounded-lg border border-outline/15 p-3"><summary className="cursor-pointer text-sm font-semibold">{label}</summary><pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(item.result.diagnostics[key] ?? "未提供", null, 2)}</pre></details>)}
-    </article>)}</div>}
-  </section>;
+  useEffect(() => {
+    if (!panelOpen || !visible) return;
+    const previous = document.activeElement as HTMLElement | null;
+    panel.current?.focus();
+    return () => previous?.focus();
+  }, [panelOpen, visible]);
+
+  const closePanel = () => setPanelOpen(false);
+  const reset = () => {
+    if (
+      chat.messages.length &&
+      !window.confirm("清除這次診斷對話、摘要與結果？右側暫時設定會保留。")
+    ) {
+      return;
+    }
+    chat.clear();
+    setComposerKey((value) => value + 1);
+  };
+
+  return (
+    <section
+      aria-label="本次診斷測試"
+      className="flex h-full min-h-0 flex-col bg-surface-container-low"
+    >
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-outline/15 bg-white px-4 py-3 lg:px-6">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-2 text-base font-bold">
+            <MaterialIcon icon="science" size={20} />
+            本次診斷測試
+          </h3>
+          <p className="mt-1 text-xs text-on-surface/55">
+            多輪對話 · 使用 {config.environment_document_id ?? "目前環境"} 作為起點
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            data-summary-trigger
+            aria-label="顯示及更改摘要"
+            onClick={() => setSummaryOpen(true)}
+            className="flex min-h-10 items-center gap-1 rounded-lg px-3 text-sm text-primary hover:bg-primary/5"
+          >
+            <MaterialIcon icon="description" size={18} />
+            摘要
+          </button>
+          <button
+            type="button"
+            onClick={reset}
+            className="min-h-10 rounded-lg px-3 text-sm hover:bg-surface-container"
+          >
+            新對話
+          </button>
+          <button
+            type="button"
+            onClick={() => setPanelOpen(true)}
+            aria-label="開啟暫時設定面板"
+            className="flex min-h-10 items-center gap-1 rounded-lg border border-outline/25 px-3 text-sm xl:hidden"
+          >
+            <MaterialIcon icon="tune" size={18} />
+            設定
+          </button>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-outline/10 px-4 py-2 text-xs text-on-surface/60 lg:px-6">
+            <span className="min-w-0 truncate" title={temporary.openrouter_model}>
+              {temporary.openrouter_model}
+            </span>
+            <span
+              className={`shrink-0 rounded-full px-2 py-1 ${
+                changed ? "bg-primary-container text-primary" : "bg-surface-container"
+              }`}
+            >
+              {changed ? "已套用暫時設定" : "沿用環境設定"}
+            </span>
+          </div>
+
+          <div
+            aria-label="診斷對話訊息"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 lg:px-6"
+          >
+            {!chat.messages.length && (
+              <div className="mx-auto flex h-full max-w-lg flex-col justify-center py-5">
+                <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-container text-primary">
+                  <MaterialIcon icon="chat_bubble" size={24} />
+                </span>
+                <h4 className="text-xl font-bold">像一般對話一樣開始測試</h4>
+                <p className="mt-3 text-sm leading-7 text-on-surface/65">
+                  輸入情境或附加圖片，接續選項回答，並查看心情分析與摘要。右側設定只影響這個診斷對話的後續請求。
+                </p>
+                <p className="mt-4 text-xs leading-6 text-on-surface/45">
+                  對話與暫時設定只保留在本頁；切換功能時會繼續執行並保留內容，重新載入或登出後會清除。
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-7">
+              {chat.messages.map((message) => (
+                <MessageItem
+                  key={message.id}
+                  message={message}
+                  showEmotions={showEmotions}
+                  showReasoning={temporary.enable_reasoning_display === true}
+                  onOpenSummary={
+                    message.id === latestAssistant ? () => setSummaryOpen(true) : undefined
+                  }
+                />
+              ))}
+              {chat.running && <TypingIndicator message="正在執行診斷，等待回覆…" />}
+              <div ref={end} />
+            </div>
+          </div>
+
+          {chat.error && (
+            <p
+              role="alert"
+              className="mx-4 mb-3 rounded-lg bg-error-container/40 px-3 py-2 text-sm text-error"
+            >
+              {chat.error}
+            </p>
+          )}
+
+          <ChatInput
+            key={composerKey}
+            inputLabel="測試訊息"
+            onSend={(...args) => {
+              if (settingsForm.current && !settingsForm.current.reportValidity()) {
+                setPanelTab("settings");
+                setPanelOpen(true);
+                return false;
+              }
+              return chat.send(...args);
+            }}
+            isLoading={chat.running}
+            onStop={chat.stop}
+            replyPrompt={replyPrompt}
+            caseRevision={chat.context.revision}
+            activeContractVersion={4}
+            allowImageUpload={temporary.enable_image_upload}
+            onClarificationDraftChange={chat.saveClarificationDraft}
+          />
+        </div>
+
+        {panelOpen && (
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="關閉設定面板背景"
+            onClick={closePanel}
+            className="fixed inset-0 z-40 bg-black/25 xl:hidden"
+          />
+        )}
+
+        <aside
+          ref={panel}
+          tabIndex={panelOpen ? -1 : undefined}
+          role={panelOpen ? "dialog" : "complementary"}
+          aria-modal={panelOpen || undefined}
+          aria-label="暫時設定與診斷"
+          className={`${
+            panelOpen ? "fixed inset-y-0 right-0 z-50 flex w-[min(92vw,380px)] shadow-xl" : "hidden"
+          } min-h-0 shrink-0 flex-col border-l border-outline/20 bg-white xl:static xl:z-auto xl:flex xl:w-[340px] xl:shadow-none 2xl:w-[380px]`}
+          onKeyDown={(event) => {
+            if (!panelOpen) return;
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closePanel();
+            }
+            if (event.key !== "Tab") return;
+            const elements = Array.from(
+              panel.current?.querySelectorAll<HTMLElement>(
+                "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary",
+              ) ?? [],
+            ).filter((item) => item.getClientRects().length);
+            const first = elements[0];
+            const last = elements.at(-1);
+            if (
+              event.shiftKey &&
+              (document.activeElement === first || document.activeElement === panel.current)
+            ) {
+              event.preventDefault();
+              last?.focus();
+            } else if (
+              !event.shiftKey &&
+              (document.activeElement === last || document.activeElement === panel.current)
+            ) {
+              event.preventDefault();
+              first?.focus();
+            }
+          }}
+        >
+          <div className="shrink-0 border-b border-outline/15 p-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-bold">本次暫時設定</h4>
+              <button
+                type="button"
+                aria-label="關閉暫時設定面板"
+                onClick={closePanel}
+                className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-surface-container xl:hidden"
+              >
+                <MaterialIcon icon="close" size={18} />
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-on-surface/55">
+              不會儲存至環境；新請求使用送出當下的設定。
+            </p>
+            <div
+              className="mt-4 flex rounded-lg bg-surface-container p-1"
+              role="tablist"
+              aria-label="診斷側欄"
+            >
+              <button
+                role="tab"
+                aria-selected={panelTab === "settings"}
+                onClick={() => setPanelTab("settings")}
+                className={`flex-1 rounded-md py-2 text-xs font-semibold ${
+                  panelTab === "settings" ? "bg-white text-primary shadow-sm" : "text-on-surface/60"
+                }`}
+              >
+                暫時設定
+              </button>
+              <button
+                role="tab"
+                aria-selected={panelTab === "diagnostics"}
+                onClick={() => setPanelTab("diagnostics")}
+                className={`flex-1 rounded-md py-2 text-xs font-semibold ${
+                  panelTab === "diagnostics"
+                    ? "bg-white text-primary shadow-sm"
+                    : "text-on-surface/60"
+                }`}
+              >
+                診斷結果{chat.runs.length ? ` · ${chat.runs.length}` : ""}
+              </button>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+            <form
+              ref={settingsForm}
+              hidden={panelTab !== "settings"}
+              onSubmit={(event) => event.preventDefault()}
+              className="space-y-5"
+            >
+              <label className="block text-sm">
+                測試模式
+                <select
+                  className="input"
+                  value={mode}
+                  disabled={chat.running}
+                  onChange={(event) => {
+                    if (!chat.running) setMode(event.target.value as TestMode);
+                  }}
+                >
+                  <option value="chat">一般對話</option>
+                  <option value="applicable_laws_v1">適用法規預測</option>
+                </select>
+              </label>
+              {mode === "applicable_laws_v1" && (
+                <p className="text-xs leading-6 text-on-surface/60">
+                  依主要處理法規優先順序預測，不追問；結果可在診斷頁籤查看。
+                </p>
+              )}
+              <DiagnosticSettings
+                config={temporary}
+                onChange={(next) =>
+                  setTemporary({ ...next, pipeline: { ...DEFAULT_PIPELINE, ...next.pipeline } })
+                }
+                csrfToken={csrfToken}
+                disabled={chat.running}
+                showEmotions={showEmotions}
+                onShowEmotions={setShowEmotions}
+              />
+              <button
+                type="button"
+                disabled={chat.running || !changed}
+                onClick={() =>
+                  setTemporary({
+                    ...structuredClone(config),
+                    pipeline: { ...DEFAULT_PIPELINE, ...config.pipeline },
+                  })
+                }
+                className="min-h-10 w-full rounded-lg border border-outline/30 text-sm disabled:opacity-40"
+              >
+                還原環境設定
+              </button>
+            </form>
+
+            <div hidden={panelTab !== "diagnostics"} className="space-y-4">
+              <p className="text-xs leading-6 text-on-surface/55">
+                最近兩次請求的設定與處理結果。PII 比較重用原請求，不會追加到對話或更動摘要。
+              </p>
+              {latest && (
+                <button
+                  type="button"
+                  disabled={chat.running || !comparisonConfig}
+                  onClick={() => {
+                    if (comparisonConfig) {
+                      chat.compare(latest, {
+                        ...comparisonConfig,
+                        enable_anonymization: !comparisonConfig.enable_anonymization,
+                      });
+                    }
+                  }}
+                  className="min-h-10 w-full rounded-lg border border-primary/30 px-3 py-2 text-sm text-primary disabled:opacity-40"
+                >
+                  只切換後端 PII 再測一次
+                </button>
+              )}
+              {!latest && (
+                <p className="rounded-lg bg-surface-container-low p-4 text-sm text-on-surface/60">
+                  送出第一則訊息後，可在這裡查看診斷。
+                </p>
+              )}
+              {latest && !comparisonConfig && (
+                <p className="text-xs text-on-surface/60">
+                  本次未提供完整設定，無法建立 PII 比較。
+                </p>
+              )}
+              {chat.running && (
+                <button
+                  type="button"
+                  onClick={chat.stop}
+                  className="min-h-10 rounded-lg border border-outline/30 px-3 text-sm"
+                >
+                  停止比較／測試
+                </button>
+              )}
+              {!!chat.runs.length && (
+                <div aria-label="最近兩次測試比較" className="space-y-4">
+                  {chat.runs.map((run) => (
+                    <DiagnosticResult key={run.id} run={run} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      {visible && summaryOpen && (
+        <CaseSummary
+          context={chat.context}
+          onSave={chat.saveSummary}
+          onStartEdit={chat.stop}
+          onClose={() => setSummaryOpen(false)}
+          canRegenerate={canRegenerate}
+        />
+      )}
+    </section>
+  );
+}
+
+function DiagnosticResult({ run }: { run: TestRun }) {
+  return (
+    <article aria-label={`測試 ${run.id}`} className="space-y-3 rounded-xl border border-outline/20 p-3">
+      <h4 className="text-sm font-bold">
+        測試 {run.id}
+        {run.comparison ? " · 僅切換後端 PII" : ""}
+      </h4>
+      <p className="text-xs text-on-surface/55">
+        {run.mode === "chat" ? "一般對話" : "適用法規預測"}
+      </p>
+      {"prediction" in run.result ? (
+        <div>
+          <h5 className="text-sm font-semibold">預測的適用法條</h5>
+          <p className="mt-2 whitespace-pre-wrap text-sm">{predictionText(run.result)}</p>
+          {run.result.prediction.decision_reason && (
+            <p className="mt-2 text-xs">{run.result.prediction.decision_reason}</p>
+          )}
+        </div>
+      ) : (
+        <details>
+          <summary className="cursor-pointer text-sm">本次回覆</summary>
+          <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">
+            {run.result.response.reply}
+          </p>
+        </details>
+      )}
+      {DIAGNOSTIC_SECTIONS.map(([key, label]) => (
+        <details key={key} className="rounded-lg border border-outline/15 p-2">
+          <summary className="cursor-pointer text-xs font-medium">{label}</summary>
+          <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11px]">
+            {JSON.stringify(run.result.diagnostics[key] ?? "未提供", null, 2)}
+          </pre>
+        </details>
+      ))}
+    </article>
+  );
 }

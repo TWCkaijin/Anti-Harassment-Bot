@@ -38,6 +38,7 @@ admin/frontend/dist/
 .firebase/
 firebase-debug.log
 firestore-debug.log
+firepit-log.txt
 ui-debug.log
 
 # ===== IDE =====

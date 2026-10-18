@@ -44,6 +44,14 @@ def sources():
     return jsonify(CorpusService().list_sources(**page_options()))
 
 
+@corpus_bp.get("/records/<record_id>")
+def record_detail(record_id):
+    kind = request.args.get("kind", "law")
+    if kind not in {"law", "judgment", "remedy"}:
+        raise CorpusError("不支援的資料類別", status=400)
+    return jsonify(CorpusService().get_record(kind, record_id))
+
+
 @corpus_bp.get("/imports")
 def imports():
     return jsonify(CorpusService().list_imports(**page_options()))

@@ -1,17 +1,12 @@
 """Regressions for CI build identity and secret-safe deployment diagnostics."""
 
 import json
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
-sys.path.insert(0, str(SCRIPTS))
-import deploy  # noqa: E402
-import provision_build  # noqa: E402
+from scripts import deploy, provision_build
 
 
 def test_deployment_error_does_not_expose_credentials():

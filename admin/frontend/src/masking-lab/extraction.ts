@@ -1,7 +1,10 @@
 import { CHUNK_CHARACTERS, CHUNK_OVERLAP, ENTITY_TYPES, type Entity } from "./config";
+import type { ExtractionRound } from "./pipeline";
 
 export class MaskingError extends Error {
   readonly code: string;
+  rounds: ExtractionRound[] = [];
+  generatedOutput?: string;
   constructor(code: string) { super(code); this.name = "MaskingError"; this.code = code; }
 }
 
@@ -27,14 +30,39 @@ export function parseEntities(raw: string, source: string): Entity[] {
   return result;
 }
 
-/** Code-point chunks overlap so identifiers at a boundary receive local context. */
+/** Sentence/newline boundaries first; only unpunctuated long runs need overlap.
+ * ASCII dots inside emails, URLs and decimals are not sentence boundaries.
+ * Keep every chunk an exact source substring (including its punctuation).
+ */
 export function splitText(text: string): string[] {
   const characters = Array.from(text);
   const result: string[] = [];
-  for (let offset = 0; offset < characters.length; offset += CHUNK_CHARACTERS - CHUNK_OVERLAP) {
-    result.push(characters.slice(offset, offset + CHUNK_CHARACTERS).join(""));
-    if (offset + CHUNK_CHARACTERS >= characters.length) break;
+  const appendSentence = (start: number, end: number) => {
+    while (end - start > CHUNK_CHARACTERS) {
+      const limit = start + CHUNK_CHARACTERS;
+      let boundary = limit;
+      while (boundary > start && !/[，,；;]/u.test(characters[boundary - 1])) boundary -= 1;
+      const hardCut = boundary === start;
+      if (hardCut) boundary = limit;
+      const chunk = characters.slice(start, boundary).join("");
+      if (chunk.trim()) result.push(chunk);
+      start = hardCut ? boundary - CHUNK_OVERLAP : boundary;
+    }
+    const chunk = characters.slice(start, end).join("");
+    if (chunk.trim()) result.push(chunk);
+  };
+  let start = 0;
+  for (let index = 0; index < characters.length; index += 1) {
+    const char = characters[index];
+    const asciiStop = char === "." && (index + 1 === characters.length || /\s/u.test(characters[index + 1]));
+    if (char === "。" || char === "\n" || char === "\r" || asciiStop) {
+      // Treat Windows line endings as one boundary.
+      if (char === "\r" && characters[index + 1] === "\n") index += 1;
+      appendSentence(start, index + 1);
+      start = index + 1;
+    }
   }
+  appendSentence(start, characters.length);
   return result;
 }
 

@@ -391,55 +391,188 @@ export function assertResponseContract(request: ChatRequest, response: ChatRespo
   }
 }
 
-export function parseChatResponse(payload: unknown, expectedContractVersion?: number): ChatResponse {
-  if (expectedContractVersion !== undefined && isRecord(payload) && (payload.contract_version ?? 1) !== expectedContractVersion) {
-    throw new ApiError(502, "回覆協定版本不符", "服務回覆與本次要求的版本不符，請重新連線後再試。", false);
+const RAG_SOURCE_STRING_FIELDS = [
+  "collection",
+  "doc_id",
+  "source_url",
+  "article",
+  "version",
+  "law_name",
+  "article_number",
+  "checked_at",
+  "effective_date",
+  "promulgation_date",
+  "promulgated_date",
+  "promulgated_date_scope",
+  "effective_date_scope",
+  "effective_note",
+] as const;
+
+const RAG_SOURCE_ALLOWED_KEYS = new Set<string>([
+  "label",
+  "type",
+  "distance",
+  ...RAG_SOURCE_STRING_FIELDS,
+]);
+
+const RAG_SOURCE_TYPES = new Set<string>(["law", "judgment", "remedy", "unknown"]);
+const RETRIEVAL_STATUSES = new Set<string>(["ok", "empty", "failed", "disabled", "not_requested"]);
+const RETRIEVAL_DATA_TYPES = new Set<string>(["law", "judgment", "remedy"]);
+const ANSWER_SECTION_KINDS = new Set<string>(["direction", "basis", "next_steps"]);
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isValidExecutionSummary(value: unknown): value is { route: string; model_calls: number } {
+  return (
+    isRecord(value) &&
+    typeof value.route === "string" &&
+    isNonNegativeSafeInteger(value.model_calls)
+  );
+}
+
+function isValidAnswerSection(
+  value: unknown,
+): value is NonNullable<ChatResponse["answer_sections"]>[number] {
+  return (
+    isRecord(value) &&
+    ANSWER_SECTION_KINDS.has(String(value.kind)) &&
+    typeof value.text === "string" &&
+    Array.isArray(value.source_ids) &&
+    value.source_ids.every((id): id is string => typeof id === "string")
+  );
+}
+
+export function parseChatResponse(
+  payload: unknown,
+  expectedContractVersion?: number,
+): ChatResponse {
+  if (
+    expectedContractVersion !== undefined &&
+    isRecord(payload) &&
+    (payload.contract_version ?? 1) !== expectedContractVersion
+  ) {
+    throw new ApiError(
+      502,
+      "回覆協定版本不符",
+      "服務回覆與本次要求的版本不符，請重新連線後再試。",
+      false,
+    );
   }
-  if (!isRecord(payload) || typeof payload.reply !== "string" || !Array.isArray(payload.suggested_replies)
-    || !Array.isArray(payload.action_buttons) || !Array.isArray(payload.clarifying_questions)
-    || !isRecord(payload.rag_used) || typeof payload.rag_used.status !== "boolean"
-    || !Array.isArray(payload.rag_used.sources) || payload.rag_used.sources.length > 100 || !payload.rag_used.sources.every(isRagSource)
-    || (payload.rag_used.retrieval !== undefined && !isRetrievalReport(payload.rag_used.retrieval))
-    || !["answer", "clarify"].includes(String(payload.interaction_mode))) throw invalidStream();
-  if (payload.contract_version !== undefined && payload.contract_version !== 2 && payload.contract_version !== 3 && payload.contract_version !== 4) throw invalidStream();
-  if (payload.contract_version === 2 || payload.contract_version === 3) {
-    if (!Number.isSafeInteger(payload.facts_revision) || Number(payload.facts_revision) < 0
-      || !Array.isArray(payload.fact_updates) || payload.fact_updates.length > 13 || !payload.fact_updates.every(isFactUpdate)
-      || (payload.clarification !== null && !isClarification(payload.clarification, payload.contract_version))
-      || !Array.isArray(payload.answer_sections) || payload.answer_sections.length > 6
-      || !payload.answer_sections.every(section => isRecord(section) && ["direction", "basis", "next_steps"].includes(String(section.kind))
-        && typeof section.text === "string" && Array.isArray(section.source_ids) && section.source_ids.every(id => typeof id === "string"))
-      || !isRecord(payload.execution) || typeof payload.execution.route !== "string" || !Number.isSafeInteger(payload.execution.model_calls)
-      || Number(payload.execution.model_calls) < 0) throw invalidStream();
-    if (payload.contract_version === 2 && payload.fact_updates.some(update => Array.isArray(update.value))) throw invalidStream();
+
+  if (
+    !isRecord(payload) ||
+    typeof payload.reply !== "string" ||
+    !Array.isArray(payload.suggested_replies) ||
+    !Array.isArray(payload.action_buttons) ||
+    !Array.isArray(payload.clarifying_questions) ||
+    !isRecord(payload.rag_used) ||
+    typeof payload.rag_used.status !== "boolean" ||
+    !Array.isArray(payload.rag_used.sources) ||
+    payload.rag_used.sources.length > 100 ||
+    !payload.rag_used.sources.every(isRagSource) ||
+    (payload.rag_used.retrieval !== undefined && !isRetrievalReport(payload.rag_used.retrieval)) ||
+    (payload.interaction_mode !== "answer" && payload.interaction_mode !== "clarify")
+  ) {
+    throw invalidStream();
   }
-  if (payload.contract_version === 4) {
-    if (!Number.isSafeInteger(payload.context_revision) || Number(payload.context_revision) < 0
-      || (payload.summary_update !== null && !isSummaryUpdate(payload.summary_update))
-      || (payload.clarification !== null && !isClarification(payload.clarification, 4))
-      || !isRecord(payload.execution) || typeof payload.execution.route !== "string" || !Number.isSafeInteger(payload.execution.model_calls)
-      || Number(payload.execution.model_calls) < 0) throw invalidStream();
+
+  const version = payload.contract_version;
+  if (version !== undefined && version !== 2 && version !== 3 && version !== 4) {
+    throw invalidStream();
   }
-  if ((payload.contract_version === 3 || payload.contract_version === 4) && sanitizeAnalysis(payload.analysis) === undefined) throw invalidStream();
-  if (payload.analysis !== undefined && sanitizeAnalysis(payload.analysis) === undefined) throw invalidStream();
-  return { ...payload, ...(payload.interaction_mode === "answer" && payload.clarification !== undefined ? { clarification: null } : {}) } as unknown as ChatResponse;
+
+  if (version === 2 || version === 3) {
+    if (
+      !isNonNegativeSafeInteger(payload.facts_revision) ||
+      !Array.isArray(payload.fact_updates) ||
+      payload.fact_updates.length > 13 ||
+      !payload.fact_updates.every(isFactUpdate) ||
+      (payload.clarification !== null && !isClarification(payload.clarification, version)) ||
+      !Array.isArray(payload.answer_sections) ||
+      payload.answer_sections.length > 6 ||
+      !payload.answer_sections.every(isValidAnswerSection) ||
+      !isValidExecutionSummary(payload.execution) ||
+      (version === 2 && payload.fact_updates.some((update) => Array.isArray(update.value)))
+    ) {
+      throw invalidStream();
+    }
+  }
+
+  if (version === 4) {
+    const validV4 =
+      isNonNegativeSafeInteger(payload.context_revision) &&
+      (payload.summary_update === null || isSummaryUpdate(payload.summary_update)) &&
+      (payload.clarification === null || isClarification(payload.clarification, 4)) &&
+      isValidExecutionSummary(payload.execution);
+
+    if (!validV4) throw invalidStream();
+  }
+
+  if ((version === 3 || version === 4) && sanitizeAnalysis(payload.analysis) === undefined) {
+    throw invalidStream();
+  }
+  if (payload.analysis !== undefined && sanitizeAnalysis(payload.analysis) === undefined) {
+    throw invalidStream();
+  }
+
+  return {
+    ...payload,
+    ...(payload.interaction_mode === "answer" && payload.clarification !== undefined
+      ? { clarification: null }
+      : {}),
+  } as unknown as ChatResponse;
 }
 
 export function isRetrievalReport(value: unknown): value is NonNullable<RagInfo["retrieval"]> {
-  return isRecord(value) && ["ok", "empty", "failed", "disabled", "not_requested"].includes(String(value.status))
-    && Array.isArray(value.data_types) && value.data_types.length <= 3
-    && value.data_types.every(kind => ["law", "judgment", "remedy"].includes(kind))
-    && new Set(value.data_types).size === value.data_types.length
-    && Array.isArray(value.sources) && value.sources.length <= 100 && value.sources.every(isRagSource);
+  if (!isRecord(value) || !RETRIEVAL_STATUSES.has(String(value.status))) {
+    return false;
+  }
+  if (
+    !Array.isArray(value.data_types) ||
+    value.data_types.length > 3 ||
+    !value.data_types.every((kind) => RETRIEVAL_DATA_TYPES.has(String(kind))) ||
+    new Set(value.data_types).size !== value.data_types.length
+  ) {
+    return false;
+  }
+  return (
+    Array.isArray(value.sources) &&
+    value.sources.length <= 100 &&
+    value.sources.every(isRagSource)
+  );
 }
 
 function isRagSource(value: unknown): value is RagSource | string {
-  if (typeof value === "string") return value.trim().length > 0 && value.length <= 4000;
-  if (!isRecord(value) || typeof value.label !== "string" || !value.label.trim() || value.label.length > 4000) return false;
-  if (Object.keys(value).some(key => !["label", "type", "collection", "doc_id", "distance", "source_url", "article", "version", "law_name", "article_number", "checked_at", "effective_date", "promulgation_date", "promulgated_date", "promulgated_date_scope", "effective_date_scope", "effective_note"].includes(key))) return false;
-  if (value.type !== undefined && !["law", "judgment", "remedy", "unknown"].includes(String(value.type))) return false;
-  if (["collection", "doc_id", "source_url", "article", "version", "law_name", "article_number", "checked_at", "effective_date", "promulgation_date", "promulgated_date", "promulgated_date_scope", "effective_date_scope", "effective_note"].some(key => value[key] != null && (typeof value[key] !== "string" || value[key].length > 4000))) return false;
-  return value.distance == null || (typeof value.distance === "number" && Number.isFinite(value.distance));
+  if (typeof value === "string") {
+    return value.trim().length > 0 && value.length <= 4000;
+  }
+  if (
+    !isRecord(value) ||
+    typeof value.label !== "string" ||
+    !value.label.trim() ||
+    value.label.length > 4000
+  ) {
+    return false;
+  }
+  if (Object.keys(value).some((key) => !RAG_SOURCE_ALLOWED_KEYS.has(key))) {
+    return false;
+  }
+  if (value.type !== undefined && !RAG_SOURCE_TYPES.has(String(value.type))) {
+    return false;
+  }
+  const hasInvalidStringField = RAG_SOURCE_STRING_FIELDS.some((key) => {
+    const fieldValue = value[key];
+    return fieldValue != null && (typeof fieldValue !== "string" || fieldValue.length > 4000);
+  });
+  if (hasInvalidStringField) {
+    return false;
+  }
+  return (
+    value.distance == null ||
+    (typeof value.distance === "number" && Number.isFinite(value.distance))
+  );
 }
 
 /** Consume complete SSE events, preserving split UTF-8 characters and line endings. */

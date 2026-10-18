@@ -1,4 +1,5 @@
 import { ApiError, normalizeApiErrorDetail, requestGuard } from "@rag/shared/api";
+import { activateReadCache, cachedRead, clearReadCache, invalidateReadCache } from "./readCache";
 
 export interface AdminSession {
   authenticated: true;
@@ -21,19 +22,41 @@ export class AdminRequestError extends ApiError {
 
 export function currentSession(): AdminSession | null { return activeSession; }
 
-function acceptSession(value: unknown): AdminSession {
+async function acceptSession(value: unknown): Promise<AdminSession> {
   if (typeof value !== "object" || value === null || !("authenticated" in value)
     || value.authenticated !== true || !("csrf_token" in value) || typeof value.csrf_token !== "string"
     || !value.csrf_token || !("expires_at" in value) || typeof value.expires_at !== "string"
     || !("environment" in value) || typeof value.environment !== "string") {
     throw new ApiError(502, "管理員登入回應格式不正確");
   }
-  activeSession = value as AdminSession;
-  return activeSession;
+  const accepted = value as AdminSession;
+  // Persist only a one-way cache partition, never a password, Cookie or CSRF token.
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accepted.csrf_token));
+  activateReadCache(`${API_BASE}:${accepted.environment}:${Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("")}`);
+  activeSession = accepted;
+  return accepted;
 }
 
 /** Only the browser manages the HttpOnly session cookie. Passwords and sessions are never persisted in JS storage. */
 export async function adminFetch<T>(path: string, options: RequestInit = {}, csrfToken = activeSession?.csrf_token): Promise<T> {
+  const method = (options.method ?? "GET").toUpperCase();
+  const cacheable = method === "GET" && /^\/(?:config|scenario-scripts|rerank-models|corpus\/(?:sources|records))(?:\?|$)/.test(path);
+  if (cacheable && activeSession && Date.parse(activeSession.expires_at) <= Date.now()) {
+    activeSession = null; clearReadCache(); window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+    throw new AdminRequestError(401, "登入已到期，請重新登入。");
+  }
+  if (cacheable) return cachedRead(path, () => requestAdmin<T>(path, { ...options, signal: undefined }, csrfToken), {
+    fresh: options.cache === "reload", signal: options.signal,
+  });
+  const prefix = method !== "GET" && method !== "HEAD"
+    ? path.startsWith("/config") ? "/config" : path.startsWith("/scenario-scripts") ? "/scenario-scripts" : path.startsWith("/corpus/") ? "/corpus/" : null
+    : null;
+  if (prefix) invalidateReadCache(prefix);
+  try { return await requestAdmin<T>(path, options, csrfToken); }
+  finally { if (prefix) invalidateReadCache(prefix); }
+}
+
+async function requestAdmin<T>(path: string, options: RequestInit = {}, csrfToken = activeSession?.csrf_token): Promise<T> {
   const url = new URL(`${API_BASE}${path}`, window.location.origin);
   if (url.origin !== window.location.origin) throw new ApiError(503, "管理 API 必須使用本站的安全連線");
   const method = (options.method ?? "GET").toUpperCase();
@@ -58,6 +81,7 @@ export async function adminFetch<T>(path: string, options: RequestInit = {}, csr
     } catch { /* Keep transport errors free of HTML/provider bodies. */ }
     if (response.status === 401 && path !== "/auth/login") {
       activeSession = null;
+      clearReadCache();
       window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
     }
     const retryAfter = Number(response.headers.get("Retry-After"));
@@ -81,4 +105,5 @@ export async function restoreSession(): Promise<AdminSession> {
 export async function logout(): Promise<void> {
   await adminFetch<void>("/auth/logout", { method: "POST" });
   activeSession = null;
+  clearReadCache();
 }
