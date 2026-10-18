@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { BASIC_CHECKS } from "../masking-lab/selfCheck";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -15,6 +16,11 @@ import {
 import AdminPanel from "./AdminPanel";
 const session = { authenticated: true as const, csrf_token: "admin-token", expires_at: "2099-01-01T00:00:00Z", environment: "preview" };
 import { DEFAULT_PIPELINE } from "../services/pipeline";
+import { evaluateSplit, type CaseResult } from "../masking-lab/benchmark";
+
+const masking = vi.hoisted(() => ({ load: vi.fn(), detect: vi.fn(), dispose: vi.fn() }));
+vi.mock("../masking-lab/runtime", () => ({ BrowserMaskingRuntime: vi.fn(class { load = masking.load; detect = masking.detect; dispose = masking.dispose; }) }));
+vi.mock("../masking-lab/benchmark", async () => ({ ...await vi.importActual("../masking-lab/benchmark"), evaluateSplit: vi.fn() }));
 
 vi.mock("../services/api", async () => {
   const actual = await vi.importActual<typeof import("../services/api")>("../services/api");
@@ -47,6 +53,10 @@ const runtimeConfig: RuntimeConfig = {
 };
 
 beforeEach(() => {
+  masking.load.mockReset().mockResolvedValue({ elapsedMs: 5, fetchedBytes: 0 });
+  masking.detect.mockReset().mockImplementation(async (source: string) => ({ entities: BASIC_CHECKS.find(item => item.source === source)?.expected ?? [] }));
+  masking.dispose.mockReset();
+  vi.mocked(evaluateSplit).mockReset();
   window.localStorage.clear();
   vi.mocked(getRuntimeConfig).mockReset().mockResolvedValue(runtimeConfig);
   vi.mocked(getScenarioSkills).mockReset().mockResolvedValue({ skills: [] });
@@ -195,12 +205,12 @@ describe("AdminPanel runtime config", () => {
 
   it("runs the real automatic preparation path in admin diagnostics even when the legacy manual review setting is enabled", async () => {
     vi.mocked(getRuntimeConfig).mockResolvedValue({ ...runtimeConfig, enable_client_privacy_review: true });
-    vi.mocked(runAdminChatTest).mockResolvedValue({ response: { reply: "合成診斷回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, interaction_mode: "answer", clarifying_questions: [], suggested_replies: [], action_buttons: [] }, diagnostics: {} });
+    vi.mocked(runAdminChatTest).mockResolvedValue({ response: { contract_version: 4, context_revision: 0, reply: "合成診斷回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, interaction_mode: "answer", clarifying_questions: [], suggested_replies: [], action_buttons: [] }, diagnostics: {} });
     await openSystemSettings();
     fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "synthetic@example.test" } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    expect(await screen.findByText("合成診斷回覆")).toBeVisible();
+    fireEvent.change(await screen.findByRole("textbox", { name: "測試訊息" }), { target: { value: "synthetic@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "傳送訊息" }));
+    expect(await within(screen.getByLabelText("診斷對話訊息")).findByText("合成診斷回覆")).toBeVisible();
     expect(screen.queryByRole("dialog", { name: "確認即將送出的內容" })).not.toBeInTheDocument();
     expect(runAdminChatTest).toHaveBeenCalledWith("admin-token", expect.objectContaining({ message: "[電子郵件]" }), expect.objectContaining({ enable_anonymization: true }), expect.any(AbortSignal));
     expect(updateRuntimeConfig).not.toHaveBeenCalled();
@@ -219,49 +229,84 @@ describe("AdminPanel runtime config", () => {
   });
 
   it("runs temporary overrides without saving config or storing test messages", async () => {
-    vi.mocked(runAdminChatTest).mockResolvedValue({ response: { reply: "合成診斷回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, interaction_mode: "answer", clarifying_questions: [], suggested_replies: [], action_buttons: [] }, diagnostics: { history: { removed_messages: 2 }, pii: { message: { changed_values: 1 } } } });
+    vi.mocked(runAdminChatTest).mockResolvedValue({ response: { contract_version: 4, context_revision: 0, reply: "合成診斷回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, interaction_mode: "answer", clarifying_questions: [], suggested_replies: [], action_buttons: [] }, diagnostics: { history: { removed_messages: 2 }, pii: { message: { changed_values: 1 } } } });
     await openSystemSettings();
 
     fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
     expect(screen.queryByRole("button", { name: "儲存變更" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "synthetic-private-message" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: "測試訊息" }), { target: { value: "synthetic-private-message" } });
+    fireEvent.click(screen.getByText("處理流程", { selector: "summary" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "精簡對話歷史" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "後端 PII 遮罩（第二層）" }));
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
+    fireEvent.click(screen.getByRole("button", { name: "傳送訊息" }));
     expect(runAdminChatTest).not.toHaveBeenCalled();
-    expect(await screen.findByText("合成診斷回覆")).toBeVisible();
-    expect(runAdminChatTest).toHaveBeenCalledWith("admin-token", { message: "synthetic-private-message", history: [], use_rag: true, contract_version: 4, case_context: { schema_version: 3, revision: 0, facts: {}, summary: "", summary_origin: "user" } }, expect.objectContaining({ enable_anonymization: false, pipeline: expect.objectContaining({ trim_history: false }) }), expect.any(AbortSignal));
+    expect(await within(screen.getByLabelText("診斷對話訊息")).findByText("合成診斷回覆")).toBeVisible();
+    expect(runAdminChatTest).toHaveBeenCalledWith("admin-token", expect.objectContaining({ message: "synthetic-private-message", history: [], use_rag: true, contract_version: 4, case_context: { schema_version: 3, revision: 0, facts: {}, summary: "", summary_origin: "model" } }), expect.objectContaining({ enable_anonymization: false, pipeline: expect.objectContaining({ trim_history: false }) }), expect.any(AbortSignal));
     expect(updateRuntimeConfig).not.toHaveBeenCalled();
     expect(JSON.stringify(localStorage)).not.toContain("synthetic-private-message");
     fireEvent.click(screen.getByRole("button", { name: /系統設定/ }));
     expect(screen.getByRole("checkbox", { name: "精簡對話歷史" })).toBeChecked();
   });
 
-  it("rejects malformed diagnostics input before any test request", async () => {
+  it("rejects oversized diagnostic messages before any test request", async () => {
     await openSystemSettings();
     fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成案例" } });
-    fireEvent.click(screen.getByText("測試歷史與情境摘要"));
-    fireEvent.change(screen.getByRole("textbox", { name: "歷史 JSON" }), { target: { value: '[{"role":"system","content":"invalid"}]' } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("歷史必須是 user／assistant");
+    fireEvent.change(await screen.findByRole("textbox", { name: "測試訊息" }), { target: { value: "字".repeat(2001) } });
+    expect(screen.getByRole("button", { name: "傳送訊息" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("訊息不可超過");
     expect(runAdminChatTest).not.toHaveBeenCalled();
     expect(updateRuntimeConfig).not.toHaveBeenCalled();
   });
 
-  it("aborts the diagnostic request when leaving its tab without saving overrides", async () => {
-    vi.mocked(runAdminChatTest).mockReturnValue(new Promise(() => {}));
+  it("completes diagnostics in the background and retains the reply and temporary settings on return", async () => {
+    let complete!: (result: Awaited<ReturnType<typeof runAdminChatTest>>) => void;
+    vi.mocked(runAdminChatTest).mockReturnValue(new Promise(resolve => { complete = resolve; }));
     await openSystemSettings();
 
     fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
-    fireEvent.change(screen.getByRole("textbox", { name: "測試訊息" }), { target: { value: "合成情境" } });
-    fireEvent.click(screen.getByRole("button", { name: "執行本次測試" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "測試訊息" }), { target: { value: "合成情境" } });
+    fireEvent.change(screen.getByLabelText("本次模型"), { target: { value: "synthetic/temporary" } });
+    fireEvent.click(screen.getByRole("button", { name: "傳送訊息" }));
     await waitFor(() => expect(runAdminChatTest).toHaveBeenCalled());
     const signal = vi.mocked(runAdminChatTest).mock.calls[0][3];
     expect(signal?.aborted).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: /系統設定/ }));
-    expect(signal?.aborted).toBe(true);
+    expect(signal?.aborted).toBe(false);
+    await act(async () => complete({ response: { contract_version: 4, context_revision: 0, reply: "背景完成回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, interaction_mode: "answer", clarifying_questions: [], suggested_replies: [], action_buttons: [] }, diagnostics: {} }));
+    fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
+    expect(within(screen.getByLabelText("診斷對話訊息")).getByText("背景完成回覆")).toBeVisible();
+    expect(screen.getByLabelText("本次模型")).toHaveValue("synthetic/temporary");
+    expect(runAdminChatTest).toHaveBeenCalledOnce();
     expect(updateRuntimeConfig).not.toHaveBeenCalled();
+  });
+
+  it("keeps masking evaluation running across navigation and still stops when explicitly cancelled", async () => {
+    let signal!: AbortSignal;
+    let onCase!: (result: CaseResult) => void;
+    let complete!: () => void;
+    vi.mocked(evaluateSplit).mockImplementation(async (_runtime, _split, abort, callback) => {
+      signal = abort; onCase = callback;
+      await new Promise<void>(resolve => { complete = resolve; });
+      return [];
+    });
+    await openSystemSettings();
+    fireEvent.click(screen.getByRole("button", { name: /本機遮罩驗證/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "載入本機模型" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "執行開發集 80 則" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "執行開發集 80 則" }));
+    fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
+    expect(signal.aborted).toBe(false);
+    expect(masking.dispose).not.toHaveBeenCalled();
+    act(() => onCase({ id: "background-1", split: "development", category: "synthetic", characters: 4, source: "合成文字", expected: [], detected: [], masked: "合成文字", missing: [], unexpected: [], elapsedMs: 1, error: null }));
+    expect(window.maskingValidationReport?.cases).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /本機遮罩驗證/ }));
+    expect(screen.getByText(/background-1 ·/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "停止" })).toBeEnabled();
+    expect(masking.load).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "停止" }));
+    expect(signal.aborted).toBe(true);
+    expect(masking.dispose).toHaveBeenCalledOnce();
+    await act(async () => complete());
   });
 
   it("shows the active maintenance message and resumes only after saving the cleared field", async () => {
@@ -360,8 +405,8 @@ it("groups models and workflow controls and preserves custom mask scope when tog
   const workflows = screen.getByRole("region", { name: "處理流程" });
   expect(within(workflows).getByRole("checkbox", { name: "啟用 Reranking" })).toBeVisible();
   expect(screen.getAllByRole("checkbox", { name: "啟用 Reranking" })).toHaveLength(1);
-  expect(within(screen.getByRole("group", { name: "驗證及測試" })).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("對話行為測試")]);
-  expect(within(screen.getByRole("navigation")).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("系統設定"), expect.stringContaining("Prompt 設定"), expect.stringContaining("Skills 設定"), expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("對話行為測試"), expect.stringContaining("檢索資料庫")]);
+  expect(within(screen.getByRole("group", { name: "驗證及測試" })).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("本機遮罩驗證")]);
+  expect(within(screen.getByRole("navigation")).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("系統設定"), expect.stringContaining("Prompt 設定"), expect.stringContaining("Skills 設定"), expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("本機遮罩驗證"), expect.stringContaining("檢索資料庫")]);
   fireEvent.click(screen.getByText("進階遮罩範圍（自訂範圍）"));
   const queryMask = screen.getByLabelText("遮罩檢索查詢");
   expect(queryMask).not.toBeChecked();

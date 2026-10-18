@@ -36,6 +36,7 @@ class AdminSettings(BaseSettings):
     admin_tasks_service_account: str = ""
     admin_tasks_target_url: str = ""
     admin_tasks_audience: str = ""
+    admin_local_jobs: bool = False
     admin_job_lease_seconds: int = Field(default=600, ge=60, le=1800)
     admin_job_retention_seconds: int = Field(default=604800, ge=3600, le=2592000)
     admin_max_body_bytes: int = Field(default=22 * 1024 * 1024, ge=1024)

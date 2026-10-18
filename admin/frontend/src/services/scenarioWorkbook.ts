@@ -243,3 +243,79 @@ function appendSummarySheet(entries: Record<string, Uint8Array>, rows: (string |
   entries["[Content_Types].xml"] = serialize(types);
   entries[part] = serialize(output);
 }
+
+/** Conservative preflight: refuse structures whose references cannot be shifted losslessly. */
+export function checkResultInsertion(workbook: ScenarioWorkbook, sheet: ScenarioSheet, afterColumn: number, count: number): void {
+  if (!Number.isSafeInteger(afterColumn) || afterColumn < -1 || afterColumn > sheet.maxColumn || count < 1 || sheet.maxColumn + count >= 16384) throw new Error('工作表沒有足夠空間插入結果欄。');
+  const unsafe = () => new Error('此 Excel 含公式、合併儲存格、表格或其他無法安全移動的結構，請另存為純值測資後重試。');
+  for (const [path, bytes] of Object.entries(workbook.entries)) {
+    if (!path.endsWith('.xml') || !path.startsWith('xl/')) continue;
+    const doc = xml(bytes);
+    if (elements(doc, 'f').length || elements(doc, 'definedName').length || elements(doc, 'pivotTableDefinition').length || elements(doc, 'externalLink').length) throw unsafe();
+  }
+  const doc = xml(workbook.entries[sheet.path]);
+  const relationPath = sheet.path.replace(/([^/]+)$/, '_rels/$1.rels');
+  if (workbook.entries[relationPath] && elements(xml(workbook.entries[relationPath]), 'Relationship').length) throw unsafe();
+  for (const tag of ['sheetProtection', 'mergeCells', 'tableParts', 'drawing', 'legacyDrawing', 'legacyDrawingHF', 'extLst', 'conditionalFormatting', 'dataValidations', 'hyperlinks', 'autoFilter', 'sortState', 'colBreaks', 'oleObjects', 'controls', 'protectedRanges', 'ignoredErrors']) {
+    if (elements(doc, tag).length) throw unsafe();
+  }
+  if (!elements(doc, 'sheetData').length) throw unsafe();
+}
+
+/** Insert a contiguous result block into a copy, retaining original cells, styles and ZIP parts. */
+export function insertScenarioResults(workbook: ScenarioWorkbook, sheet: ScenarioSheet, headerRow: number, afterColumn: number,
+  headers: string[], results: { row: number; values: (string | number | null)[] }[], summary?: (string | number | null)[][]): Uint8Array {
+  const count = headers.length, first = afterColumn + 1;
+  checkResultInsertion(workbook, sheet, afterColumn, count);
+  const doc = xml(workbook.entries[sheet.path]), ns = doc.documentElement.namespaceURI ?? NS;
+  const data = elements(doc, 'sheetData')[0];
+  for (const cell of elements(data, 'c')) {
+    const [column, row] = coordinate(cell.getAttribute('r')!);
+    if (column >= first) cell.setAttribute('r', `${columnName(column + count)}${row}`);
+  }
+  for (const row of elements(data, 'row')) row.removeAttribute('spans');
+  // Shift view coordinates and freeze boundaries along with the original cells.
+  const moveRef = (ref: string) => ref.replace(/[A-Z]+[1-9]\d*/g, value => { const [col, row] = coordinate(value); return `${columnName(col >= first ? col + count : col)}${row}`; });
+  for (const view of [...elements(doc, 'pane'), ...elements(doc, 'selection'), ...elements(doc, 'sheetView')]) {
+    for (const attr of ['topLeftCell', 'activeCell', 'sqref']) if (view.hasAttribute(attr)) view.setAttribute(attr, moveRef(view.getAttribute(attr)!));
+    if (view.localName === 'pane' && view.getAttribute('state')?.startsWith('frozen')) {
+      const x = Number(view.getAttribute('xSplit') ?? 0);
+      if (x > first) view.setAttribute('xSplit', String(x + count));
+    }
+  }
+  let cols = elements(doc, 'cols')[0];
+  if (!cols) { cols = doc.createElementNS(ns, 'cols'); data.parentNode!.insertBefore(cols, data); }
+  for (const col of Array.from(cols.children)) {
+    const min = Number(col.getAttribute('min')) - 1, max = Number(col.getAttribute('max')) - 1;
+    if (max < first) continue;
+    if (min < first) {
+      const before = col.cloneNode(true) as Element; before.setAttribute('max', String(first)); cols.insertBefore(before, col);
+    }
+    const shiftedMin = Math.max(min, first) + count + 1, shiftedMax = Math.min(16384, max + count + 1);
+    if (shiftedMin > 16384) col.remove();
+    else { col.setAttribute('min', String(shiftedMin)); col.setAttribute('max', String(shiftedMax)); }
+  }
+  headers.forEach((_, i) => {
+    const col = doc.createElementNS(ns, 'col'); col.setAttribute('min', String(first + i + 1)); col.setAttribute('max', String(first + i + 1)); col.setAttribute('width', i % 4 === 0 ? '55' : '24'); col.setAttribute('customWidth', '1'); cols.append(col);
+  });
+  Array.from(cols.children).sort((a, b) => Number(a.getAttribute('min')) - Number(b.getAttribute('min'))).forEach(col => cols.append(col));
+  const rows = new Map(elements(data, 'row').map(row => [Number(row.getAttribute('r')), row]));
+  for (const result of [{ row: headerRow, values: headers }, ...results]) {
+    let row = rows.get(result.row);
+    if (!row) { row = doc.createElementNS(ns, 'row'); row.setAttribute('r', String(result.row)); data.append(row); rows.set(result.row, row); }
+    result.values.forEach((value, i) => {
+      if (i >= count || (typeof value === 'string' && value.length > 32767)) throw new Error('結果超過 Excel 儲存格上限，請下載完整 JSON 紀錄。');
+      const cell = doc.createElementNS(ns, 'c'); cell.setAttribute('r', `${columnName(first + i)}${result.row}`);
+      if (typeof value === 'number') { const v = doc.createElementNS(ns, 'v'); v.textContent = String(value); cell.append(v); }
+      else { cell.setAttribute('t', 'inlineStr'); const inline = doc.createElementNS(ns, 'is'), text = doc.createElementNS(ns, 't'); text.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve'); text.textContent = value ?? ''; inline.append(text); cell.append(inline); }
+      row!.append(cell);
+    });
+    Array.from(row.children).sort((a, b) => coordinate(a.getAttribute('r')!)[0] - coordinate(b.getAttribute('r')!)[0]).forEach(cell => row!.append(cell));
+  }
+  Array.from(data.children).sort((a, b) => Number(a.getAttribute('r')) - Number(b.getAttribute('r'))).forEach(row => data.append(row));
+  const dimension = elements(doc, 'dimension')[0];
+  if (dimension) dimension.setAttribute('ref', `A1:${columnName(sheet.maxColumn + count)}${Math.max(headerRow, sheet.maxRow)}`);
+  const entries = { ...workbook.entries, [sheet.path]: strToU8(new XMLSerializer().serializeToString(doc)) };
+  if (summary) appendSummarySheet(entries, summary);
+  return zipSync(entries, { level: 6 });
+}

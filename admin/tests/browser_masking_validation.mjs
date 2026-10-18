@@ -17,10 +17,10 @@ const output = process.env.BROWSER_ARTIFACTS || '/tmp/rag-browser-masking-valida
 await mkdir(output, { recursive: true });
 const sourceHashes = {};
 for (const filename of await readdir('admin/frontend/src/masking-lab')) {
-  if (filename.endsWith('.test.ts')) continue;
+  if (/\.test\.tsx?$/.test(filename)) continue;
   sourceHashes[filename] = createHash('sha256').update(await readFile(path.join('admin/frontend/src/masking-lab', filename))).digest('hex');
 }
-const context = await chromium.launchPersistentContext(path.join(output, 'chrome-profile'), {
+const context = await chromium.launchPersistentContext(process.env.BROWSER_PROFILE_DIR || path.join(output, 'chrome-profile'), {
   channel: process.env.BROWSER_CHANNEL || 'chrome', headless: process.env.BROWSER_HEADLESS === 'true',
   viewport: { width: 1440, height: 1050 }, serviceWorkers: 'block',
 });
@@ -29,7 +29,12 @@ let state = 'started';
 const allowedRemote = ['huggingface.co', 'raw.githubusercontent.com', 'cdn-lfs.huggingface.co', 'cdn-lfs-us-1.hf.co', 'cas-bridge.xethub.hf.co', 'us.aws.cdn.hf.co'];
 await context.route('**/*', async route => {
   const req = route.request(), url = new URL(req.url());
+  // Optional Admin font styles are irrelevant to the model and stay offline.
+  if (url.hostname === 'fonts.googleapis.com') return route.fulfill({ contentType: 'text/css', body: '' });
   if (url.pathname.endsWith('/auth/session')) return route.fulfill({ json: { authenticated: true, csrf_token: 'synthetic-csrf', expires_at: '2099-01-01T00:00:00Z', environment: 'preview' } });
+  // The integrated Admin shell reads these on mount; never contact its backend.
+  if (url.pathname.endsWith('/config')) return route.fulfill({ json: { openrouter_model: 'synthetic/not-used', agent_prompt_sections: {}, rag_collections: {}, environment_document_id: 'synthetic', source: 'local' } });
+  if (url.pathname.endsWith('/scenario-scripts')) return route.fulfill({ json: { skills: [] } });
   // Do not log signed CDN URL query strings or bodies, even though fixtures are synthetic.
   const record = { host: url.hostname, path: url.pathname, method: req.method() };
   requests.push(record);
@@ -78,7 +83,9 @@ try {
   state = 'cold_load';
   await page.getByRole('button', { name: '載入本機模型', exact: true }).click();
   await waitWhileBusy(660_000);
-  await save('cold-load.json');
+  const initial = await save('cold-load.json');
+  assert(initial.basicCheck?.passed, 'Basic extraction did not find any expected synthetic PII');
+  await page.screenshot({ path: path.join(output, 'basic-check.png'), fullPage: false });
   state = 'cached_load';
   await page.getByRole('button', { name: '重新載入並量測快取' }).click();
   await waitWhileBusy(660_000);
@@ -94,6 +101,8 @@ try {
   const report = await save();
   console.log('scores', JSON.stringify(report.scores));
   console.log('gatePassed', report.gatePassed);
+  // This is a minimum functional regression check, not the 95% quality gate.
+  assert(report.scores.all.truePositive > 0, 'The model returned no correct spans');
   assert.equal(violations.length, 0, 'Unexpected outbound network request');
   assert.equal(pageErrors.length, 0, 'Browser page errors');
 } catch (error) {

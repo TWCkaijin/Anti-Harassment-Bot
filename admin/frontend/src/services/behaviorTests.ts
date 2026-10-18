@@ -4,6 +4,7 @@ import type { SummaryCaseContext } from "./caseFacts";
 import type { ScenarioWorkbook } from "./scenarioWorkbook";
 
 export interface BehaviorCase {
+  reference?: string;
   id: string;
   category: string;
   originalPrompt: string;
@@ -16,6 +17,8 @@ export interface BehaviorCase {
 export type BehaviorStatus = "pending" | "running" | "paused" | "completed" | "error" | "interrupted";
 export interface BehaviorIssue { code: string; severity: "info" | "warning"; text: string; evidence: string }
 export interface BehaviorTurn {
+  prediction?: import("./api").ApplicableLawPrediction;
+  lawDiagnostics?: Record<string, unknown>;
   number: number;
   attempt: number;
   status: "running" | "completed" | "error" | "interrupted";
@@ -94,12 +97,12 @@ export function importBehaviorCases(workbook: ScenarioWorkbook): BehaviorCase[] 
   return cases;
 }
 
-export function validateBehaviorCases(cases: BehaviorCase[], requireConfirmed = true): void {
-  if (!cases.length || cases.length > 100) throw new Error("每套需有 1–100 個案例。");
+export function validateBehaviorCases(cases: BehaviorCase[], requireConfirmed = true, optionalMetadata = false, maximum = 100): void {
+  if (!cases.length || cases.length > maximum) throw new Error("每套需有 1–100 個案例。");
   if (new Set(cases.map(test => test.id)).size !== cases.length) throw new Error("案例 ID 不可重複。");
   for (const test of cases) {
-    if (!test.id.trim() || test.id.length > 80 || !test.category.trim() || test.category.length > 100
-      || !test.expected.trim() || !test.criticalFailure.trim()
+    if (!test.id.trim() || test.id.length > 80 || (!optionalMetadata && !test.category.trim()) || test.category.length > 100
+      || (!optionalMetadata && (!test.expected.trim() || !test.criticalFailure.trim()))
       || [test.originalPrompt, test.expected, test.criticalFailure].some(text => text.length > 4000)) throw new Error("案例 ID、類型、預期行為及重大失敗條件需完整且符合長度限制。");
     if (!test.turns.length || test.turns.length > 10 || test.turns.some(text => text.length > 2000 || (requireConfirmed && !text.trim()))) throw new Error(`${test.id}：需填入 1–10 輪完整訊息，每輪最多 2,000 字元。`);
     if (requireConfirmed && !test.confirmed) throw new Error(`${test.id}：請先確認完整腳本。`);

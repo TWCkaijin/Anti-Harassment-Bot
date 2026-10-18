@@ -10,6 +10,26 @@ const session = { authenticated: true as const, csrf_token: "csrf-1", expires_at
 beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); vi.mocked(restoreSession).mockRejectedValue(new ApiError(401, "Unauthenticated")); vi.mocked(login).mockResolvedValue(session); vi.mocked(logout).mockResolvedValue(); });
 
 describe("standalone admin authentication", () => {
+  it("locks login controls until authentication fails and then permits retry", async () => {
+    let reject!: (error: Error) => void;
+    vi.mocked(login).mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+    render(<App />);
+    const password = await screen.findByLabelText("管理密碼");
+    fireEvent.change(password, { target: { value: "synthetic-password" } });
+    fireEvent.click(screen.getByRole("button", { name: "登入" }));
+    expect(password).toBeDisabled();
+    const pending = screen.getByRole("button", { name: "正在登入…" });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute("aria-busy", "true");
+    fireEvent.submit(password.closest("form")!);
+    expect(login).toHaveBeenCalledOnce();
+    await act(async () => reject(new ApiError(401, "密碼錯誤")));
+    expect(password).toBeEnabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("無法登入");
+    fireEvent.change(password, { target: { value: "retry-password" } });
+    fireEvent.click(screen.getByRole("button", { name: "登入" }));
+    expect(await screen.findByLabelText("已登入的管理工具")).toBeInTheDocument();
+  });
   it("does not mount protected tools before backend password verification", async () => {
     render(<App />);
     const password = await screen.findByLabelText("管理密碼");

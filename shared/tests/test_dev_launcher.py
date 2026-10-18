@@ -26,6 +26,7 @@ def test_environment_overrides_production_and_disables_cloud_dispatch(monkeypatc
     assert env["FIRESTORE_DATABASE_ID"] == "app-dev"
     assert env["ADMIN_PRIVATE_DATABASE_ID"] == "admin-private-dev"
     assert env["ADMIN_TASKS_QUEUE"] == ""
+    assert env["ADMIN_LOCAL_JOBS"] == "true"
     assert env["VITE_API_BASE_URL"] == "/api"
     assert "K_SERVICE" not in env
     assert "FIRESTORE_EMULATOR_HOST" not in env

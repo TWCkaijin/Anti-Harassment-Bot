@@ -82,19 +82,30 @@ export async function runAdminApplicableLawTest(csrfToken: string, request: Chat
   const result = await runTestJob(csrfToken, `{"request":${reviewedBody},"overrides":${JSON.stringify(overrides)},"output_contract":"applicable_laws_v1"${expectedContractSha256 ? `,"expected_applicable_laws_contract_sha256":${JSON.stringify(expectedContractSha256)}` : ""}}`, signal);
   return parseAdminApplicableLawTestResult(result);
 }
-export function getRuntimeConfig(csrfToken?: string): Promise<RuntimeConfig> { return adminFetch("/config", {}, csrfToken); }
+export function getRuntimeConfig(csrfToken?: string, fresh = false): Promise<RuntimeConfig> { return adminFetch("/config", fresh ? { cache: "reload" } : {}, csrfToken); }
 const revisionHeaders = (revision?: string): Record<string, string> => revision === undefined ? {} : { "If-Match": revision };
-export function updateRuntimeConfig(csrfToken: string, request: RuntimeConfigUpdate & { revision?: string }): Promise<RuntimeConfig> {
+export async function updateRuntimeConfig(csrfToken: string, request: RuntimeConfigUpdate & { revision?: string }): Promise<RuntimeConfig> {
   const { revision, ...updates } = request;
+  await verifyRuntimeRevision(csrfToken, revision);
   return adminFetch("/config", { method: "PUT", headers: revisionHeaders(revision), body: JSON.stringify(updates) }, csrfToken);
 }
-export function seedRuntimeConfig(csrfToken: string, revision?: string): Promise<RuntimeConfig> { return adminFetch("/config/seed", { method: "POST", headers: revisionHeaders(revision) }, csrfToken); }
-export function resetRuntimeConfig(csrfToken: string, revision?: string): Promise<RuntimeConfig> { return adminFetch("/config/reset", { method: "POST", headers: revisionHeaders(revision) }, csrfToken); }
-export function seedScenarioScripts(csrfToken: string, revision?: number): Promise<{ script_ids: string[]; revision?: number }> { return adminFetch("/scenario-scripts/seed", { method: "POST", headers: revisionHeaders(revision?.toString()) }, csrfToken); }
-export function getScenarioSkills(csrfToken?: string): Promise<{ skills: ScenarioSkill[]; revision?: number }> { return adminFetch("/scenario-scripts", {}, csrfToken); }
-export function updateScenarioSkill(csrfToken: string, id: string, skill: ScenarioSkillInput & { catalog_revision?: number }): Promise<ScenarioSkill> {
+export async function seedRuntimeConfig(csrfToken: string, revision?: string): Promise<RuntimeConfig> { await verifyRuntimeRevision(csrfToken, revision); return adminFetch("/config/seed", { method: "POST", headers: revisionHeaders(revision) }, csrfToken); }
+export async function resetRuntimeConfig(csrfToken: string, revision?: string): Promise<RuntimeConfig> { await verifyRuntimeRevision(csrfToken, revision); return adminFetch("/config/reset", { method: "POST", headers: revisionHeaders(revision) }, csrfToken); }
+export async function seedScenarioScripts(csrfToken: string, revision?: number): Promise<{ script_ids: string[]; revision?: number }> { await verifySkillsRevision(csrfToken, revision); return adminFetch("/scenario-scripts/seed", { method: "POST", headers: revisionHeaders(revision?.toString()) }, csrfToken); }
+export function getScenarioSkills(csrfToken?: string, fresh = false): Promise<{ skills: ScenarioSkill[]; revision?: number }> { return adminFetch("/scenario-scripts", fresh ? { cache: "reload" } : {}, csrfToken); }
+export async function updateScenarioSkill(csrfToken: string, id: string, skill: ScenarioSkillInput & { catalog_revision?: number }): Promise<ScenarioSkill> {
   const { catalog_revision, ...input } = skill;
+  await verifySkillsRevision(csrfToken, catalog_revision);
   return adminFetch(`/scenario-scripts/${encodeURIComponent(id)}`, { method: "PUT", headers: revisionHeaders(catalog_revision?.toString()), body: JSON.stringify(input) }, csrfToken);
 }
-export function deleteScenarioSkill(csrfToken: string, id: string, revision?: number): Promise<void> { return adminFetch(`/scenario-scripts/${encodeURIComponent(id)}`, { method: "DELETE", headers: revisionHeaders(revision?.toString()) }, csrfToken); }
+export async function deleteScenarioSkill(csrfToken: string, id: string, revision?: number): Promise<void> { await verifySkillsRevision(csrfToken, revision); return adminFetch(`/scenario-scripts/${encodeURIComponent(id)}`, { method: "DELETE", headers: revisionHeaders(revision?.toString()) }, csrfToken); }
 export function getRerankModels(csrfToken?: string): Promise<{ data: { id: string; name: string }[] }> { return adminFetch("/rerank-models", {}, csrfToken); }
+
+async function verifyRuntimeRevision(csrfToken: string, revision?: string) {
+  const latest = await getRuntimeConfig(csrfToken, true);
+  if (revision !== undefined && latest.revision !== revision) throw new ApiError(409, "設定已更新", "伺服器設定已變更，請重新載入後再儲存；你的草稿仍保留。");
+}
+async function verifySkillsRevision(csrfToken: string, revision?: number) {
+  const latest = await getScenarioSkills(csrfToken, true);
+  if (revision !== undefined && latest.revision !== revision) throw new ApiError(409, "Skills 已更新", "伺服器 Skills 已變更，請重新載入後再儲存；你的草稿仍保留。");
+}

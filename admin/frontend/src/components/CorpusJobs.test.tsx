@@ -51,3 +51,20 @@ describe("durable corpus jobs", () => {
     await waitFor(() => expect(corpus.getCorpusJob).toHaveBeenCalledTimes(before + 1));
   });
 });
+
+it("does not invalidate corpus lists merely by viewing an old completed job", async () => {
+  vi.mocked(corpus.listCorpusJobs).mockResolvedValue({ items: [{ ...pending, status: 'succeeded' }], next_cursor: null });
+  vi.mocked(corpus.getCorpusJob).mockResolvedValue({ ...pending, status: 'succeeded' });
+  const complete = vi.fn();
+  render(<CorpusJobs csrfToken="csrf" refreshKey={0} onCompleted={complete} onOpenImport={vi.fn()} />);
+  await screen.findByLabelText('工作詳細狀態');
+  expect(complete).not.toHaveBeenCalled();
+});
+
+it("does not fetch or poll while the corpus tab is hidden", async () => {
+  const view = render(<CorpusJobs active={false} csrfToken="csrf" refreshKey={0} onCompleted={vi.fn()} onOpenImport={vi.fn()} />);
+  expect(corpus.listCorpusJobs).not.toHaveBeenCalled(); expect(corpus.getCorpusJob).not.toHaveBeenCalled();
+  view.rerender(<CorpusJobs active csrfToken="csrf" refreshKey={0} onCompleted={vi.fn()} onOpenImport={vi.fn()} />);
+  await screen.findByLabelText('工作詳細狀態');
+  expect(corpus.getCorpusJob).toHaveBeenCalledOnce();
+});

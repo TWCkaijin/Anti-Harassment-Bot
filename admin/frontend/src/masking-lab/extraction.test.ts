@@ -16,19 +16,50 @@ describe("local extraction contract", () => {
     const masked = previewMask("林沐青是我的主管。林沐青已讀訊息。", [{ text: "林", type: "person" }, { text: "林沐青", type: "person" }]);
     expect(masked).toBe("[人物1]是我的主管。[人物1]已讀訊息。");
   });
-  it("preserves all code points and enough overlap when splitting long input", () => {
-    const source = "甲".repeat(795) + "林沐青😀" + "乙".repeat(900);
+  it("splits sentences and Windows/Unix newlines without changing source literals", () => {
+    const source = "我是林沐青。第二人是陳映禾。\r\n電話0910-246-802\n信箱a.b@example.com。";
     const chunks = splitText(source);
-    expect(chunks.join("")).toContain("林沐青😀");
-    expect(chunks[0] + chunks.slice(1).map(chunk => Array.from(chunk).slice(100).join("")).join("")).toBe(source);
-    expect(chunks.every(chunk => Array.from(chunk).length <= 800)).toBe(true);
+    expect(chunks).toEqual(["我是林沐青。", "第二人是陳映禾。", "電話0910-246-802\n", "信箱a.b@example.com。"]);
+    expect(chunks.every(chunk => source.includes(chunk))).toBe(true);
+    expect(splitText("\n\r\n  ")).toEqual([]);
+    expect(splitText("")).toEqual([]);
+  });
+  it("keeps URL, email and decimal dots intact but splits a final ASCII period", () => {
+    expect(splitText("Email a.b@example.com. Visit https://example.com/a.b at 3.14."))
+      .toEqual(["Email a.b@example.com.", " Visit https://example.com/a.b at 3.14."]);
+  });
+  it("splits long sentences at clause boundaries before falling back to hard cuts", () => {
+    const first = "甲".repeat(90) + "，";
+    const second = "乙".repeat(90) + "；";
+    const third = "第二人是陳映禾。";
+    expect(splitText(first + second + third)).toEqual([first, second + third]);
+    expect(splitText("甲".repeat(150))).toEqual(["甲".repeat(150)]);
+  });
+  it("preserves Unicode and boundary names with overlap in unpunctuated long input", () => {
+    const source = "甲".repeat(148) + "林沐青😀" + "乙".repeat(300);
+    const chunks = splitText(source);
+    expect(chunks.some(chunk => chunk.includes("林沐青😀"))).toBe(true);
+    expect(chunks[0] + chunks.slice(1).map(chunk => Array.from(chunk).slice(30).join("")).join("")).toBe(source);
+    expect(chunks.every(chunk => source.includes(chunk) && Array.from(chunk).length <= 150)).toBe(true);
   });
   it("only permits the pinned public model asset paths", () => {
     expect(isModelAssetUrl(`${MODEL_URL}params_shard_0.bin`)).toBe(true);
+    expect(isModelAssetUrl(`${MODEL_URL}params_shard_8.bin`)).toBe(true);
+    expect(isModelAssetUrl(`${MODEL_URL}params_shard_9.bin`)).toBe(false);
+    expect(isModelAssetUrl(MODEL_URL.replace(/\/resolve\/[^/]+\//, "/resolve/main/") + "mlc-chat-config.json")).toBe(false);
     expect(isModelAssetUrl(`${MODEL_URL}params_shard_0.bin?text=private`)).toBe(false);
     expect(isModelAssetUrl(`${MODEL_URL}private-name`)).toBe(false);
     expect(isModelAssetUrl("https://openrouter.ai/api/v1/chat/completions")).toBe(false);
     expect(isModelAssetUrl("https://huggingface.co/another/model/resolve/main/config.json")).toBe(false);
+  });
+  it("keeps every annotated benchmark entity intact in at least one short chunk", () => {
+    for (const fixture of FIXTURES) {
+      const chunks = splitText(fixture.text);
+      expect(chunks.every(chunk => Array.from(chunk).length <= 150)).toBe(true);
+      for (const entity of fixture.expected) {
+        expect(chunks.some(chunk => chunk.includes(entity.text)), `${fixture.id}: ${entity.text}`).toBe(true);
+      }
+    }
   });
 });
 describe("evaluation evidence", () => {

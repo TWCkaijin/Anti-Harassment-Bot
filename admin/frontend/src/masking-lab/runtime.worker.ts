@@ -1,6 +1,7 @@
 import type { MLCEngine } from "@mlc-ai/web-llm";
-import { CONTEXT_WINDOW, ENTITY_SCHEMA, EXTRACTION_EXAMPLES, EXTRACTION_PROMPT, LIBRARY_URL, MODEL_ID, MODEL_URL, isModelAssetUrl, type Entity } from "./config";
-import { MaskingError, parseEntities, splitText } from "./extraction";
+import { CONTEXT_WINDOW, LIBRARY_URL, MODEL_ID, MODEL_URL, isModelAssetUrl, type Entity } from "./config";
+import { MaskingError, splitText } from "./extraction";
+import { extractInStages, type ExtractionRound } from "./pipeline";
 import type { WorkerCommand, WorkerEvent } from "./types";
 
 const send = (event: WorkerEvent) => self.postMessage(event);
@@ -28,6 +29,7 @@ self.fetch = async (input, init) => {
 async function execute(command: WorkerCommand) {
   if (busy) { send({ id: command.id, kind: "error", code: "busy" }); return; }
   busy = true;
+  const rounds: ExtractionRound[] = [];
   try {
     if (command.operation === "load") {
       if (engine) { await engine.unload(); engine = null; }
@@ -62,27 +64,29 @@ async function execute(command: WorkerCommand) {
       const start = performance.now();
       const entities: Entity[] = [];
       const chunks = splitText(command.text);
-      for (const chunk of chunks) {
-        await engine.resetChat();
-        const result = await engine.chat.completions.create({
-          messages: [{ role: "system", content: EXTRACTION_PROMPT }, ...EXTRACTION_EXAMPLES.flatMap(example => [
-            { role: "user" as const, content: JSON.stringify({ text: example.text }) },
-            { role: "assistant" as const, content: JSON.stringify({ entities: example.entities }) },
-          ]), { role: "user", content: JSON.stringify({ text: chunk }) }],
-          temperature: 0, seed: 0, max_tokens: 768,
-          extra_body: { enable_thinking: false },
-          response_format: { type: "json_object", schema: ENTITY_SCHEMA },
-        });
-        if (result.choices[0]?.finish_reason !== "stop") throw new MaskingError("incomplete_output");
-        const raw = result.choices[0].message.content ?? "";
-        const extracted = parseEntities(raw, chunk);
-        for (const entity of extracted) if (!entities.some(item => item.text === entity.text)) entities.push(entity);
+      for (const [index, chunk] of chunks.entries()) {
+        const extracted = await extractInStages(chunk, async (messages, schema, maxTokens) => {
+          await engine!.resetChat();
+          const result = await engine!.chat.completions.create({
+            messages, temperature: 0, seed: 0, max_tokens: maxTokens,
+            extra_body: { enable_thinking: false },
+            response_format: { type: "json_object", schema },
+          });
+          if (result.choices[0]?.finish_reason !== "stop") {
+            const error = new MaskingError("incomplete_output");
+            error.generatedOutput = result.choices[0]?.message.content ?? "";
+            throw error;
+          }
+          return result.choices[0].message.content ?? "";
+        }, index);
+        rounds.push(...extracted.rounds);
+        for (const entity of extracted.entities) if (!entities.some(item => item.text === entity.text)) entities.push(entity);
       }
-      send({ id: command.id, kind: "detected", detection: { entities, elapsedMs: performance.now() - start, chunks: chunks.length } });
+      send({ id: command.id, kind: "detected", detection: { entities, rounds, elapsedMs: performance.now() - start, chunks: chunks.length } });
     }
   } catch (error) {
-    // Provider/library exceptions may contain input. Only fixed error codes leave the worker.
-    send({ id: command.id, kind: "error", code: error instanceof MaskingError ? error.code : command.operation === "load" ? "model_load_failed" : "model_execution_failed" });
+    // Never forward library exception messages. Stage outputs are local lab evidence.
+    send({ id: command.id, kind: "error", rounds: [...rounds, ...(error instanceof MaskingError ? error.rounds : [])], code: error instanceof MaskingError ? error.code : command.operation === "load" ? "model_load_failed" : "model_execution_failed" });
   } finally { busy = false; }
 }
 self.onmessage = (event: MessageEvent<WorkerCommand>) => { void execute(event.data); };

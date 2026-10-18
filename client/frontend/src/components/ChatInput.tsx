@@ -27,6 +27,7 @@ import {
 } from "../hooks/conversationHistory";
 
 interface ChatInputProps {
+  inputLabel?: string;
   onSend: (message: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext) => SendOutcome;
   isLoading?: boolean;
   suggestedReplies?: string[];
@@ -40,7 +41,7 @@ interface ChatInputProps {
   onClarificationDraftChange?: (messageId: string, draft: ClarificationDraft) => void;
 }
 
-export default function ChatInput({ onSend, isLoading, suggestedReplies = [], replyPrompt, streamingPrompt, onStop, caseRevision, activeContractVersion, disabled = false, allowImageUpload = true, onClarificationDraftChange }: ChatInputProps) {
+export default function ChatInput({ inputLabel, onSend, isLoading, suggestedReplies = [], replyPrompt, streamingPrompt, onStop, caseRevision, activeContractVersion, disabled = false, allowImageUpload = true, onClarificationDraftChange }: ChatInputProps) {
   const { t } = useI18n();
   const [value, setValue] = useState("");
   const { attachment, isReading, error: imageError, selectFile, removeImage, setError: setImageError } = useImageAttachment();
@@ -232,6 +233,7 @@ export default function ChatInput({ onSend, isLoading, suggestedReplies = [], re
             </>}
             <textarea
               ref={textareaRef}
+              aria-label={inputLabel ?? t.inputPlaceholder}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={handleKeyDown}

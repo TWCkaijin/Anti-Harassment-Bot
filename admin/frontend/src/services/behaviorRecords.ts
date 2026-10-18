@@ -1,4 +1,4 @@
-import { parseChatResponse, type AdminChatTestResult, type ChatRequest, type RuntimeConfigUpdate } from "./api";
+import { parseAdminApplicableLawTestResult, parseChatResponse, type AdminChatTestResult, type ChatRequest, type RuntimeConfigUpdate } from "./api";
 import { reproducibleOverrides } from "./adminDiagnostics";
 import { applySummaryUpdate, emptySummaryContext, isCaseContext, isRecord, type SummaryCaseContext } from "./caseFacts";
 import { validateBehaviorCases, type BehaviorCase, type BehaviorIssue, type BehaviorRecord, type BehaviorReview, type BehaviorRun, type BehaviorTurn } from "./behaviorTests";
@@ -119,10 +119,11 @@ function timestamp(value: unknown): string {
 }
 function hash(value: unknown): string { const result = text(value, 64); if (!hashPattern.test(result)) throw invalid(); return result; }
 function only(value: Record<string, unknown>, keys: string[]) { if (Object.keys(value).some(key => !keys.includes(key))) throw invalid(); }
-function parseCase(value: unknown): BehaviorCase {
+function parseCase(value: unknown, optionalMetadata = false): BehaviorCase {
   if (!isRecord(value) || !isRecord(value.source) || !Array.isArray(value.turns) || typeof value.confirmed !== "boolean") throw invalid();
-  only(value, ["id", "category", "originalPrompt", "expected", "criticalFailure", "turns", "confirmed", "source"]);
-  return { id: text(value.id, 80), category: text(value.category, 100), originalPrompt: text(value.originalPrompt, 4000, true), expected: text(value.expected, 4000), criticalFailure: text(value.criticalFailure, 4000), turns: value.turns.map(turn => text(turn, 2000)), confirmed: value.confirmed,
+  only(value, ["id", "category", "originalPrompt", "expected", "criticalFailure", "turns", "confirmed", "source", ...(optionalMetadata ? ["reference"] : [])]);
+  return { id: text(value.id, 80), category: text(value.category, 100, optionalMetadata), originalPrompt: text(value.originalPrompt, 4000, true), expected: text(value.expected, 4000, optionalMetadata), criticalFailure: text(value.criticalFailure, 4000, optionalMetadata),
+    ...(value.reference === undefined ? {} : { reference: text(value.reference, 32767, true) }), turns: value.turns.map(turn => text(turn, 2000)), confirmed: value.confirmed,
     source: { file: text(value.source.file, 300), sheet: text(value.source.sheet, 100), row: integer(value.source.row, 1, 1048576) } };
 }
 function parseRequest(value: unknown): ChatRequest {
@@ -149,13 +150,13 @@ function parseOverrides(value: unknown): RuntimeConfigUpdate {
   return result;
 }
 
-export async function importBehaviorRun(raw: string): Promise<BehaviorRun> {
+export async function importBehaviorRun(raw: string, mode?: "chat" | "law"): Promise<BehaviorRun> {
   if (new TextEncoder().encode(raw).length > MAX_BEHAVIOR_JSON_BYTES) throw new Error("測試 JSON 不可超過 20 MB。");
   let value: unknown; try { value = JSON.parse(raw); } catch { throw invalid(); }
   if (!isRecord(value) || value.format !== "behavior-tests-v1" || value.scriptVersion !== "1" || !Array.isArray(value.cases) || !Array.isArray(value.records)
     || ![1, 3].includes(Number(value.repetitions)) || typeof value.repetitions !== "number" || value.corpusVersion !== "unknown") throw invalid();
   only(value, ["format", "runId", "createdAt", "scriptVersion", "cases", "repetitions", "overrides", "contractSha256", "environment", "corpusVersion", "records"]);
-  const cases = value.cases.map(parseCase); validateBehaviorCases(cases);
+  const cases = value.cases.map(item => parseCase(item, !!mode)); validateBehaviorCases(cases, true, !!mode, mode === "law" ? 5000 : 100);
   const run: BehaviorRun = { format: "behavior-tests-v1", runId: text(value.runId, 80), createdAt: timestamp(value.createdAt), scriptVersion: "1", cases,
     repetitions: value.repetitions as 1 | 3, overrides: parseOverrides(value.overrides), contractSha256: hash(value.contractSha256), environment: text(value.environment, 200), corpusVersion: "unknown", records: [] };
   if (value.records.length !== cases.length * run.repetitions) throw invalid();
@@ -171,19 +172,26 @@ export async function importBehaviorRun(raw: string): Promise<BehaviorRun> {
     const rawTurns = entry.turns;
     const turns: BehaviorTurn[] = rawTurns.map((item: unknown, index: number) => {
       if (!isRecord(item) || !["running", "completed", "error", "interrupted"].includes(String(item.status))) throw invalid();
-      only(item, ["number", "attempt", "status", "startedAt", "elapsedMs", "request", "result", "contextAfter", "issues", "error"]);
+      only(item, ["number", "attempt", "status", "startedAt", "elapsedMs", "request", "result", "contextAfter", "issues", "error", ...(mode === "law" ? ["prediction", "lawDiagnostics"] : [])]);
       const number = integer(item.number, 1, test.turns.length);
       if (number !== nextTurn || integer(item.attempt, 1, 100) !== ++attempt) throw invalid();
       if (item.elapsedMs !== null && (typeof item.elapsedMs !== "number" || !Number.isFinite(item.elapsedMs) || item.elapsedMs < 0)) throw invalid();
       const turn: BehaviorTurn = { number, attempt, status: item.status as BehaviorTurn["status"], startedAt: timestamp(item.startedAt), elapsedMs: item.elapsedMs as number | null, request: parseRequest(item.request), issues: [] };
       if (item.status === "completed") {
-        if (!isRecord(item.result) || !isRecord(item.result.diagnostics)) throw invalid();
-        turn.result = sanitizeBehaviorResult(item.result as unknown as AdminChatTestResult);
-        turn.contextAfter = acceptedBehaviorContext(turn.request, turn.result);
-        turn.issues = checkBehaviorTurn(test, turn);
+        if (mode === "law") {
+          if (item.result !== undefined || item.contextAfter !== undefined) throw invalid();
+          if (item.lawDiagnostics !== undefined && !isRecord(item.lawDiagnostics)) throw invalid();
+          turn.lawDiagnostics = sanitizeBehaviorData(item.lawDiagnostics ?? {}) as Record<string, unknown>;
+          turn.prediction = parseAdminApplicableLawTestResult({ output_contract: "applicable_laws_v1", prediction: item.prediction, diagnostics: {} }).prediction;
+        } else {
+          if (!isRecord(item.result) || !isRecord(item.result.diagnostics)) throw invalid();
+          turn.result = sanitizeBehaviorResult(item.result as unknown as AdminChatTestResult);
+          turn.contextAfter = acceptedBehaviorContext(turn.request, turn.result);
+          turn.issues = checkBehaviorTurn(test, turn);
+        }
         nextTurn++; attempt = 0;
       } else {
-        if (item.result !== undefined || item.contextAfter !== undefined) throw invalid();
+        if (item.result !== undefined || item.contextAfter !== undefined || item.prediction !== undefined || item.lawDiagnostics !== undefined) throw invalid();
         turn.error = text(item.error ?? "匯入時發現未完成請求，可能已呼叫模型；請手動重試。", 1000);
         if (item.status === "running") { if (index !== rawTurns.length - 1) throw invalid(); turn.status = "interrupted"; }
       }
