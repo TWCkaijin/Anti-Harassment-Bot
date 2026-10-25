@@ -162,6 +162,7 @@ export interface HealthResponse {
 }
 
 export interface RuntimeConfig {
+  pii_model_revision?: string;
   revision?: string;
   openrouter_provider_sort?: "auto" | "latency" | "throughput" | "price";
   rag_rerank_enabled?: boolean;
@@ -202,6 +203,7 @@ export interface RuntimeConfig {
 export type RuntimeConfigUpdate = Partial<
   Pick<
     RuntimeConfig,
+    | "pii_model_revision"
     | "openrouter_provider_sort"
     | "rag_rerank_enabled"
     | "rag_rerank_model"

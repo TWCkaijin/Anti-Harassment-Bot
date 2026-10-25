@@ -133,7 +133,7 @@ class WorkerSetup:
                 "update",
                 self.queue,
                 f"--location={REGION}",
-                "--max-concurrent-dispatches=2",
+                "--max-concurrent-dispatches=8",
                 "--max-dispatches-per-second=2",
                 "--max-attempts=5",
                 "--min-backoff=10s",

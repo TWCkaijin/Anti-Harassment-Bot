@@ -7,7 +7,7 @@ export class BrowserMaskingRuntime {
   private sequence = 0;
   private pending: { id: number; resolve: (event: WorkerEvent) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; progress?: (fraction: number, text: string) => void } | null = null;
 
-  private request(operation: "load" | "extract", text?: string, progress?: (fraction: number, text: string) => void): Promise<WorkerEvent> {
+  private request(operation: "load" | "extract", text?: string, progress?: (fraction: number, text: string) => void, options?: { revision?: string; forceDownload?: boolean }): Promise<WorkerEvent> {
     if (this.pending) return Promise.reject(new MaskingError("busy"));
     if (!this.worker) {
       this.worker = new Worker(new URL("./runtime.worker.ts", import.meta.url), { type: "module" });
@@ -28,13 +28,13 @@ export class BrowserMaskingRuntime {
       const id = ++this.sequence;
       const timer = setTimeout(() => this.dispose("model_timeout"), operation === "load" ? 600_000 : GENERATION_TIMEOUT_MS);
       this.pending = { id, resolve, reject, timer, progress };
-      const command: WorkerCommand = operation === "load" ? { id, operation } : { id, operation, text: text ?? "" };
+      const command: WorkerCommand = operation === "load" ? { id, operation, ...options } : { id, operation, text: text ?? "" };
       this.worker!.postMessage(command);
     });
   }
 
-  async load(progress?: (fraction: number, text: string) => void): Promise<LoadMetrics> {
-    const response = await this.request("load", undefined, progress);
+  async load(progress?: (fraction: number, text: string) => void, options?: { revision?: string; forceDownload?: boolean }): Promise<LoadMetrics> {
+    const response = await this.request("load", undefined, progress, options);
     if (response.kind !== "loaded") throw new MaskingError("invalid_worker_response");
     return response.metrics;
   }

@@ -1,0 +1,378 @@
+{
+  "id": "synthetic-run",
+  "dataset_id": "synthetic-dataset",
+  "dataset_revision": 2,
+  "dataset_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "job_id": "synthetic-job",
+  "status": "succeeded",
+  "archived": false,
+  "created_at": "2026-10-18T00:00:00Z",
+  "settings": {
+    "top_k": 2,
+    "candidate_k": 3,
+    "model": "synthetic",
+    "timeout_seconds": 1,
+    "max_chars_per_doc": 2000,
+    "distance_threshold": null,
+    "provider_sort": "auto",
+    "preserve_data_types": true
+  },
+  "results": [
+    {
+      "case_id": "case-1",
+      "query": "合成查詢",
+      "data_types": [
+        "law"
+      ],
+      "case": {
+        "id": "case-1",
+        "query": "合成查詢",
+        "query_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "data_types": [
+          "law"
+        ],
+        "privacy_confirmed": true,
+        "reviewed": true,
+        "no_relevant": false,
+        "annotations": [
+          {
+            "document": {
+              "key": "laws/1",
+              "doc_id": "1",
+              "kind": "law",
+              "collection": "laws",
+              "unit_id": "law:A",
+              "content": "合成條文 1",
+              "metadata": {
+                "law_name": "合成法",
+                "article_number": "A"
+              },
+              "source_id": null,
+              "version": "synthetic-v1",
+              "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "evidence_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "manual_unit_id": null
+            },
+            "relevance": "relevant"
+          },
+          {
+            "document": {
+              "key": "laws/2",
+              "doc_id": "2",
+              "kind": "law",
+              "collection": "laws",
+              "unit_id": "law:B",
+              "content": "合成條文 2",
+              "metadata": {
+                "law_name": "合成法",
+                "article_number": "B"
+              },
+              "source_id": null,
+              "version": "synthetic-v1",
+              "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "evidence_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "manual_unit_id": null
+            },
+            "relevance": "relevant"
+          },
+          {
+            "document": {
+              "key": "laws/3",
+              "doc_id": "3",
+              "kind": "law",
+              "collection": "laws",
+              "unit_id": "law:C",
+              "content": "合成條文 3",
+              "metadata": {
+                "law_name": "合成法",
+                "article_number": "C"
+              },
+              "source_id": null,
+              "version": "synthetic-v1",
+              "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "evidence_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "manual_unit_id": null
+            },
+            "relevance": "relevant"
+          }
+        ]
+      },
+      "candidates": [
+        {
+          "key": "laws/1",
+          "doc_id": "1",
+          "kind": "law",
+          "collection": "laws",
+          "unit_id": "law:A",
+          "content": "合成條文 1",
+          "metadata": {
+            "law_name": "合成法",
+            "article_number": "A"
+          },
+          "source_id": null,
+          "version": "synthetic-v1",
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "evidence_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "manual_unit_id": null
+        },
+        {
+          "key": "laws/1b",
+          "doc_id": "1b",
+          "kind": "law",
+          "collection": "laws",
+          "unit_id": "law:A",
+          "content": "合成條文 1b",
+          "metadata": {
+            "law_name": "合成法",
+            "article_number": "A"
+          },
+          "source_id": null,
+          "version": "synthetic-v1",
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "evidence_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "manual_unit_id": null
+        },
+        {
+          "key": "laws/2",
+          "doc_id": "2",
+          "kind": "law",
+          "collection": "laws",
+          "unit_id": "law:B",
+          "content": "合成條文 2",
+          "metadata": {
+            "law_name": "合成法",
+            "article_number": "B"
+          },
+          "source_id": null,
+          "version": "synthetic-v1",
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "evidence_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "manual_unit_id": null
+        }
+      ],
+      "model_order": [
+        "laws/2",
+        "laws/1",
+        "laws/1b"
+      ],
+      "final_order": [
+        "laws/2",
+        "laws/1"
+      ],
+      "rerank": {
+        "status": "ok",
+        "model": "synthetic",
+        "elapsed_ms": 10
+      },
+      "status": "completed",
+      "elapsed_ms": 15,
+      "candidate_ref": {
+        "synthetic": true
+      },
+      "scores": {},
+      "excerpts": [],
+      "selection_reasons": {},
+      "metrics": {
+        "stages": {
+          "candidate": {
+            "hits": 2,
+            "relevant": 3,
+            "recall": 0.6666666666666666,
+            "hit_ids": [
+              "law:A",
+              "law:B"
+            ],
+            "returned_chunks": 3
+          },
+          "before": {
+            "hits": 1,
+            "relevant": 3,
+            "recall": 0.3333333333333333,
+            "hit_ids": [
+              "law:A"
+            ],
+            "returned_chunks": 2
+          },
+          "model": {
+            "hits": 2,
+            "relevant": 3,
+            "recall": 0.6666666666666666,
+            "hit_ids": [
+              "law:A",
+              "law:B"
+            ],
+            "returned_chunks": 2
+          },
+          "final": {
+            "hits": 2,
+            "relevant": 3,
+            "recall": 0.6666666666666666,
+            "hit_ids": [
+              "law:A",
+              "law:B"
+            ],
+            "returned_chunks": 2
+          }
+        },
+        "per_kind": {
+          "law": {
+            "candidate": {
+              "hits": 2,
+              "relevant": 3
+            },
+            "before": {
+              "hits": 1,
+              "relevant": 3
+            },
+            "model": {
+              "hits": 2,
+              "relevant": 3
+            },
+            "final": {
+              "hits": 2,
+              "relevant": 3
+            }
+          }
+        },
+        "delta": 0.3333333333333333,
+        "missing_candidates": [
+          "law:C"
+        ],
+        "dropped": [],
+        "gained": [
+          "law:B"
+        ],
+        "missing_final": [
+          "law:C"
+        ],
+        "unmapped_keys": [],
+        "rerank_status": "ok"
+      }
+    }
+  ],
+  "total": 1,
+  "summary": {
+    "total": 1,
+    "finished": 1,
+    "measured": 1,
+    "completion_rate": 1.0,
+    "measurement_rate": 1.0,
+    "unmeasured": 0,
+    "statuses": {
+      "ok": 1
+    },
+    "stages": {
+      "candidate": {
+        "evaluated_cases": 1,
+        "macro": 0.6666666666666666,
+        "micro": 0.6666666666666666
+      },
+      "before": {
+        "evaluated_cases": 1,
+        "macro": 0.3333333333333333,
+        "micro": 0.3333333333333333
+      },
+      "model": {
+        "evaluated_cases": 1,
+        "macro": 0.6666666666666666,
+        "micro": 0.6666666666666666
+      },
+      "final": {
+        "evaluated_cases": 1,
+        "macro": 0.6666666666666666,
+        "micro": 0.6666666666666666
+      }
+    },
+    "per_kind": {
+      "law": {
+        "candidate": {
+          "evaluated_cases": 1,
+          "macro": 0.6666666666666666,
+          "micro": 0.6666666666666666
+        },
+        "before": {
+          "evaluated_cases": 1,
+          "macro": 0.3333333333333333,
+          "micro": 0.3333333333333333
+        },
+        "model": {
+          "evaluated_cases": 1,
+          "macro": 0.6666666666666666,
+          "micro": 0.6666666666666666
+        },
+        "final": {
+          "evaluated_cases": 1,
+          "macro": 0.6666666666666666,
+          "micro": 0.6666666666666666
+        }
+      },
+      "judgment": {
+        "candidate": {
+          "evaluated_cases": 0,
+          "macro": null,
+          "micro": null
+        },
+        "before": {
+          "evaluated_cases": 0,
+          "macro": null,
+          "micro": null
+        },
+        "model": {
+          "evaluated_cases": 0,
+          "macro": null,
+          "micro": null
+        },
+        "final": {
+          "evaluated_cases": 0,
+          "macro": null,
+          "micro": null
+        }
+      },
+      "remedy": {
+        "candidate": {
+          "evaluated_cases": 0,
+          "macro": null,
+          "micro": null
+        },
+        "before": {
+          "evaluated_cases": 0,
+          "macro": null,
+          "micro": null
+        },
+        "model": {
+          "evaluated_cases": 0,
+          "macro": null,
+          "micro": null
+        },
+        "final": {
+          "evaluated_cases": 0,
+          "macro": null,
+          "micro": null
+        }
+      }
+    },
+    "mixed": {
+      "candidate": {
+        "evaluated_cases": 0,
+        "macro": null,
+        "micro": null
+      },
+      "before": {
+        "evaluated_cases": 0,
+        "macro": null,
+        "micro": null
+      },
+      "model": {
+        "evaluated_cases": 0,
+        "macro": null,
+        "micro": null
+      },
+      "final": {
+        "evaluated_cases": 0,
+        "macro": null,
+        "micro": null
+      }
+    },
+    "p95_ms": 15
+  }
+}

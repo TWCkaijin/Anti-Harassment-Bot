@@ -1,5 +1,5 @@
 import type { MLCEngine } from "@mlc-ai/web-llm";
-import { CONTEXT_WINDOW, LIBRARY_URL, MODEL_ID, MODEL_URL, isModelAssetUrl, type Entity } from "./config";
+import { CONTEXT_WINDOW, LIBRARY_URL, MODEL_ID, MODEL_REVISION, modelUrl, isModelAssetUrl, type Entity } from "./config";
 import { MaskingError, splitText } from "./extraction";
 import { extractInStages, type ExtractionRound } from "./pipeline";
 import type { WorkerCommand, WorkerEvent } from "./types";
@@ -7,6 +7,8 @@ import type { WorkerCommand, WorkerEvent } from "./types";
 const send = (event: WorkerEvent) => self.postMessage(event);
 let engine: MLCEngine | null = null;
 let busy = false;
+let activeRevision = MODEL_REVISION;
+let forceDownload = false;
 let fetchedBytes = 0, fetches = 0, failedFetches = 0;
 const measurements: Promise<void>[] = [];
 const originalFetch = self.fetch.bind(self);
@@ -16,10 +18,10 @@ const originalFetch = self.fetch.bind(self);
 self.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const method = init?.method ?? (input instanceof Request ? input.method : "GET");
-  if (method !== "GET" || init?.body || !isModelAssetUrl(url)) throw new MaskingError("network_request_blocked");
+  if (method !== "GET" || init?.body || !isModelAssetUrl(url, activeRevision)) throw new MaskingError("network_request_blocked");
   fetches += 1;
   try {
-    const response = await originalFetch(input, { ...init, credentials: "omit", referrerPolicy: "no-referrer" });
+    const response = await originalFetch(input, { ...init, ...(forceDownload ? { cache: "reload" as const } : {}), credentials: "omit", referrerPolicy: "no-referrer" });
     if (!response.ok) { failedFetches += 1; return response; }
     measurements.push(response.clone().arrayBuffer().then(buffer => { fetchedBytes += buffer.byteLength; }).catch(() => { failedFetches += 1; }));
     return response;
@@ -33,6 +35,9 @@ async function execute(command: WorkerCommand) {
   try {
     if (command.operation === "load") {
       if (engine) { await engine.unload(); engine = null; }
+      activeRevision = command.revision ?? MODEL_REVISION;
+      const url = modelUrl(activeRevision);
+      forceDownload = command.forceDownload === true;
       fetchedBytes = 0; fetches = 0; failedFetches = 0; measurements.length = 0;
       const start = performance.now();
       const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<{ info?: Record<string, string> } | null> } }).gpu;
@@ -40,14 +45,17 @@ async function execute(command: WorkerCommand) {
       const adapter = await gpu.requestAdapter();
       if (!adapter) throw new MaskingError("gpu_adapter_unavailable");
       // Import only after installing the network guard: the runtime captures fetch.
-      const { MLCEngine } = await import("@mlc-ai/web-llm");
+      const { MLCEngine, deleteModelAllInfoInCache } = await import("@mlc-ai/web-llm");
+      const appConfig = { cacheBackend: "indexeddb" as const, model_list: [{
+        model: url, model_id: MODEL_ID, model_lib: LIBRARY_URL,
+        overrides: { context_window_size: CONTEXT_WINDOW },
+      }] };
+      if (forceDownload) {
+        send({ id: command.id, kind: "progress", progress: 0, text: "正在清除目標版本快取並重新下載" });
+        await deleteModelAllInfoInCache(MODEL_ID, appConfig);
+      }
       const candidate = new MLCEngine({
-        // IndexedDB uses fetch, allowing one guard to cover all artifact downloads.
-        // Cache API's native Cache.add performs downloads outside the fetch wrapper.
-        appConfig: { cacheBackend: "indexeddb", model_list: [{
-          model: MODEL_URL, model_id: MODEL_ID, model_lib: LIBRARY_URL,
-          overrides: { context_window_size: CONTEXT_WINDOW },
-        }] },
+        appConfig,
         logLevel: "SILENT",
         initProgressCallback: report => send({ id: command.id, kind: "progress", progress: report.progress, text: report.text }),
       });
@@ -56,7 +64,7 @@ async function execute(command: WorkerCommand) {
       engine = candidate;
       const info = adapter.info;
       send({ id: command.id, kind: "loaded", metrics: {
-        elapsedMs: performance.now() - start, fetchedBytes, fetches, failedFetches,
+        modelRevision: activeRevision, elapsedMs: performance.now() - start, fetchedBytes, fetches, failedFetches,
         adapter: Object.fromEntries((["vendor", "architecture", "device", "description"] as const).map(key => [key, String(info?.[key] ?? "unavailable")])),
       } });
     } else {

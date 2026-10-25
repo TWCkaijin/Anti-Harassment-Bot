@@ -1,12 +1,31 @@
 """Bounded, optional OpenRouter reranking shared by every agent retrieval path."""
 
 import asyncio
+from dataclasses import dataclass, field
 from math import isfinite
 from time import monotonic
 
 import httpx
 
 from rag_core.core.config import get_settings
+
+
+class RankedDocuments(list):
+    """Preserve the internal list interface while retaining provider scores."""
+
+    def __init__(self, documents, scores):
+        super().__init__(documents)
+        self.scores = scores
+
+
+@dataclass
+class RerankResult:
+    selected: list
+    ranked: list | None
+    info: dict
+    scores: dict = field(default_factory=dict)
+    excerpts: list[str] = field(default_factory=list)
+    selection_reasons: dict = field(default_factory=dict)
 
 
 def apply_provider_sort(options, config):
@@ -98,24 +117,16 @@ async def _request(query, candidates, config):
         indices.append(index)
     if len(set(indices)) != len(indices):
         raise ValueError("duplicate_index")
-    ranked = [candidates[i] for i in indices]
+    ranked = RankedDocuments(
+        [candidates[i] for i in indices],
+        {_key(candidates[r["index"]]): r["relevance_score"] for r in results},
+    )
     return ranked, body.get("model", config.rag_rerank_model)
 
 
-async def retrieve_with_rerank(rag, query, config, **kwargs):
-    """One retrieval, at most one rerank, and no model or retrieval retry on failure."""
-    limit = kwargs.pop("top_k", config.rag_retrieval_top_k)
-    metrics = kwargs.get("timings")
-    diagnostics = kwargs.get("diagnostics")
-    enabled = config.rag_rerank_enabled
-    started = monotonic()
-    candidates = await rag.retrieve(
-        query, top_k=max(limit, config.rag_rerank_candidate_k) if enabled else limit, **kwargs
-    )
-    if metrics is not None:
-        metrics["candidate_retrieval_ms"] = (
-            metrics.get("candidate_retrieval_ms", 0) + (monotonic() - started) * 1000
-        )
+async def rerank_candidates(query, candidates, config, *, top_k=None, preserve_data_types=False):
+    """Rank an immutable pool once. Detailed traces are returned only to the caller."""
+    limit = config.rag_retrieval_top_k if top_k is None else top_k
     info = {
         "status": "disabled",
         "model": config.rag_rerank_model,
@@ -123,17 +134,21 @@ async def retrieve_with_rerank(rag, query, config, **kwargs):
         "retained_count": len(candidates),
         "elapsed_ms": 0.0,
     }
-    if diagnostics is not None:
-        diagnostics["rerank"] = info
-    if not enabled:
-        return candidates
-    preserve = kwargs.get("preserve_data_types", False)
+    result = RerankResult(
+        selected=candidates,
+        ranked=None,
+        info=info,
+        excerpts=[_excerpt(d, config.rag_rerank_max_chars_per_doc) for d in candidates],
+    )
+    if not config.rag_rerank_enabled:
+        return result
+    preserve = preserve_data_types
     final_limit = (
         max(limit, len({d.metadata.get("collection") for d in candidates})) if preserve else limit
     )
     if len(candidates) <= final_limit:
         info["status"] = "skipped_small_pool"
-        return candidates
+        return result
     started = monotonic()
     try:
         # Bounds the entire exchange, rather than giving each network phase one second.
@@ -141,6 +156,20 @@ async def retrieve_with_rerank(rag, query, config, **kwargs):
             ranked, actual_model = await _request(query, candidates, config)
         selected = _select(candidates, ranked, limit, preserve)
         info.update(status="ok", model=actual_model)
+        result.ranked = list(ranked)
+        result.scores = getattr(ranked, "scores", {})
+        for doc in selected:
+            result.selection_reasons[_key(doc)] = [
+                "exact_article" if doc.metadata.get("retrieval_method") == "exact" else "rank"
+            ]
+        if preserve:
+            for collection in dict.fromkeys(d.metadata.get("collection") for d in candidates):
+                group = [d for d in ranked if d.metadata.get("collection") == collection]
+                reserved = next(
+                    (d for d in group if d.metadata.get("retrieval_method") == "exact"), group[0]
+                )
+                if _key(reserved) in result.selection_reasons:
+                    result.selection_reasons[_key(reserved)].append("collection_coverage")
     except TimeoutError:
         selected = candidates[:final_limit]
         info["status"] = "timeout"
@@ -150,7 +179,34 @@ async def retrieve_with_rerank(rag, query, config, **kwargs):
     finally:
         elapsed = (monotonic() - started) * 1000
         info["elapsed_ms"] = elapsed
-        if metrics is not None:
-            metrics["rerank_ms"] = metrics.get("rerank_ms", 0) + elapsed
     info["retained_count"] = len(selected)
-    return selected
+    result.selected = selected
+    return result
+
+
+async def retrieve_with_rerank(rag, query, config, **kwargs):
+    """One retrieval, at most one rerank; the public chat interface is unchanged."""
+    limit = kwargs.pop("top_k", config.rag_retrieval_top_k)
+    metrics, diagnostics = kwargs.get("timings"), kwargs.get("diagnostics")
+    started = monotonic()
+    candidates = await rag.retrieve(
+        query,
+        top_k=max(limit, config.rag_rerank_candidate_k) if config.rag_rerank_enabled else limit,
+        **kwargs,
+    )
+    if metrics is not None:
+        metrics["candidate_retrieval_ms"] = (
+            metrics.get("candidate_retrieval_ms", 0) + (monotonic() - started) * 1000
+        )
+    result = await rerank_candidates(
+        query,
+        candidates,
+        config,
+        top_k=limit,
+        preserve_data_types=kwargs.get("preserve_data_types", False),
+    )
+    if diagnostics is not None:
+        diagnostics["rerank"] = result.info
+    if metrics is not None and result.info["status"] not in {"disabled", "skipped_small_pool"}:
+        metrics["rerank_ms"] = metrics.get("rerank_ms", 0) + result.info["elapsed_ms"]
+    return result.selected

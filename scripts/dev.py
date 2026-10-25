@@ -56,6 +56,7 @@ def environment(env_file: Path):
             "ADMIN_TASKS_TARGET_URL": "",
             "ADMIN_TASKS_SERVICE_ACCOUNT": "",
             "ADMIN_TASKS_AUDIENCE": "",
+            "ADMIN_LOCAL_JOBS": "true",
             "VITE_API_BASE_URL": "/api",
         }
     )
@@ -76,6 +77,9 @@ def check_ports():
     for name, port, _ in SERVICES:
         with socket.socket() as probe:
             try:
+                # A recently stopped Vite socket may still be in TIME_WAIT.
+                # Reuse permits that restart while active listeners still fail.
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind(("127.0.0.1", port))
             except OSError:
                 raise RuntimeError(
@@ -114,7 +118,7 @@ def stop_all(processes):
     for proc in processes:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGTERM)
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 10
     for proc in processes:
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=max(0.01, deadline - time.monotonic()))
@@ -185,7 +189,8 @@ def main():
         log_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         log_dir = Path(tempfile.mkdtemp(prefix="run-", dir=log_root))
         print(
-            f"Logs: {log_dir}\nStarting four services; no background worker is started.", flush=True
+            f"Logs: {log_dir}\nStarting four services; local jobs run only when submitted to this API instance.",
+            flush=True,
         )
         env = environment(env_file)
         for (name, _, _), command in zip(SERVICES, commands(), strict=True):

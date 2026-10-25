@@ -8,7 +8,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from provision_firebase import Provisioner
+try:
+    from scripts.provision_firebase import Provisioner
+except ModuleNotFoundError:  # pragma: no cover
+    from provision_firebase import Provisioner
 
 POLICY_PATH = Path(__file__).resolve().parents[1] / "infrastructure/iam/ci-deployment-policy.json"
 REGION = "asia-east1"

@@ -22,6 +22,11 @@ FORBIDDEN = {
 }
 
 
+def uv_executable() -> str:
+    local_uv = Path.home() / ".local" / "bin" / "uv"
+    return shutil.which("uv") or (str(local_uv) if local_uv.is_file() else "uv")
+
+
 def copy_package(source: Path, target: Path) -> None:
     def ignore(_directory, names):
         return [
@@ -47,7 +52,7 @@ def build(service: str) -> Path:
     for local_cli in ("password_cli.py", "worker_cli.py"):
         (target / "admin_app" / local_cli).unlink(missing_ok=True)
     command = [
-        "uv",
+        uv_executable(),
         "export",
         "--frozen",
         "--no-default-groups",
@@ -135,10 +140,11 @@ def main() -> None:
     for service in ["client", "admin"] if args.service == "all" else [args.service]:
         target = build(service)
         if args.discovery_venv:
-            subprocess.run(["uv", "venv", str(target / "venv"), "--python", "3.13"], check=True)
+            uv = uv_executable()
+            subprocess.run([uv, "venv", str(target / "venv"), "--python", "3.13"], check=True)
             subprocess.run(
                 [
-                    "uv",
+                    uv,
                     "pip",
                     "install",
                     "--python",

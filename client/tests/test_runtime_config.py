@@ -468,3 +468,15 @@ def test_client_privacy_review_round_trips_through_config_save_without_cloud(mon
     assert result.updated_by == "offline-admin"
     assert document.set.call_count == 1
     assert document.set.call_args.kwargs == {"merge": True}
+
+
+def test_pii_model_revision_is_pinned_and_survives_runtime_build():
+    from rag_core.core.runtime_config import _build_config, validate_runtime_config_update
+
+    revision = "a" * 40
+    assert validate_runtime_config_update({"pii_model_revision": revision}) == {"pii_model_revision": revision}
+    assert _build_config({"pii_model_revision": revision}, "firestore").pii_model_revision == revision
+    assert _build_config({}, "defaults").pii_model_revision == ""
+    for value in ("main", "latest", "../other", "A" * 40, None, 123):
+        with pytest.raises(ValueError):
+            validate_runtime_config_update({"pii_model_revision": value})

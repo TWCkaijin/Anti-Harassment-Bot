@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 jobs_bp = Blueprint("admin_jobs", __name__)
 internal_bp = Blueprint("admin_internal", __name__)
 HANDLERS = {}
+OBSERVERS = {}
 TERMINAL = {"succeeded", "failed", "cancelled", "needs_review"}
 CORPUS_JOB_KINDS = {"corpus_parse", "corpus_import", "corpus_delete"}
 
@@ -62,6 +63,16 @@ def canonical(value):
 
 def register_handler(kind, handler):
     HANDLERS[kind] = handler
+
+
+def register_observer(kind, observer):
+    OBSERVERS[kind] = observer
+
+
+def notify_observer(job):
+    observer = OBSERVERS.get((job or {}).get("kind"))
+    if observer:
+        observer(job)
 
 
 def job_ref(job_id):
@@ -335,6 +346,7 @@ class JobContext:
             },
             allow_cancel=True,
         )
+        notify_observer(job_ref(self.job_id).get().to_dict())
 
 
 def _unknown_error():
@@ -398,6 +410,7 @@ def _claim(job_id, generation):
 def execute_job(job_id, generation):
     job = _claim(job_id, generation)
     if job is None:
+        notify_observer(job_ref(job_id).get().to_dict())
         return
     context = JobContext(job_id, job["lease_token"])
     try:
@@ -629,6 +642,7 @@ def get_job(job_id, *, internal=False):
     job = infrastructure.atomic(reconcile)
     if not job:
         raise JobFailure("job_not_found", "Job not found", http_status=404)
+    notify_observer(job)
     if job["expires_at"] <= now():
         raise JobFailure("job_expired", "工作已過期，請建立新的工作。", http_status=410)
     ensure_enqueued(job)

@@ -2,10 +2,12 @@ import { BASIC_CHECKS } from "./selfCheck";
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ValidationPage from './ValidationPage';
+import { latestModelRevision } from "./modelVersion";
 import { BrowserMaskingRuntime } from './runtime';
 import { evaluateSplit, type CaseResult } from './benchmark';
 
 const mock = vi.hoisted(() => ({ load: vi.fn(), detect: vi.fn(), dispose: vi.fn() }));
+vi.mock('./modelVersion', () => ({ latestModelRevision: vi.fn(), savedModelRevision: (fallback: string) => fallback, rememberModelRevision: vi.fn() }));
 vi.mock('./runtime', () => ({ BrowserMaskingRuntime: vi.fn(class { load = mock.load; detect = mock.detect; dispose = mock.dispose; }) }));
 vi.mock('./benchmark', async () => ({ ...await vi.importActual('./benchmark'), evaluateSplit: vi.fn() }));
 const result: CaseResult = { id: 'synthetic-1', split: 'development', category: 'synthetic', characters: 10, source: '合成原文', expected: [], detected: [], masked: '合成原文', missing: [], unexpected: [], elapsedMs: 1, error: null };
@@ -13,6 +15,7 @@ beforeEach(() => {
   vi.mocked(BrowserMaskingRuntime).mockClear(); mock.dispose.mockReset(); mock.detect.mockReset().mockImplementation(async (source: string) => ({ entities: BASIC_CHECKS.find(item => item.source === source)?.expected ?? [] }));
   mock.load.mockReset().mockResolvedValue({ elapsedMs: 5, fetchedBytes: 0 });
   vi.mocked(evaluateSplit).mockReset();
+  vi.mocked(latestModelRevision).mockReset().mockResolvedValue("a".repeat(40));
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -92,4 +95,43 @@ it('invalidates a loading model on session lock and ignores late completions', a
   expect(mock.detect).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: '載入本機模型' })).toBeEnabled();
   expect(screen.getByRole('button', { name: '執行開發集 80 則' })).toBeDisabled();
+});
+
+it('downloads latest on explicit click, clears old results and records the new revision', async () => {
+  render(<ValidationPage />);
+  expect(latestModelRevision).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '下載新版模型' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '執行開發集 80 則' })).toBeEnabled());
+  expect(latestModelRevision).toHaveBeenCalledOnce();
+  expect(mock.load).toHaveBeenCalledWith(expect.any(Function), { revision: 'a'.repeat(40), forceDownload: true });
+  await waitFor(() => expect(window.maskingValidationReport?.modelRevision).toBe('a'.repeat(40)));
+  expect(window.maskingValidationReport?.cases).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: '重新載入並量測快取' }));
+  await waitFor(() => expect(mock.load).toHaveBeenCalledTimes(2));
+  expect(mock.load).toHaveBeenLastCalledWith(expect.any(Function), { revision: 'a'.repeat(40), forceDownload: false });
+  await waitFor(() => expect(screen.getByRole('button', { name: '執行開發集 80 則' })).toBeEnabled());
+});
+it('cancels version checking and ignores late responses without downloading', async () => {
+  let resolve!: (value: string) => void;
+  vi.mocked(latestModelRevision).mockImplementation(() => new Promise(r => { resolve = r; }));
+  render(<ValidationPage />);
+  fireEvent.click(screen.getByRole('button', { name: '下載新版模型' }));
+  expect(screen.getByRole('button', { name: '下載新版模型' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '停止' }));
+  expect(vi.mocked(latestModelRevision).mock.calls[0][0].aborted).toBe(true);
+  await act(async () => resolve('a'.repeat(40)));
+  expect(mock.load).not.toHaveBeenCalled();
+});
+it('loads the group pin by default and can return to it after a latest-version experiment', async () => {
+  const pin = 'b'.repeat(40);
+  render(<ValidationPage groupName="app_dev" configuredRevision={pin} />);
+  fireEvent.click(screen.getByRole('button', { name: '載入本機模型' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '執行開發集 80 則' })).toBeEnabled());
+  expect(mock.load).toHaveBeenLastCalledWith(expect.any(Function), { revision: pin, forceDownload: false });
+  fireEvent.click(screen.getByRole('button', { name: '下載新版模型' }));
+  await waitFor(() => expect(window.maskingValidationReport?.modelRevision).toBe('a'.repeat(40)));
+  await waitFor(() => expect(screen.getByRole('button', { name: '載入群組指定版本' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '載入群組指定版本' }));
+  await waitFor(() => expect(window.maskingValidationReport?.modelRevision).toBe(pin));
+  expect(mock.load).toHaveBeenLastCalledWith(expect.any(Function), { revision: pin, forceDownload: false });
 });

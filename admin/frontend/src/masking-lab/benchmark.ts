@@ -57,7 +57,7 @@ export function createReport(cases: CaseResult[], coldLoad: LoadMetrics | null, 
   const all = scoreCases(cases);
   return {
     schemaVersion: 1, createdAt: new Date().toISOString(), userAgent: navigator.userAgent,
-    model: MODEL_ID, modelRevision: MODEL_REVISION, libraryRevision: LIBRARY_REVISION,
+    model: MODEL_ID, modelRevision: coldLoad?.modelRevision ?? MODEL_REVISION, libraryRevision: LIBRARY_REVISION,
     runtimeVersion: RUNTIME_VERSION, promptVersion: PROMPT_VERSION,
     coldLoad, cachedLoad, basicCheck, scores: { all, development, holdout },
     gatePassed: development.cases === 80 && holdout.cases === 40 && all.passed && development.passed && holdout.passed,

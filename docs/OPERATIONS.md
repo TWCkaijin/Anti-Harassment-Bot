@@ -156,7 +156,7 @@ deploy 先建置／發布 Admin、Client 後端，再建置／發布對應前端
 
 `.github/workflows` 保留 main 正式與 dev preview 分支部署，shared 變更觸發兩邊驗證；部署不因新 push 取消。WIF 綁定固定 repository ID、允許的 refs 及 deploy service account，不使用長效 service-account JSON。
 
-建立 WIF 前先讀 [CI 權限審查](../infrastructure/iam/CI_DEPLOYMENT_REVIEW.md)。`scripts/provision_delivery.py --phase federation` 顯示所需計畫；Functions 的更新權限只綁定四個既有 Functions，其餘資源採逐項限制。Hosting Admin 目前需 project 層級授權，未授權時不能宣稱自動 Hosting 部署可用。最新雲端配置與部署驗證請看 [2026-10-10 權限報告](permissions-2026-10-10/README.md)。
+建立 WIF 前先讀 [CI 權限審查](../infrastructure/iam/CI_DEPLOYMENT_REVIEW.md)。`scripts/provision_delivery.py --phase federation` 顯示所需計畫；Functions 的更新權限只綁定四個既有 Functions，其餘資源採逐項限制。Hosting Admin 目前需 project 層級授權。若需實測四個 runtime 服務帳號的跨庫與寫入拒絕矩陣，可執行 `uv run --frozen python scripts/verify_runtime_iam_operator.py` 檢視與執行限時探針。
 
 Functions 必須分別配置 **build service account** 與 **runtime service account**。在既有 Functions 完成 operator bootstrap 後，先執行 `uv run python scripts/provision_build.py --environment all` 審閱計畫，再以 `--apply` 建立兩個專用 Builder、綁定來源／artifact／日誌權限並設定建置帳號。這是 operator 工作，不應給 CI IAM 管理權限。`provision_firebase.py --phase identities` 也會預建兩個 Builder 帳號；federation provisioning 會將 deployer 的 actAs 限制在四個 runtime 與兩個 build 帳號上。一般部署會在打包前檢查建置帳號，禁止意外沿用預設 Compute 身分。
 

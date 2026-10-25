@@ -17,6 +17,7 @@ export const PROMPT_SECTION_FIELDS = [
 export function configToUpdate(config: RuntimeConfig): RuntimeConfigUpdate & { revision?: string } {
   return {
     revision: config.revision,
+    pii_model_revision: config.pii_model_revision ?? "",
     pipeline: { ...DEFAULT_PIPELINE, ...config.pipeline },
     ...retrievalSettings(config),
     openrouter_model: config.openrouter_model,
