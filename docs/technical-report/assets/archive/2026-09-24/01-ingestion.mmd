@@ -1,9 +1,0 @@
-flowchart TD
-    A[法規／一般知識 Markdown<br/>判決 CSV 或 Markdown<br/>救濟資源 Markdown] --> B[解析文件、標題與來源 metadata]
-    B --> C[依段落或資源章節切分<br/>目標 1600 字元／重疊 180 字元]
-    C --> D[補充標題或判決脈絡<br/>建立穩定 doc_id 與 chunk 資訊]
-    D --> E[加入 passage: 前綴]
-    E --> F[EmbeddingClient<br/>OpenRouter 或選用本地模型]
-    F --> G[寫入 content、metadata、embedding]
-    G --> H[Firestore 三類 Collection<br/>rag_documents／rag_judgments／rag_remedies]
-    H --> I[為 embedding 欄位建立相符維度的向量索引]

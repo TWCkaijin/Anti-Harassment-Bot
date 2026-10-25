@@ -13,7 +13,10 @@ import time
 import urllib.error
 import urllib.request
 
-from provision_firebase import REGION, Provisioner
+try:
+    from scripts.provision_firebase import REGION, Provisioner
+except ModuleNotFoundError:  # pragma: no cover
+    from provision_firebase import REGION, Provisioner
 
 
 def api(method, path, body=None):

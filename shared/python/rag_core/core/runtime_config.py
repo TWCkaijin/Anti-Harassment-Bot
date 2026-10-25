@@ -44,6 +44,7 @@ RERANK_FIELDS = (
 )
 
 WRITABLE_FIELDS = {
+    "pii_model_revision",
     *RERANK_FIELDS,
     "openrouter_model",
     "temperature",
@@ -74,6 +75,7 @@ class RuntimeConfig:
     temperature: float
     top_p: float
     max_tokens: int
+    pii_model_revision: str = ""
     openrouter_provider_sort: str = "auto"
     rag_rerank_enabled: bool = False
     rag_rerank_model: str = "cohere/rerank-4-fast"
@@ -245,6 +247,7 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
         )
     return RuntimeConfig(
         revision=configuration_revision(doc_data),
+        pii_model_revision=validated.get("pii_model_revision", ""),
         **{key: validated.get(key, getattr(settings, key)) for key in RERANK_FIELDS},
         openrouter_model=validated.get("openrouter_model", settings.openrouter_model),
         rag_retrieval_top_k=validated.get("rag_retrieval_top_k", settings.rag_retrieval_top_k),
@@ -389,6 +392,10 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
             ):
                 raise ValueError("rag_rerank_timeout_seconds must be between 0.1 and 10")
             cleaned[key] = float(value)
+        elif key == "pii_model_revision":
+            if not isinstance(value, str) or (value and (len(value) != 40 or any(c not in "0123456789abcdef" for c in value))):
+                raise ValueError("pii_model_revision must be empty or a 40-character lowercase commit SHA")
+            cleaned[key] = value
         elif key in {"openrouter_model", "rag_rerank_model", "maintenance_message"}:
             if value is None:
                 if key in {"openrouter_model", "rag_rerank_model"}:
@@ -470,6 +477,7 @@ def _default_runtime_document() -> dict[str, Any]:
     from rag_core.agents.openrouter_agent import get_default_prompt_sections
 
     return {
+        "pii_model_revision": "",
         **{key: getattr(settings, key) for key in RERANK_FIELDS},
         "openrouter_model": settings.openrouter_model,
         "temperature": settings.openrouter_temperature,

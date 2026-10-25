@@ -405,8 +405,8 @@ it("groups models and workflow controls and preserves custom mask scope when tog
   const workflows = screen.getByRole("region", { name: "處理流程" });
   expect(within(workflows).getByRole("checkbox", { name: "啟用 Reranking" })).toBeVisible();
   expect(screen.getAllByRole("checkbox", { name: "啟用 Reranking" })).toHaveLength(1);
-  expect(within(screen.getByRole("group", { name: "驗證及測試" })).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("本機遮罩驗證")]);
-  expect(within(screen.getByRole("navigation")).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("系統設定"), expect.stringContaining("Prompt 設定"), expect.stringContaining("Skills 設定"), expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("本機遮罩驗證"), expect.stringContaining("檢索資料庫")]);
+  expect(within(screen.getByRole("group", { name: "驗證及測試" })).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("本機遮罩驗證"), expect.stringContaining("Rerank 測試")]);
+  expect(within(screen.getByRole("navigation")).getAllByRole("button").map(button => button.textContent)).toEqual([expect.stringContaining("系統設定"), expect.stringContaining("Prompt 設定"), expect.stringContaining("Skills 設定"), expect.stringContaining("本次診斷測試"), expect.stringContaining("批次預測"), expect.stringContaining("本機遮罩驗證"), expect.stringContaining("Rerank 測試"), expect.stringContaining("檢索資料庫")]);
   fireEvent.click(screen.getByText("進階遮罩範圍（自訂範圍）"));
   const queryMask = screen.getByLabelText("遮罩檢索查詢");
   expect(queryMask).not.toBeChecked();

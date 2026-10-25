@@ -29,6 +29,12 @@ def create_app(*, include_corpus=True):
     app.register_blueprint(jobs_bp, url_prefix="/api/v1/admin")
     app.register_blueprint(jobs_bp, url_prefix="/v1/admin", name="admin_jobs_direct")
     app.register_blueprint(internal_bp, url_prefix="/internal")
+    from admin_app.rerank_tests import register_jobs as register_rerank_jobs
+    from admin_app.rerank_tests import rerank_bp
+
+    register_rerank_jobs()
+    app.register_blueprint(rerank_bp, url_prefix="/api/v1/admin/rerank-tests")
+    app.register_blueprint(rerank_bp, url_prefix="/v1/admin/rerank-tests", name="rerank_tests_direct")
     if include_corpus:
         from admin_app.corpus import corpus_bp, register_jobs
 

@@ -15,7 +15,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from build_functions import ROOT
+try:
+    from scripts.build_functions import ROOT
+except ImportError:
+    from build_functions import ROOT
 
 REGION = "asia-east1"
 FIREBASE_CLI_VERSION = "15.33.0"

@@ -21,6 +21,7 @@ import RerankSettings from "./RerankSettings";
 import { configToUpdate, PROMPT_SECTION_FIELDS } from "../services/runtimeConfig";
 import MaterialIcon from "./MaterialIcon";
 import SkillActionsEditor from "./SkillActionsEditor";
+const AdminRerankTests = lazy(() => import("./AdminRerankTests"));
 const AdminChatTest = lazy(() => import("./AdminChatTest"));
 import AdminBatchPrediction from "./AdminBatchPrediction";
 const MaskingValidation = lazy(() => import("../masking-lab/ValidationPage"));
@@ -33,7 +34,7 @@ interface AdminPanelProps {
   unlocked?: boolean;
 }
 
-type AdminTab = "system" | "prompts" | "skills" | "test" | "batch" | "masking" | "corpus";
+type AdminTab = "system" | "prompts" | "skills" | "test" | "batch" | "masking" | "rerank" | "corpus";
 
 
 const emptyPromptSections = Object.fromEntries(PROMPT_SECTION_FIELDS.map(([key]) => [key, ""]));
@@ -88,12 +89,14 @@ const tabs: Array<{ id: AdminTab; label: string; icon: string }> = [
   { id: "test", label: "本次診斷測試", icon: "science" },
   { id: "batch", label: "批次預測", icon: "description" },
   { id: "masking", label: "本機遮罩驗證", icon: "fact_check" },
+  { id: "rerank", label: "Rerank 測試", icon: "sort" },
   { id: "corpus", label: "檢索資料庫", icon: "database" },
 ];
 
 export default function AdminPanel({ session, onLogout, unlocked = true }: AdminPanelProps) {
   const verifiedCsrf = session.csrf_token;
-  const [activeTab, setActiveTab] = useState<AdminTab>(() => window.location.hash === "#masking" ? "masking" : "system");
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => window.location.hash === "#rerank" ? "rerank" : window.location.hash === "#masking" ? "masking" : "system");
+  const [rerankVisited, setRerankVisited] = useState(() => window.location.hash === "#rerank");
   const [corpusVisited, setCorpusVisited] = useState(false);
   const [testVisited, setTestVisited] = useState(false);
   const [config, setConfig] = useState<RuntimeConfig>(emptyConfig);
@@ -337,20 +340,20 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
         <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           <nav
             className={`flex w-full shrink-0 flex-col border-b border-outline/15 bg-surface-container-low p-3 sm:w-44 sm:border-r sm:border-b-0 ${
-              activeTab === "test" ? "max-sm:overflow-x-auto" : ""
+              (activeTab === "test" || activeTab === "rerank") ? "max-sm:overflow-x-auto" : ""
             }`}
           >
             <div
               className={
-                activeTab === "test"
+                (activeTab === "test" || activeTab === "rerank")
                   ? "flex w-max gap-3 sm:block sm:w-full sm:space-y-3"
                   : "w-full space-y-3"
               }
             >
               {[
-                { title: "設定", items: tabs.slice(0, 3) },
-                { title: "驗證及測試", items: tabs.slice(3, 6) },
-                { title: "資料管理", items: tabs.slice(6) },
+                { title: "設定", items: tabs.filter(t => ["system", "prompts", "skills"].includes(t.id)) },
+                { title: "驗證及測試", items: tabs.filter(t => ["test", "batch", "masking", "rerank"].includes(t.id)) },
+                { title: "資料管理", items: tabs.filter(t => t.id === "corpus") },
               ].map((group, index) => (
                 <div
                   key={group.title}
@@ -358,7 +361,7 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
                   aria-label={group.title}
                   className={
                     index
-                      ? activeTab === "test"
+                      ? (activeTab === "test" || activeTab === "rerank")
                         ? "border-l border-outline/20 pl-3 sm:border-l-0 sm:border-t sm:pl-0 sm:pt-3"
                         : "border-t border-outline/20 pt-3"
                       : ""
@@ -369,7 +372,7 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
                   </p>
                   <div
                     className={`flex gap-1 sm:block sm:space-y-1 ${
-                      activeTab === "test" ? "flex-nowrap" : "flex-wrap"
+                      (activeTab === "test" || activeTab === "rerank") ? "flex-nowrap" : "flex-wrap"
                     }`}
                   >
                     {group.items.map((tab) => (
@@ -377,6 +380,7 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
                         key={tab.id}
                         onClick={() => {
                           setActiveTab(tab.id);
+                          if (tab.id === "rerank") setRerankVisited(true);
                           if (tab.id === "test") setTestVisited(true);
                           if (tab.id === "masking") setMaskingVisited(true);
                           if (tab.id === "corpus") setCorpusVisited(true);
@@ -466,10 +470,17 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
             <div hidden={activeTab !== "batch"}>
               <AdminBatchPrediction csrfToken={verifiedCsrf} onHasDataChange={setBatchHasData} />
             </div>
+            {rerankVisited && lastLoadedConfig && (
+              <div hidden={activeTab !== "rerank"}>
+                <Suspense fallback={<p role="status">正在載入 Rerank 測試…</p>}>
+                  <AdminRerankTests csrfToken={verifiedCsrf} config={lastLoadedConfig} active={unlocked && activeTab === "rerank"} />
+                </Suspense>
+              </div>
+            )}
             {maskingVisited && (
               <div hidden={activeTab !== "masking"}>
                 <Suspense fallback={<p role="status">正在載入遮罩驗證…</p>}>
-                  <MaskingValidation active={unlocked} />
+                  <MaskingValidation key={`${lastLoadedConfig?.environment_document_id}:${lastLoadedConfig?.pii_model_revision}`} active={unlocked && !!lastLoadedConfig} configuredRevision={lastLoadedConfig?.pii_model_revision} groupName={lastLoadedConfig?.environment_document_id ?? session.environment} />
                 </Suspense>
               </div>
             )}
@@ -480,7 +491,8 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
           activeTab !== "corpus" &&
           activeTab !== "test" &&
           activeTab !== "batch" &&
-          activeTab !== "masking" && (
+          activeTab !== "masking" &&
+          activeTab !== "rerank" && (
             <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-outline/15 px-5 py-3">
               <p className={`text-xs ${error ? "text-error" : "text-on-surface/55"}`}>
                 {error ||
@@ -628,6 +640,14 @@ function SystemSettings({
           </Field>
         </div>
         <RerankSettings config={config} onChange={set} csrfToken={csrfToken} />
+      </section>
+
+      <section aria-label="PII 模型版本" className="space-y-3 border-t border-outline/10 pt-6">
+        <h4 className="text-sm font-bold">PII 模型版本 · {config.environment_document_id ?? "目前設定群組"}</h4>
+        <Field label="群組指定 PII 模型 commit SHA">
+          <input className="input" value={config.pii_model_revision ?? ""} placeholder="留空使用網站內建版本" onChange={event => set({ pii_model_revision: event.target.value.trim() })} />
+        </Field>
+        <p className="text-xs text-on-surface/65">填入 Hugging Face 模型的完整 40 位 commit SHA，按「儲存變更」後，此設定群組的本機遮罩驗證會預設載入指定版本。Admin 仍可在驗證頁下載最新版試驗，不會改寫群組設定。儲存版本變更會重設該頁驗證結果，請先下載報告。</p>
       </section>
 
       <section aria-label="處理流程" className="border-t border-outline/10 pt-6">

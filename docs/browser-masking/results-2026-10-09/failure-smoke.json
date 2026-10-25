@@ -1,7 +1,0 @@
-{
-  "passed": true,
-  "method": "real-browser worker script fault injection: navigator.gpu undefined",
-  "errorText": "驗證未完成：webgpu_unavailable。請確認 WebGPU 與網路環境後重試。",
-  "blocked": [],
-  "errors": []
-}
