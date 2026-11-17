@@ -24,7 +24,8 @@ import SkillActionsEditor from "./SkillActionsEditor";
 const AdminRerankTests = lazy(() => import("./AdminRerankTests"));
 const AdminChatTest = lazy(() => import("./AdminChatTest"));
 import AdminBatchPrediction from "./AdminBatchPrediction";
-const MaskingValidation = lazy(() => import("../masking-lab/ValidationPage"));
+const maskingLabEnabled = import.meta.env.MODE === "preview" || import.meta.env.DEV;
+const MaskingValidation = maskingLabEnabled ? lazy(() => import("../masking-lab/ValidationPage")) : null;
 import PipelineSettingsEditor from "./PipelineSettingsEditor";
 import { DEFAULT_PIPELINE } from "../services/pipeline";
 
@@ -41,6 +42,11 @@ const emptyPromptSections = Object.fromEntries(PROMPT_SECTION_FIELDS.map(([key])
 const emptyConfig: RuntimeConfig = {
   pipeline: DEFAULT_PIPELINE,
   openrouter_model: "",
+  gate_enabled: false,
+  gate_model: "",
+  gate_prompt: "",
+  gate_post_prompt: "",
+  gate_timeout_seconds: 10,
   rag_retrieval_top_k: 3,
   rag_distance_threshold: null,
   enable_anonymization: true,
@@ -51,7 +57,7 @@ const emptyConfig: RuntimeConfig = {
   agent_prompt_sections: emptyPromptSections,
   rag_collections: { law: "rag_documents", judgment: "rag_judgments", remedy: "rag_remedies" },
   maintenance_message: "",
-  enable_image_upload: true,
+  enable_image_upload: false,
   development_mode: false,
   enable_reasoning_display: false,
   source: "local",
@@ -88,14 +94,14 @@ const tabs: Array<{ id: AdminTab; label: string; icon: string }> = [
   { id: "skills", label: "Skills 設定", icon: "account_tree" },
   { id: "test", label: "本次診斷測試", icon: "science" },
   { id: "batch", label: "批次預測", icon: "description" },
-  { id: "masking", label: "本機遮罩驗證", icon: "fact_check" },
+  ...(maskingLabEnabled ? [{ id: "masking" as const, label: "本機遮罩驗證", icon: "fact_check" }] : []),
   { id: "rerank", label: "Rerank 測試", icon: "sort" },
   { id: "corpus", label: "檢索資料庫", icon: "database" },
 ];
 
 export default function AdminPanel({ session, onLogout, unlocked = true }: AdminPanelProps) {
   const verifiedCsrf = session.csrf_token;
-  const [activeTab, setActiveTab] = useState<AdminTab>(() => window.location.hash === "#rerank" ? "rerank" : window.location.hash === "#masking" ? "masking" : "system");
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => window.location.hash === "#rerank" ? "rerank" : maskingLabEnabled && window.location.hash === "#masking" ? "masking" : "system");
   const [rerankVisited, setRerankVisited] = useState(() => window.location.hash === "#rerank");
   const [corpusVisited, setCorpusVisited] = useState(false);
   const [testVisited, setTestVisited] = useState(false);
@@ -112,7 +118,7 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
   const [skillsLoaded, setSkillsLoaded] = useState(false);
   const [loadErrors, setLoadErrors] = useState<{ config?: string; skills?: string }>({});
   const [batchHasData, setBatchHasData] = useState(false);
-  const [maskingVisited, setMaskingVisited] = useState(() => window.location.hash === "#masking");
+  const [maskingVisited, setMaskingVisited] = useState(() => maskingLabEnabled && window.location.hash === "#masking");
 
   const selectedSkill = skills.find((skill) => skill.id === selectedSkillId) ?? null;
   const runtimeDirty = useMemo(() => {
@@ -477,7 +483,7 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
                 </Suspense>
               </div>
             )}
-            {maskingVisited && (
+            {MaskingValidation && maskingVisited && (
               <div hidden={activeTab !== "masking"}>
                 <Suspense fallback={<p role="status">正在載入遮罩驗證…</p>}>
                   <MaskingValidation key={`${lastLoadedConfig?.environment_document_id}:${lastLoadedConfig?.pii_model_revision}`} active={unlocked && !!lastLoadedConfig} configuredRevision={lastLoadedConfig?.pii_model_revision} groupName={lastLoadedConfig?.environment_document_id ?? session.environment} />
@@ -642,13 +648,57 @@ function SystemSettings({
         <RerankSettings config={config} onChange={set} csrfToken={csrfToken} />
       </section>
 
-      <section aria-label="PII 模型版本" className="space-y-3 border-t border-outline/10 pt-6">
+      <section aria-label="Gate 審查設定" className="space-y-4 border-t border-outline/10 pt-6">
+        <h4 className="text-sm font-bold">Gate 審查設定</h4>
+        <Toggle
+          label="啟用聊天內容審查"
+          checked={config.gate_enabled ?? false}
+          onChange={(gate_enabled) => set({ gate_enabled })}
+        />
+        <p className="text-xs leading-relaxed text-on-surface/65">
+          啟用後，Gate 會先審查使用者輸入，再審查主模型回覆。審查失敗或逾時時會隱藏回覆並提供重試。
+        </p>
+        <Field label="Gate OpenRouter Model">
+          <input
+            value={config.gate_model ?? ""}
+            onChange={(event) => set({ gate_model: event.target.value })}
+            className="input"
+          />
+        </Field>
+        <Field label="Gate 逾時（秒）">
+          <input
+            type="number"
+            min="1"
+            max="60"
+            step="1"
+            value={config.gate_timeout_seconds ?? 10}
+            onChange={(event) => set({ gate_timeout_seconds: Number(event.target.value) })}
+            className="input"
+          />
+        </Field>
+        <Field label="Gate 輸入審查提示詞（pre）">
+          <textarea
+            value={config.gate_prompt ?? ""}
+            onChange={(event) => set({ gate_prompt: event.target.value })}
+            className="input min-h-40 resize-y"
+          />
+        </Field>
+        <Field label="Gate 回覆審查提示詞（post）">
+          <textarea
+            value={config.gate_post_prompt ?? ""}
+            onChange={(event) => set({ gate_post_prompt: event.target.value })}
+            className="input min-h-40 resize-y"
+          />
+        </Field>
+      </section>
+
+      {maskingLabEnabled && <section aria-label="PII 模型版本" className="space-y-3 border-t border-outline/10 pt-6">
         <h4 className="text-sm font-bold">PII 模型版本 · {config.environment_document_id ?? "目前設定群組"}</h4>
         <Field label="群組指定 PII 模型 commit SHA">
           <input className="input" value={config.pii_model_revision ?? ""} placeholder="留空使用網站內建版本" onChange={event => set({ pii_model_revision: event.target.value.trim() })} />
         </Field>
         <p className="text-xs text-on-surface/65">填入 Hugging Face 模型的完整 40 位 commit SHA，按「儲存變更」後，此設定群組的本機遮罩驗證會預設載入指定版本。Admin 仍可在驗證頁下載最新版試驗，不會改寫群組設定。儲存版本變更會重設該頁驗證結果，請先下載報告。</p>
-      </section>
+      </section>}
 
       <section aria-label="處理流程" className="border-t border-outline/10 pt-6">
         <PipelineSettingsEditor
@@ -662,7 +712,7 @@ function SystemSettings({
             onChange={(checked) => set({ enable_anonymization: checked })}
           />
           <p className="text-xs leading-relaxed text-on-surface/65">
-            瀏覽器會自動遮罩文字後送出。後端遮罩另由上方開關控制。
+            瀏覽器會先遮罩文字並要求使用者確認送出內容。後端遮罩另由上方開關控制。
           </p>
           <Toggle
             label="啟用 Reranking"
@@ -671,12 +721,12 @@ function SystemSettings({
           />
           <p className="text-xs text-on-surface/60">資料檢索開啟時，才會對檢索結果重排。</p>
           <Toggle
-            label="允許圖片上傳"
+            label="預留圖片設定（目前停用）"
             checked={config.enable_image_upload}
             onChange={(checked) => set({ enable_image_upload: checked })}
           />
           <p className="text-xs leading-relaxed text-on-surface/65">
-            圖片以原圖傳送，不做自動去識別；每張最多 5 MB。
+            目前 Client 與 Admin 診斷端點均拒絕圖片。此欄位只保留既有設定值，不能啟用上傳。
           </p>
         </PipelineSettingsEditor>
       </section>

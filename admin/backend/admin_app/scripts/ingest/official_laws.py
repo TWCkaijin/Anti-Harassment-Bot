@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
+from admin_app.scripts.common.gcloud_login import get_gcloud_login_credentials
 from admin_app.scripts.common.legal_corpus import (
     OFFICIAL_URL,
     apply_current_supplements,
@@ -110,11 +111,17 @@ def decode_firestore(value):
     return value
 
 
-def firestore_client(project, database):
-    # The same deployment-bound factory is used by client, admin and maintenance.
-    from rag_core.firestore_clients import get_business_db
+def firestore_client(project, database, *, credentials=None):
+    if credentials is None:
+        # Preserve the deployment-bound ADC path by default.
+        from rag_core.firestore_clients import get_business_db
 
-    client = get_business_db()
+        client = get_business_db()
+    else:
+        # Opt-in user login is bound to the explicit project/database arguments.
+        from google.cloud import firestore
+
+        client = firestore.Client(project=project, database=database, credentials=credentials)
     if client.project != project or client._database != database:
         raise ValueError("Firestore project/database does not match the selected environment")
     return client
@@ -258,6 +265,7 @@ def main():
     snapshot.add_argument("--database", required=True, choices=["(default)", "app-dev"])
     snapshot.add_argument("--collection", default="rag_documents")
     snapshot.add_argument("--output", required=True, type=Path)
+    snapshot.add_argument("--use-gcloud-login", action="store_true")
     plan = sub.add_parser("plan")
     plan.add_argument("--corpus", required=True, type=Path)
     plan.add_argument("--snapshot", type=Path)
@@ -271,11 +279,13 @@ def main():
     apply.add_argument("--database", required=True, choices=["(default)", "app-dev"])
     apply.add_argument("--expected-plan-sha256", required=True)
     apply.add_argument("--backup", required=True, type=Path)
+    apply.add_argument("--use-gcloud-login", action="store_true")
     back = sub.add_parser("rollback")
     back.add_argument("--backup", required=True, type=Path)
     back.add_argument("--project", required=True)
     back.add_argument("--database", required=True, choices=["(default)", "app-dev"])
     back.add_argument("--apply", action="store_true")
+    back.add_argument("--use-gcloud-login", action="store_true")
     args = parser.parse_args()
     if args.command == "fetch":
         if args.output.exists():
@@ -335,7 +345,8 @@ def main():
         write_json(args.output, report)
         print(json.dumps({"legacy_count": report["legacy_count"], "output": str(args.output)}))
     elif args.command == "snapshot":
-        db = firestore_client(args.project, args.database)
+        credentials = get_gcloud_login_credentials(args.project) if args.use_gcloud_login else None
+        db = firestore_client(args.project, args.database, credentials=credentials)
         rows = [
             {"doc_id": doc.id, "data": encode_firestore(doc.to_dict())}
             for doc in db.collection(args.collection).stream()
@@ -393,7 +404,15 @@ def main():
         batch_id = asyncio.run(
             apply_plan(
                 result,
-                db=firestore_client(args.project, args.database),
+                db=firestore_client(
+                    args.project,
+                    args.database,
+                    credentials=(
+                        get_gcloud_login_credentials(args.project)
+                        if args.use_gcloud_login
+                        else None
+                    ),
+                ),
                 embed=embed,
                 backup_path=args.backup,
             )
@@ -401,7 +420,12 @@ def main():
         print(json.dumps({"batch_id": batch_id, "backup": str(args.backup)}))
     else:
         records, ignored_tail = read_rollback_journal(args.backup)
-        result = rollback(records, firestore_client(args.project, args.database), apply=args.apply)
+        credentials = get_gcloud_login_credentials(args.project) if args.use_gcloud_login else None
+        result = rollback(
+            records,
+            firestore_client(args.project, args.database, credentials=credentials),
+            apply=args.apply,
+        )
         result["ignored_incomplete_journal_tail"] = ignored_tail
         print(json.dumps(result))
 

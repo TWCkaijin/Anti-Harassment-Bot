@@ -13,6 +13,14 @@ export function reproducibleOverrides(value: unknown): RuntimeConfigUpdate | nul
   }
   if (!["repair", "annotate"].includes(String(value.pipeline.content_policy))) return null;
   if (value.enable_client_privacy_review !== undefined && typeof value.enable_client_privacy_review !== "boolean") return null;
+  if (value.gate_enabled !== undefined && typeof value.gate_enabled !== "boolean") return null;
+  if (value.gate_model !== undefined && typeof value.gate_model !== "string") return null;
+  if (value.gate_prompt !== undefined && typeof value.gate_prompt !== "string") return null;
+  if (value.gate_post_prompt !== undefined && typeof value.gate_post_prompt !== "string") return null;
+  if (value.gate_timeout_seconds !== undefined &&
+    (typeof value.gate_timeout_seconds !== "number" || !Number.isFinite(value.gate_timeout_seconds)
+      || value.gate_timeout_seconds < 1 || value.gate_timeout_seconds > 60)) return null;
+  if (value.gate_enabled === true && (!String(value.gate_model ?? "").trim() || !String(value.gate_prompt ?? "").trim() || !String(value.gate_post_prompt ?? "").trim())) return null;
   if (typeof value.openrouter_model !== "string" || !value.openrouter_model.trim()
     || !["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(String(value.reasoning_effort))
     || !["enable_anonymization", "enable_image_upload", "development_mode"].every(key => typeof value[key] === "boolean")
@@ -26,6 +34,11 @@ export function reproducibleOverrides(value: unknown): RuntimeConfigUpdate | nul
   Object.assign(result, retrievalSettings(value as unknown as RuntimeConfig));
   result.maintenance_message = value.maintenance_message ?? "";
   if (typeof value.enable_client_privacy_review === "boolean") result.enable_client_privacy_review = value.enable_client_privacy_review;
+  if (typeof value.gate_enabled === "boolean") result.gate_enabled = value.gate_enabled;
+  if (typeof value.gate_model === "string") result.gate_model = value.gate_model;
+  if (typeof value.gate_prompt === "string") result.gate_prompt = value.gate_prompt;
+  if (typeof value.gate_post_prompt === "string") result.gate_post_prompt = value.gate_post_prompt;
+  if (typeof value.gate_timeout_seconds === "number") result.gate_timeout_seconds = value.gate_timeout_seconds;
   result.pipeline = Object.fromEntries(Object.keys(DEFAULT_PIPELINE).map(key => [key, pipeline[key]]));
   return result as RuntimeConfigUpdate;
 }

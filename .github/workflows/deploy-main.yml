@@ -1,8 +1,28 @@
 name: Deploy — Production (main)
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      unit:
+        description: Select one deployment unit or the full four-unit release
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - admin-backend
+          - admin-frontend
+          - client-backend
+          - client-frontend
+      client_app_check:
+        description: "Initial rollout: stage without enforcement, then enforce after both Client Hosting channels are updated"
+        required: true
+        default: inherit
+        type: choice
+        options:
+          - inherit
+          - stage
+          - enforce
 
 permissions:
   contents: read
@@ -19,7 +39,8 @@ jobs:
       contents: read
 
   deploy:
-    name: Deploy affected services
+    name: Deploy selected units
+    if: github.ref == 'refs/heads/main'
     needs: quality-gate
     runs-on: ubuntu-latest
     permissions:
@@ -30,11 +51,12 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Detect affected services
+      - name: Detect affected services on push
         id: filter
+        if: github.event_name == 'push'
         uses: dorny/paths-filter@v3
         with:
-          base: ${{ github.ref }}
+          base: ${{ github.event.before }}
           filters: |
             client:
               - 'client/**'
@@ -53,70 +75,127 @@ jobs:
               - '.firebaserc'
               - '.firebaseignore'
               - '.github/workflows/**'
-      - name: Select deployment scope
+      - name: Select deployment units
         id: scope
+        shell: bash
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_UNIT: ${{ inputs.unit }}
           CLIENT_CHANGED: ${{ steps.filter.outputs.client }}
           ADMIN_CHANGED: ${{ steps.filter.outputs.admin }}
           SHARED_CHANGED: ${{ steps.filter.outputs.shared }}
+          CLIENT_APP_CHECK_MODE: ${{ inputs.client_app_check }}
+          CLIENT_APP_CHECK_SETTING: ${{ vars.CLIENT_CHAT_APP_CHECK_ENABLED_PROD }}
         run: |
-          if [[ "$SHARED_CHANGED" == true || ( "$CLIENT_CHANGED" == true && "$ADMIN_CHANGED" == true ) ]]; then
-            echo 'service=all' >> "$GITHUB_OUTPUT"
-          elif [[ "$CLIENT_CHANGED" == true ]]; then
-            echo 'service=client' >> "$GITHUB_OUTPUT"
-          elif [[ "$ADMIN_CHANGED" == true ]]; then
-            echo 'service=admin' >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          admin_backend=false
+          admin_frontend=false
+          client_backend=false
+          client_frontend=false
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            if [[ "$SHARED_CHANGED" == "true" ]]; then
+              admin_backend=true; admin_frontend=true; client_backend=true; client_frontend=true
+            else
+              if [[ "$ADMIN_CHANGED" == "true" ]]; then admin_backend=true; admin_frontend=true; fi
+              if [[ "$CLIENT_CHANGED" == "true" ]]; then client_backend=true; client_frontend=true; fi
+            fi
           else
-            echo 'service=none' >> "$GITHUB_OUTPUT"
+            case "$REQUESTED_UNIT" in
+              all) admin_backend=true; admin_frontend=true; client_backend=true; client_frontend=true ;;
+              admin-backend) admin_backend=true ;;
+              admin-frontend) admin_frontend=true ;;
+              client-backend) client_backend=true ;;
+              client-frontend) client_frontend=true ;;
+              *) exit 2 ;;
+            esac
           fi
+          any=false
+          if [[ "$admin_backend" == "true" || "$admin_frontend" == "true" || "$client_backend" == "true" || "$client_frontend" == "true" ]]; then any=true; fi
+          client_app_check_enabled=false
+          if [[ "$client_backend" == "true" ]]; then
+            case "$CLIENT_APP_CHECK_MODE" in
+              inherit)
+                case "$CLIENT_APP_CHECK_SETTING" in
+                  true|false) client_app_check_enabled="$CLIENT_APP_CHECK_SETTING" ;;
+                  *) echo 'CLIENT_CHAT_APP_CHECK_ENABLED_PROD must be true or false' >&2; exit 2 ;;
+                esac ;;
+              stage) client_app_check_enabled=false ;;
+              enforce) client_app_check_enabled=true ;;
+              *) echo 'Unknown client_app_check mode' >&2; exit 2 ;;
+            esac
+          fi
+          for key in admin_backend admin_frontend client_backend client_frontend any; do
+            echo "$key=${!key}" >> "$GITHUB_OUTPUT"
+          done
+          echo "client_app_check_enabled=$client_app_check_enabled" >> "$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@v4
-        if: steps.scope.outputs.service != 'none'
+        if: steps.scope.outputs.any == 'true'
         with:
           version: 10.27.0
       - uses: actions/setup-node@v4
-        if: steps.scope.outputs.service != 'none'
+        if: steps.scope.outputs.any == 'true'
         with:
-          node-version: "24"
+          node-version: '24'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - uses: astral-sh/setup-uv@v5
-        if: steps.scope.outputs.service != 'none'
-        with:
-          version: "latest"
+        if: steps.scope.outputs.any == 'true'
       - name: Install deployment dependencies
-        if: steps.scope.outputs.service != 'none'
+        if: steps.scope.outputs.any == 'true'
         run: |
           uv python install 3.13
           uv sync --frozen --all-extras
           pnpm install --frozen-lockfile
           npm install --global firebase-tools@15.33.0
       - name: Authenticate with Workload Identity Federation
-        if: steps.scope.outputs.service != 'none'
+        if: steps.scope.outputs.any == 'true'
         uses: google-github-actions/auth@v3
         with:
           project_id: anti-harassment-bot
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
-      - name: Set up Google Cloud CLI
-        if: steps.scope.outputs.service != 'none'
-        uses: google-github-actions/setup-gcloud@v3
-      - name: Build and deploy functions before hosting
-        if: steps.scope.outputs.service != 'none'
+      - uses: google-github-actions/setup-gcloud@v3
+        if: steps.scope.outputs.any == 'true'
+      - name: Guard first Client App Check enforcement
+        if: steps.scope.outputs.client_backend == 'true'
         env:
-          DEPLOY_SERVICE: ${{ steps.scope.outputs.service }}
-          # 15.33.0 probes legacy appspot actAs even for explicit runtime SAs.
-          # Cloud APIs still enforce the resource-scoped deployment policy.
-          FIREBASE_SKIP_INFORMATIONAL_IAM: "1"
-          VITE_ANALYTICS_ENABLED: ${{ vars.ANALYTICS_ENABLED }}
-          VITE_FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
-          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
-          VITE_FIREBASE_MEASUREMENT_ID: ${{ vars.FIREBASE_MEASUREMENT_ID }}
-        run: uv run python scripts/deploy.py --environment production --service "$DEPLOY_SERVICE"
-      - name: Deployment summary
-        if: steps.scope.outputs.service != 'none'
-        env:
-          DEPLOY_SERVICE: ${{ steps.scope.outputs.service }}
+          DESIRED: ${{ steps.scope.outputs.client_app_check_enabled }}
+          MODE: ${{ inputs.client_app_check }}
         run: |
-          echo "Deployed production services: $DEPLOY_SERVICE" >> "$GITHUB_STEP_SUMMARY"
-          echo "See deployment JSON output for exact service and hosting URLs." >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          current=$(gcloud functions describe api --v2 --region=asia-east1 \
+            --project=anti-harassment-bot \
+            --format='value(serviceConfig.environmentVariables.CHAT_APP_CHECK_ENABLED)')
+          if [[ "$current" != 'true' && "$DESIRED" == 'true' && "$MODE" != 'enforce' ]]; then
+            echo 'First App Check enforcement requires explicit enforce mode after Client live and main-preview have App Check capable bundles.' >&2
+            exit 2
+          fi
+      - name: Deploy Admin backend
+        if: steps.scope.outputs.admin_backend == 'true'
+        env:
+          FIREBASE_SKIP_INFORMATIONAL_IAM: '1'
+        run: uv run python scripts/deploy.py --environment production --service admin --backend-only --output build/deployment-admin-backend.json
+      - name: Deploy Admin frontend
+        if: steps.scope.outputs.admin_frontend == 'true'
+        run: uv run python scripts/deploy.py --environment production --service admin --frontend-only --output build/deployment-admin-frontend.json
+      - name: Deploy Client backend
+        if: steps.scope.outputs.client_backend == 'true'
+        env:
+          FIREBASE_SKIP_INFORMATIONAL_IAM: '1'
+          CHAT_APP_CHECK_ENABLED: ${{ steps.scope.outputs.client_app_check_enabled }}
+        run: uv run python scripts/deploy.py --environment production --service client --backend-only --output build/deployment-client-backend.json
+      - name: Deploy Client frontend
+        if: steps.scope.outputs.client_frontend == 'true'
+        env:
+          CLIENT_FIREBASE_APP_ID: ${{ vars.CLIENT_FIREBASE_APP_ID_PROD }}
+          VITE_APP_CHECK_ENABLED: ${{ vars.CLIENT_APP_CHECK_ENABLED_PROD }}
+          VITE_APP_CHECK_SITE_KEY: ${{ vars.CLIENT_APP_CHECK_SITE_KEY_PROD }}
+        run: uv run python scripts/deploy.py --environment production --service client --frontend-only --output build/deployment-client-frontend.json
+      - name: Deployment summary
+        if: steps.scope.outputs.any == 'true'
+        run: |
+          echo "Admin backend: ${{ steps.scope.outputs.admin_backend }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Admin frontend: ${{ steps.scope.outputs.admin_frontend }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Client backend: ${{ steps.scope.outputs.client_backend }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Client backend App Check enforcement: ${{ steps.scope.outputs.client_app_check_enabled }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Client frontend: ${{ steps.scope.outputs.client_frontend }}" >> "$GITHUB_STEP_SUMMARY"

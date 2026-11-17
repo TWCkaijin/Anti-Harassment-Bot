@@ -48,7 +48,7 @@ export default function ChatArea({
   onOpenSidebar,
   onStop,
   showReasoning = false,
-  caseFacts, onSaveCaseFacts, backendConnected, contractVersion, onReconnect, storageIssue, showEmotions = false, incompatibleSummary = false, summaryRequiresConnection = false, canRegenerate = false, allowImageUpload = true, onClarificationDraftChange,
+    caseFacts, onSaveCaseFacts, backendConnected, contractVersion, onReconnect, storageIssue, showEmotions = false, incompatibleSummary = false, summaryRequiresConnection = false, canRegenerate = false, allowImageUpload = true, onClarificationDraftChange,
 }: ChatAreaProps) {
   const { t } = useI18n();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -77,7 +77,7 @@ export default function ChatArea({
     };
   }, [backendConnected]);
   const connected = backendConnected === undefined ? isBackendConnected : backendConnected;
-  const sendingDisabled = connected !== true || incompatibleSummary || summaryRequiresConnection;
+  const sendingDisabled = connected !== true || incompatibleSummary || summaryRequiresConnection || storageIssue === "changed";
 
   const hasMessages = messages.length > 0;
   const summaryMessageId = [...messages].reverse().find(message => message.role === "assistant" && !message.superseded && !message.isError && !message.isCancelled)?.id;
@@ -102,7 +102,7 @@ export default function ChatArea({
             <MaterialIcon icon="menu" size={24} className="text-on-surface/70" />
           </button>
           {!summaryMessageId && caseFacts && onSaveCaseFacts && hasCaseContext(caseFacts) && <button data-summary-trigger type="button" aria-label={t.caseSummaryOpen} title={t.caseSummaryOpen} onClick={() => setSummaryOpen(true)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-on-surface/60 hover:bg-primary/10"><MaterialIcon icon="description" size={17} /></button>}
-          
+
           {!hasMessages && <div className="flex items-center gap-2.5 min-w-0">
             <BrandMark size={32} className="lg:hidden" />
             <div className="space-y-1 min-w-0">
@@ -151,7 +151,7 @@ export default function ChatArea({
           {connected === false && onReconnect && <button type="button" onClick={onReconnect} className="rounded-lg border border-outline/20 px-3 py-1 text-xs text-primary hover:bg-primary/5">{t.reconnect}</button>}
         </div>
       </header>
-      {storageIssue && <p role="alert" className="border-b border-error/20 bg-error-container/20 px-6 py-3 text-xs text-error">{storageIssue === "migration" ? t.storageMigration : storageIssue === "future" ? t.storageFuture : storageIssue === "invalid" ? t.storageInvalid : t.storageUnavailable}</p>}
+      {storageIssue && <p role="alert" className="border-b border-error/20 bg-error-container/20 px-6 py-3 text-xs text-error">{storageIssue === "migration" ? t.storageMigration : storageIssue === "future" ? t.storageFuture : storageIssue === "invalid" ? t.storageInvalid : storageIssue === "changed" ? t.storageChanged : t.storageUnavailable}</p>}
       {incompatibleSummary && <p role="alert" className="border-b border-outline/20 bg-surface-container-low px-6 py-3 text-xs">{t.incompatibleSummary}</p>}
       {summaryRequiresConnection && <p role="status" className="border-b border-outline/20 bg-surface-container-low px-6 py-3 text-xs">{connected === null ? t.summaryCheckingConnection : t.summaryConnectionFailed}</p>}
       {summaryOpen && caseFacts && onSaveCaseFacts && <CaseSummary context={caseFacts} onSave={onSaveCaseFacts} onStartEdit={onStop} onClose={() => setSummaryOpen(false)} canRegenerate={canRegenerate} />}

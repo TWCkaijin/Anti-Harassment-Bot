@@ -17,6 +17,11 @@ export const PROMPT_SECTION_FIELDS = [
 export function configToUpdate(config: RuntimeConfig): RuntimeConfigUpdate & { revision?: string } {
   return {
     revision: config.revision,
+    gate_enabled: config.gate_enabled ?? false,
+    gate_model: config.gate_model ?? config.openrouter_model,
+    gate_prompt: config.gate_prompt,
+    gate_post_prompt: config.gate_post_prompt,
+    gate_timeout_seconds: config.gate_timeout_seconds ?? 10,
     pii_model_revision: config.pii_model_revision ?? "",
     pipeline: { ...DEFAULT_PIPELINE, ...config.pipeline },
     ...retrievalSettings(config),

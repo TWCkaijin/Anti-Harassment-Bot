@@ -227,8 +227,10 @@ def test_annotation_mode_keeps_raw_claim_in_diagnostics_without_displaying_false
         diagnostics=diagnostics,
     )
     assert "第999條" not in sections[0]["text"]
-    assert "待核對" in sections[0]["text"]
-    assert diagnostics["rewrites"][0]["before"] == "依刑法第999條可以申訴。"
+    assert "沒有可核對的官方來源" in sections[0]["text"]
+    assert diagnostics["rewrites"][0]["reasons"] == ["unsupported_article"]
+    assert "before" not in diagnostics["rewrites"][0]
+    assert "after" not in diagnostics["rewrites"][0]
 
 
 @pytest.mark.asyncio

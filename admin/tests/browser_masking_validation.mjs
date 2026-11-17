@@ -26,6 +26,7 @@ const context = await chromium.launchPersistentContext(process.env.BROWSER_PROFI
 });
 const requests = [], violations = [], pageErrors = [];
 let state = 'started';
+const localCacheOnly = process.env.BROWSER_LOCAL_CACHE_ONLY === 'true';
 const allowedRemote = ['huggingface.co', 'raw.githubusercontent.com', 'cdn-lfs.huggingface.co', 'cdn-lfs-us-1.hf.co', 'cas-bridge.xethub.hf.co', 'us.aws.cdn.hf.co'];
 await context.route('**/*', async route => {
   const req = route.request(), url = new URL(req.url());
@@ -39,7 +40,7 @@ await context.route('**/*', async route => {
   const record = { host: url.hostname, path: url.pathname, method: req.method() };
   requests.push(record);
   const allowed = req.method() === 'GET' && !req.postData()
-    && (['127.0.0.1', 'localhost'].includes(url.hostname) && !url.pathname.startsWith('/api/') || allowedRemote.includes(url.hostname));
+    && (['127.0.0.1', 'localhost'].includes(url.hostname) && !url.pathname.startsWith('/api/') || !localCacheOnly && allowedRemote.includes(url.hostname));
   if (!allowed) { violations.push(record); return route.abort(); }
   return route.continue();
 });
@@ -50,7 +51,7 @@ page.on('console', message => {
 });
 async function save(name = 'report.json') {
   const report = await page.evaluate(() => window.maskingValidationReport ?? null).catch(() => null);
-  await writeFile(path.join(output, name), JSON.stringify({ state, sourceHashes, report, requests, violations, pageErrors }, null, 2));
+  await writeFile(path.join(output, name), JSON.stringify({ state, localCacheOnly, sourceHashes, report, requests, violations, pageErrors }, null, 2));
   return report;
 }
 async function waitWhileBusy(limitMs) {

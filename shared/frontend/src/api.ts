@@ -113,6 +113,11 @@ export interface ChatProgress {
   elapsed_ms: number;
 }
 
+export interface ChatRetraction {
+  turn_id: string;
+  code: "gate_denied" | "review_unavailable";
+}
+
 export interface TelActionButton {
   action: "tel";
   phone_number: string;
@@ -164,6 +169,11 @@ export interface HealthResponse {
 export interface RuntimeConfig {
   pii_model_revision?: string;
   revision?: string;
+  gate_enabled?: boolean;
+  gate_model?: string;
+  gate_prompt?: string;
+  gate_post_prompt?: string;
+  gate_timeout_seconds?: number;
   openrouter_provider_sort?: "auto" | "latency" | "throughput" | "price";
   rag_rerank_enabled?: boolean;
   rag_rerank_model?: string;
@@ -203,6 +213,11 @@ export interface RuntimeConfig {
 export type RuntimeConfigUpdate = Partial<
   Pick<
     RuntimeConfig,
+    | "gate_enabled"
+    | "gate_model"
+    | "gate_prompt"
+    | "gate_post_prompt"
+    | "gate_timeout_seconds"
     | "pii_model_revision"
     | "openrouter_provider_sort"
     | "rag_rerank_enabled"
@@ -250,13 +265,15 @@ export class ApiError extends Error {
   readonly detail?: string;
   readonly retryable: boolean;
   readonly debugMessage?: string;
+  readonly code?: string;
 
   constructor(
     status: number,
     message: string,
     detail?: string,
     retryable = false,
-    debugMessage?: string
+    debugMessage?: string,
+    code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -264,6 +281,7 @@ export class ApiError extends Error {
     this.detail = detail;
     this.retryable = retryable;
     this.debugMessage = debugMessage;
+    this.code = code;
   }
 }
 
@@ -358,6 +376,7 @@ export async function throwResponseError(response: Response): Promise<never> {
   let detail: string | undefined;
   let retryable = false;
   let debugMessage: string | undefined;
+  let code: string | undefined;
   try {
     const errorData: unknown = await response.json();
     if (isRecord(errorData)) {
@@ -370,6 +389,7 @@ export async function throwResponseError(response: Response): Promise<never> {
       debugMessage = typeof errorData.debug_message === "string"
         ? errorData.debug_message
         : undefined;
+      code = typeof errorData.code === "string" ? errorData.code : undefined;
     }
   } catch {
     // 非 JSON 回應
@@ -379,7 +399,8 @@ export async function throwResponseError(response: Response): Promise<never> {
     `API 請求失敗 (${response.status})`,
     detail,
     retryable,
-    debugMessage
+    debugMessage,
+    code,
   );
 }
 
@@ -587,6 +608,7 @@ async function readChatStream(
   onActivity?: () => void,
   onAnalysis?: (analysis: AnalysisEntry) => void,
   onReasoning?: (reasoning: ReasoningEntry) => void,
+  onRetract?: (retraction: ChatRetraction) => void,
   expectedContractVersion?: number,
 ): Promise<ChatResponse> {
   if (!response.body) throw invalidStream();
@@ -596,6 +618,7 @@ async function readChatStream(
   let event = "";
   let data: string[] = [];
   let result: ChatResponse | undefined;
+  let turnId: string | undefined;
   const abort = () => { void reader.cancel().catch(() => undefined); };
   signal?.addEventListener("abort", abort, { once: true });
 
@@ -605,11 +628,17 @@ async function readChatStream(
       const eventData = data.join("\n");
       event = "";
       data = [];
-      if (!eventData || !["delta", "guidance", "progress", "analysis", "reasoning", "done", "error"].includes(eventName)) return;
+      if (!eventData || !["delta", "guidance", "progress", "analysis", "reasoning", "retract", "done", "error"].includes(eventName)) return;
       let payload: unknown;
       try { payload = JSON.parse(eventData); } catch { throw invalidStream(); }
       if (!isRecord(payload)) throw invalidStream();
-      if (eventName === "reasoning") {
+      if (eventName === "retract") {
+        if (typeof payload.turn_id !== "string" || !/^[0-9a-f-]{32,36}$/.test(payload.turn_id)
+          || (payload.code !== "gate_denied" && payload.code !== "review_unavailable")
+          || (turnId && turnId !== payload.turn_id)) throw invalidStream();
+        turnId = payload.turn_id;
+        onRetract?.({ turn_id: payload.turn_id, code: payload.code });
+      } else if (eventName === "reasoning") {
         if (!isReasoningEntry(payload)) throw invalidStream();
         onReasoning?.(payload);
       } else if (eventName === "analysis") {
@@ -619,6 +648,11 @@ async function readChatStream(
         if (!CHAT_PROGRESS_PHASES.some(phase => phase === payload.phase)
           || typeof payload.elapsed_ms !== "number" || !Number.isFinite(payload.elapsed_ms)
           || payload.elapsed_ms < 0) throw invalidStream();
+        if (payload.turn_id !== undefined) {
+          if (typeof payload.turn_id !== "string" || !/^[0-9a-f-]{32,36}$/.test(payload.turn_id)
+            || (turnId && turnId !== payload.turn_id)) throw invalidStream();
+          turnId = payload.turn_id;
+        }
         onProgress?.({ phase: payload.phase as ChatProgress["phase"], elapsed_ms: payload.elapsed_ms });
       } else if (eventName === "delta") {
         if (typeof payload.text !== "string") throw invalidStream();
@@ -638,6 +672,7 @@ async function readChatStream(
         // Never promote model-generated actions or other unvalidated metadata.
         if (Object.keys(guidance).length > 0) onGuidance?.(guidance);
       } else if (eventName === "done") {
+        if (payload.turn_id !== undefined && (typeof payload.turn_id !== "string" || (turnId && turnId !== payload.turn_id))) throw invalidStream();
         result = parseChatResponse(payload, expectedContractVersion);
       } else {
         throw new ApiError(
@@ -646,6 +681,7 @@ async function readChatStream(
           normalizeApiErrorDetail(payload.detail),
           payload.retryable === true,
           typeof payload.debug_message === "string" ? payload.debug_message : undefined,
+          typeof payload.code === "string" ? payload.code : undefined,
         );
       }
       return;
@@ -700,6 +736,8 @@ export async function sendChat(
   onProgress?: (progress: ChatProgress) => void,
   onAnalysis?: (analysis: AnalysisEntry) => void,
   onReasoning?: (reasoning: ReasoningEntry) => void,
+  onRetract?: (retraction: ChatRetraction) => void,
+  appCheckToken?: string,
 ): Promise<ChatResponse> {
   const reviewedBody = reviewedRequestBody(request);
   const guard = requestGuard(30_000, "後端尚未開始回應，請確認服務已啟動後再試。", signal);
@@ -709,7 +747,7 @@ export async function sendChat(
   try {
     const response = await fetch(`${API_BASE_URL}/v1/chat/`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...(appCheckToken ? { "X-Firebase-AppCheck": appCheckToken } : {}) },
       body: `${reviewedBody.slice(0, -1)},"stream":true}`,
       signal: guard.signal,
     });
@@ -718,7 +756,7 @@ export async function sendChat(
     if (!response.ok) await throwResponseError(response);
     const result = !response.headers.get("content-type")?.includes("text/event-stream")
       ? parseChatResponse(await response.json(), request.contract_version ?? 1)
-      : await readChatStream(response, guard.signal, onDelta, onGuidance, onProgress, receivedActivity, onAnalysis, onReasoning, request.contract_version ?? 1);
+      : await readChatStream(response, guard.signal, onDelta, onGuidance, onProgress, receivedActivity, onAnalysis, onReasoning, onRetract, request.contract_version ?? 1);
     assertResponseContract(request, result);
     return result;
   } catch (error) {

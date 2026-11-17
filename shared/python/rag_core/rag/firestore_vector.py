@@ -7,6 +7,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
 
 from rag_core.core.logger import get_logger
+from rag_core.core.referral_policy import is_private_referral_resource
 from rag_core.firestore_clients import get_business_db
 from rag_core.rag.base import (
     BaseRAG,
@@ -15,7 +16,15 @@ from rag_core.rag.base import (
     RAGVectorSearchError,
 )
 from rag_core.rag.embeddings import EmbeddingClient
-from rag_core.rag.legal_lookup import legacy_conflict_reason, legal_references, lookup_key
+from rag_core.rag.legal_lookup import (
+    citation_only_references,
+    has_law_provenance,
+    is_law_document,
+    law_document_reference,
+    legacy_conflict_reason,
+    legal_references,
+    lookup_key,
+)
 
 logger = get_logger(__name__)
 
@@ -91,6 +100,19 @@ class FirestoreVectorRAG(BaseRAG):
                 requested_top_k=top_k,
                 distance_threshold=distance_threshold,
             )
+        requested_scope = set(citation_only_references(query))
+        citation_scope = (
+            requested_scope
+            if any(
+                is_law_document(doc.metadata)
+                and has_law_provenance(doc.metadata)
+                and doc.metadata.get("corpus_active") is not False
+                and law_document_reference(doc.metadata) in requested_scope
+                and not legacy_conflict_reason(doc.content, doc.metadata)
+                for doc in exact_results
+            )
+            else set()
+        )
 
         embedding_started = monotonic()
         query_vector = await self._get_embedding(query)
@@ -192,9 +214,13 @@ class FirestoreVectorRAG(BaseRAG):
                 for items in results_by_collection:
                     if rank < len(items):
                         ordered.append(items[rank])
-            return self._merge_results([], ordered, max(top_k, len(collection_names)), diagnostics)
+            return self._merge_results(
+                [], ordered, max(top_k, len(collection_names)), diagnostics, citation_scope
+            )
         if len(results_by_collection) == 1:
-            return self._merge_results(exact_results, results_by_collection[0], top_k, diagnostics)
+            return self._merge_results(
+                exact_results, results_by_collection[0], top_k, diagnostics, citation_scope
+            )
 
         # Firestore cosine distance is lower-is-better. Merge cross-collection
         # results globally when distance is available; keep a stable round-robin
@@ -224,10 +250,10 @@ class FirestoreVectorRAG(BaseRAG):
             for fallback_items in fallback_by_collection:
                 if index < len(fallback_items):
                     results.append(fallback_items[index])
-        return self._merge_results(exact_results, results, top_k, diagnostics)
+        return self._merge_results(exact_results, results, top_k, diagnostics, citation_scope)
 
     @staticmethod
-    def _merge_results(exact, vector, top_k, diagnostics):
+    def _merge_results(exact, vector, top_k, diagnostics, citation_scope=None):
         results = []
         seen = set()
         observations = []
@@ -236,6 +262,21 @@ class FirestoreVectorRAG(BaseRAG):
             reason = None
             if doc.metadata.get("corpus_active") is False:
                 reason = "inactive_or_not_effective"
+            elif (
+                is_law_document(doc.metadata)
+                or doc.metadata.get("data_type") == "document"
+                and bool(legal_references(doc.content))
+            ) and not has_law_provenance(doc.metadata):
+                reason = "unverified_law_provenance"
+            elif (
+                citation_scope
+                and is_law_document(doc.metadata)
+                and doc.metadata.get("retrieval_method") != "exact"
+                and law_document_reference(doc.metadata) not in citation_scope
+            ):
+                reason = "unrelated_law_for_exact_citation"
+            elif is_private_referral_resource(doc.content, doc.metadata):
+                reason = "private_referral_resource"
             elif conflict := legacy_conflict_reason(doc.content, doc.metadata):
                 reason = conflict
             elif doc.doc_id and key in seen:

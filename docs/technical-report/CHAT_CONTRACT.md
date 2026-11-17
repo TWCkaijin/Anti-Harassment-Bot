@@ -10,7 +10,7 @@ v4 沒有固定的「方向／依據／下一步」標題，也不要求 `answer
 
 無依據的法律主張按局部處理，修正模式全回覆只插入一次共同限制，保留其他可支持內容。標記模式保留待核對文字。引用對應檢查不等於語義上每個法律推論都已證明，仍需個案及專業覆核。
 
-`analysis` 是已完成的情境整理與檢索摘要。獨立 `reasoning` 事件只接收供應商公開的 `text` 或 `summary`；不解碼加密資料，也不展示簽章或工具參數。`enable_analysis` 控制分析摘要；推理文字另外要求開發設定 `enable_reasoning_display=true`（預設 false）。關閉顯示時仍保留模型的 reasoning effort，但要求供應商 exclude reasoning，且後端 JSON／SSE 和前端顯示均另行阻擋推理文字；模型不提供 reasoning 時，正式答案照常處理。推理說明以淺色斜體並標示非已驗證答案，生成中展開、完成後可收合。它只存在頁面記憶體，重新整理、匯出與後續請求都不保留；可核對的 analysis 與正式答案照常儲存。
+`analysis` 是已完成的情境整理與檢索摘要。獨立 `reasoning` 事件只接收供應商標記的 `summary`；原始 `reasoning.text`、加密資料、簽章及工具參數不發布。`enable_analysis` 控制分析摘要；推理摘要另外要求開發設定 `enable_reasoning_display=true`（預設 false）。關閉顯示時仍保留模型的 reasoning effort，但要求供應商 exclude reasoning，且後端 JSON／SSE 另行阻擋推理內容；模型不提供公開摘要時，正式答案照常處理。推理摘要以淺色斜體並標示非已驗證答案，生成中展開、完成後可收合。它只存在頁面記憶體，重新整理、匯出與後續請求都不保留；可核對的 analysis 與正式答案照常儲存。
 
 已發送 analysis、reasoning 或答案段落後，伺服器與前端均不自動完整重播。取消、斷線或結尾格式錯誤保留已顯示段落並標示未完成；摘要、追問及資源按鈕只在完整 `done` 驗證成功後提交。
 

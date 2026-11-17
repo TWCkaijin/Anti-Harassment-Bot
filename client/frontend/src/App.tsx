@@ -8,6 +8,7 @@ import { useConversation } from "./hooks/useConversation";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
 import SettingsPanel from "./components/SettingsPanel";
+import PrivacyReviewDialog from "./components/PrivacyReviewDialog";
 import { useEmotionPreference } from "./hooks/useEmotionPreference";
 
 export default function App() {
@@ -29,7 +30,7 @@ export default function App() {
     deleteSession,
     renameSession,
     clearAllSessions,
-    caseFacts, pendingFacts, saveCaseFacts, contractV2, contractVersion, clientSettings, saveClarificationDraft, isBackendConnected, reconnectBackend, storageIssue, incompatibleSummary, summaryRequiresConnection, canRegenerate,
+    caseFacts, pendingFacts, saveCaseFacts, contractV2, contractVersion, clientSettings, saveClarificationDraft, isBackendConnected, reconnectBackend, storageIssue, incompatibleSummary, summaryRequiresConnection, canRegenerate, privacyReview, confirmPrivacyReview, cancelPrivacyReview,
   } = useConversation();
 
   // A first message or a different conversation starts with an unobstructed
@@ -81,7 +82,7 @@ export default function App() {
           incompatibleSummary={incompatibleSummary}
           summaryRequiresConnection={summaryRequiresConnection}
           canRegenerate={canRegenerate}
-          allowImageUpload={clientSettings?.enable_image_upload ?? true}
+          allowImageUpload={false}
         onSend={sendMessage}
         onOpenSidebar={() => {
           if (window.matchMedia("(min-width: 1024px) and (pointer: fine)").matches) {
@@ -98,10 +99,13 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         sessions={sessions}
         onClearAll={clearAllSessions}
+        storageChanged={storageIssue === "changed"}
         showEmotions={showEmotions}
         onShowEmotionsChange={updateShowEmotions}
         preferenceSaveFailed={preferenceSaveFailed}
       />
+
+      {privacyReview && <PrivacyReviewDialog initialDraft={privacyReview} onConfirm={confirmPrivacyReview} onCancel={cancelPrivacyReview} />}
 
 
     </div>

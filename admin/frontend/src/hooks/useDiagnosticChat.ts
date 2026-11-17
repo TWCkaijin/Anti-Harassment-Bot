@@ -96,7 +96,7 @@ export function useDiagnosticChat(csrfToken: string, config: RuntimeConfig, mode
         ...(answer ? { clarification_answer: answer } : {}),
         ...(regenerationOrigin ? { regenerate_from_summary: true } : {}),
       };
-      const request = await preparePrivateRequest(candidate, owner.controller.signal);
+      const request = await preparePrivateRequest(candidate, async draft => draft, owner.controller.signal);
       if (!request || active.current !== owner || owner.controller.signal.aborted || contextRef.current.revision !== summary.revision) { finish(owner); return false; }
       const user: Message = {
         id: crypto.randomUUID(), role: "user", content: request.message, timestamp: Date.now(), diagnosticMode: selectedMode,

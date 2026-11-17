@@ -57,7 +57,11 @@ def test_independent_caches_adopt_published_revision_at_their_own_ttl(
     second_old = second.get_runtime_config()
     old_revision = initial_revision or "defaults"
     assert first_old.revision == second_old.revision == old_revision
-    assert first_old.enable_image_upload is second_old.enable_image_upload is True
+    assert (
+        first_old.enable_image_upload
+        is second_old.enable_image_upload
+        is (initial_revision is not None)
+    )
     assert first_old is not second_old
 
     # A committed Admin update does not invalidate another process's memory.
@@ -89,7 +93,11 @@ def test_independent_caches_adopt_published_revision_at_their_own_ttl(
     assert first.get_runtime_config() is first_new
     assert first_read.call_count == second_read.call_count == 2
     assert first_old.revision == second_old.revision == old_revision
-    assert first_old.enable_image_upload is second_old.enable_image_upload is True
+    assert (
+        first_old.enable_image_upload
+        is second_old.enable_image_upload
+        is (initial_revision is not None)
+    )
     for database, read in ((first_database, first_read), (second_database, second_read)):
         assert all(call.args == ("runtime_config",) for call in database.collection.call_args_list)
         assert all(

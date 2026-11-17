@@ -16,6 +16,7 @@ from client.tests.test_agent import (
     fake_runtime_config,
 )
 from rag_core.agents.openrouter_agent import AgentContractError, OpenRouterAgent
+from rag_core.chat_service import _public_reasoning_entry
 from rag_core.core.agent_prompts import assemble_service_instruction, get_default_prompt_sections
 from rag_core.core.case_context import CaseContext
 from rag_core.core.clarification_tokens import sign_clarification, validate_clarification_answer
@@ -105,6 +106,30 @@ class Rag:
         ]
 
 
+class ReviewedWorkplaceRag(Rag):
+    async def retrieve(self, query, **kwargs):
+        self.calls.append((query, kwargs))
+        return [
+            RAGDocument(
+                content=(
+                    "性別平等工作法第32條之1：雇主未處理者得逕向地方主管機關申訴。"
+                    "被申訴人非具權勢地位時，自知悉逾二年或自行為終了逾五年不受理；"
+                    "被申訴人具權勢地位時，自知悉逾三年或自行為終了逾七年不受理。"
+                ),
+                doc_id="law-N0030014-32-1",
+                metadata={
+                    "collection": "rag_documents",
+                    "source": "性別平等工作法第32條之1（官方法源摘要）",
+                    "law_name": "性別平等工作法",
+                    "article_number": "32-1",
+                    "source_url": "https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=N0030014&flno=32-1",
+                    "version": "N0030014@2023-08-16",
+                    "checked_at": "2026-11-10",
+                },
+            )
+        ]
+
+
 class Stream:
     def __init__(self, chunks, before=None):
         self.chunks = chunks
@@ -149,6 +174,60 @@ async def run(agent, **changes):
         **changes,
     }
     return await agent.run(**kwargs)
+
+
+CONTEXTLESS_SOURCE_REQUEST = (
+    "請提供你判斷所依據的官方法規網址、條文及資料日期；如果沒有查到，請明確告訴我。"
+)
+
+
+async def test_first_turn_source_request_without_judgment_asks_for_target_without_model():
+    agent = agent_for([])
+    published = []
+    diagnostics = {}
+
+    async def delta(text):
+        published.append(text)
+
+    result = await run(
+        agent,
+        user_message=CONTEXTLESS_SOURCE_REQUEST,
+        on_reply_delta=delta,
+        diagnostics=diagnostics,
+    )
+    payload = json.loads(result.reply)
+    assert "沒有我先前的法律判斷" in payload["reply"]
+    assert "沒有指定要核對的法規或條文" in payload["reply"]
+    assert "請貼上要核對的判斷" in payload["reply"]
+    assert "http" not in payload["reply"]
+    assert published == [payload["reply"]]
+    assert payload["interaction_mode"] == "answer"
+    assert result.sources == []
+    assert result.guidance["retrieval"]["status"] == "not_requested"
+    assert result.guidance["execution"]["model_calls"] == 0
+    assert result.guidance["execution"]["route"] == "clarify_missing_prior_judgment"
+    assert diagnostics["final_answer"] == [{"text": payload["reply"], "source_ids": []}]
+    assert agent.client.chat.completions.calls == []
+    assert agent.rag.calls == []
+
+
+@pytest.mark.parametrize(
+    ("message", "extra"),
+    [
+        (CONTEXTLESS_SOURCE_REQUEST, {"history": [{"role": "assistant", "content": "先前回答"}]}),
+        (
+            CONTEXTLESS_SOURCE_REQUEST,
+            {"case_context": {"schema_version": 3, "summary": "先前判斷"}},
+        ),
+        ("請提供你判斷所依據的性別平等工作法第32條之1官方法規網址。", {}),
+        ("請提供你判斷我在公司被主管騷擾所依據的官方法規網址與條文。", {}),
+    ],
+)
+async def test_prior_source_request_with_context_or_named_law_keeps_model_route(message, extra):
+    agent = agent_for([response(plan())])
+    result = await run(agent, user_message=message, **extra)
+    assert result.guidance["execution"]["model_calls"] == 1
+    assert result.guidance["execution"]["route"] == "direct_support"
 
 
 def role_question(subject):
@@ -406,6 +485,60 @@ async def test_final_stage_receives_explicit_answer_task_after_understanding_wit
 
 
 @pytest.mark.asyncio
+async def test_direct_public_workplace_article_uses_one_reviewed_answer_in_v4():
+    message = (
+        "請依現行《性別平等工作法》第32-1條，說明向地方主管機關申訴的情形、"
+        "權勢地位是指誰，以及較長申訴期限適用哪些例外。請附官方法源。"
+    )
+    final = final_answer(
+        answer_units=[
+            {
+                "text": "具權勢地位指的是被申訴人為最高負責人或僱用人。",
+                "source_ids": ["rag_documents/law-N0030014-32-1"],
+            },
+            {"text": "首先應向雇主申訴。", "source_ids": []},
+        ]
+    )
+    agent = agent_for([response(legal_plan()), response(final)], ReviewedWorkplaceRag())
+    result = await run(agent, user_message=message)
+    reply = json.loads(result.reply)["reply"]
+    assert "具權勢地位指的是被申訴人為最高負責人" not in reply
+    assert "首先應向雇主" not in reply
+    assert "自該行為終了時起逾五年" in reply
+    assert "自該行為終了時起逾七年" in reply
+    assert (
+        reply.count("https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=N0030014&flno=32-1") == 1
+    )
+    assert result.sources[0]["doc_id"] == "rag_documents/law-N0030014-32-1"
+
+
+@pytest.mark.asyncio
+async def test_direct_public_workplace_canonical_skips_existing_case_summary_in_v4():
+    message = (
+        "請依現行《性別平等工作法》第32-1條，說明向地方主管機關申訴的情形、"
+        "權勢地位是指誰，以及較長申訴期限適用哪些例外。請附官方法源。"
+    )
+    final = final_answer(
+        answer_units=[{"text": "我剛才提到對方是主管，先保存訊息。", "source_ids": []}]
+    )
+    agent = agent_for([response(legal_plan()), response(final)], ReviewedWorkplaceRag())
+    result = await run(
+        agent,
+        user_message=message,
+        case_context={
+            "schema_version": 3,
+            "summary": "我被主管騷擾，擔心報復。",
+            "summary_origin": "user",
+            "revision": 1,
+            "facts": {},
+        },
+    )
+    reply = json.loads(result.reply)["reply"]
+    assert "我剛才提到對方是主管" in reply
+    assert "若依前述一般規定有較長申訴期限" not in reply
+
+
+@pytest.mark.asyncio
 async def test_final_unit_is_sent_before_later_units_and_metadata_arrive():
     observed = []
     legal = legal_plan()
@@ -498,7 +631,7 @@ async def test_repeated_unsupported_claims_keep_local_notices_and_other_text():
     reply = json.loads(result.reply)["reply"]
     assert "第13條" not in reply and "第224條" not in reply and "第195條" not in reply
     assert "性別平等工作法" in reply and "刑法" in reply and "民法" in reply
-    assert reply.count("〔條號待核對〕") == 3
+    assert reply.count("條號目前沒有可核對的官方來源") == 3
     assert "你可以先休息。" in reply
     assert not agent.rag.calls
     assert result.sources == []
@@ -630,14 +763,40 @@ async def test_reasoning_whitelist_bounded_and_not_in_next_model_history():
             fake_runtime_config(), reasoning_effort="low", enable_reasoning_display=True
         ),
     )
-    assert sum(len(item["text"]) for item in reasoning_events) == 4000
+    assert sum(len(item["text"]) for item in reasoning_events) == 2300
     assert all(len(item["text"]) <= 2000 for item in reasoning_events)
-    assert {item["kind"] for item in reasoning_events} == {"text", "summary"}
+    assert {item["kind"] for item in reasoning_events} == {"summary"}
     assert result.guidance["reasoning"] == reasoning_events
     calls = agent.client.chat.completions.calls
     assert calls[0]["extra_body"]["reasoning"]["exclude"] is False
     assert "a" * 100 not in json.dumps(calls[1]["messages"])
+    assert "a" * 100 not in json.dumps(result.guidance)
     assert "SECRET" not in json.dumps(result.guidance)
+
+
+def test_raw_provider_reasoning_is_never_public_even_when_display_is_enabled():
+    value = SimpleNamespace(
+        reasoning="Output JSON with internal schema instructions",
+        reasoning_details=[
+            {"type": "reasoning.text", "text": "Internal implementation steps"},
+            {"type": "reasoning.summary", "summary": "已核對本輪可用資料。"},
+        ],
+    )
+    assert v4.provider_reasoning_text(value) == [("已核對本輪可用資料。", "summary")]
+    assert (
+        _public_reasoning_entry(
+            {"text": "Internal implementation steps", "kind": "text", "stage": "answer"},
+            100,
+        )
+        is None
+    )
+    assert (
+        _public_reasoning_entry(
+            {"text": "已核對本輪可用資料。", "kind": "summary", "stage": "answer"},
+            100,
+        )
+        is not None
+    )
 
 
 @pytest.mark.asyncio
@@ -1551,6 +1710,8 @@ async def test_discarding_user_marker_keeps_ungrounded_claim_checks():
     )
     result = await run(agent_for([response(value)]))
     text = json.loads(result.reply)["reply"]
-    assert "條號待核對" in text and "期限待核對" in text
+    assert "條號目前沒有可核對的官方來源" in text
+    assert "期限目前沒有可核對的官方來源" in text
+    assert "條號待核對" not in text and "期限待核對" not in text
     assert "第999條" not in text and "999天" not in text
     assert result.sources == []

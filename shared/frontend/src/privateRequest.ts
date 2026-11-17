@@ -1,11 +1,12 @@
 import type { ChatRequest } from "./api";
-import { approvePrivacyDraft, createPrivacyDraft } from "./clientPrivacy";
+import { approvePrivacyDraft, createPrivacyDraft, type PrivacyDraft } from "./clientPrivacy";
 
-/** Mask all outbound fields locally, then register the immutable transport snapshot. */
-export async function preparePrivateRequest(request: ChatRequest, signal?: AbortSignal): Promise<ChatRequest | null> {
+export type PrivacyReviewer = (draft: PrivacyDraft, signal?: AbortSignal) => Promise<PrivacyDraft | null>;
+
+/** Rule-mask locally, require a person's review, then register the exact approved snapshot. */
+export async function preparePrivateRequest(request: ChatRequest, review: PrivacyReviewer, signal?: AbortSignal): Promise<ChatRequest | null> {
   if (signal?.aborted) return null;
   const draft = createPrivacyDraft(request);
-  // Let synchronous navigation, summary edits or cancellation invalidate preparation.
-  await Promise.resolve();
-  return signal?.aborted ? null : approvePrivacyDraft(draft);
+  const reviewed = await review(draft, signal);
+  return !reviewed || signal?.aborted ? null : approvePrivacyDraft(reviewed);
 }

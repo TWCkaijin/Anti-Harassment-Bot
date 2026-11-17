@@ -166,6 +166,7 @@ const zhTW = {
   storageUnavailable: "無法保存到此裝置。目前內容仍在此分頁，請先匯出重要內容；重新整理可能遺失。",
   storageInvalid: "部分本地紀錄無法讀取，為保留原資料，暫停覆寫。可先匯出可讀取的內容，再清除紀錄重新開始。",
   storageFuture: "本地紀錄來自較新的版本，已停止覆寫。請使用較新版本開啟。",
+  storageChanged: "其他分頁已更新對話紀錄。此分頁已停止傳送及儲存；請重新整理後再繼續。",
   incompatibleSummary: "目前服務尚未支援這份情境摘要。為避免忽略您更正的資訊，這段對話暫停傳送；您可以開啟新對話。原摘要仍保留在此裝置。",
   answerDirection: "可能的處理方向",
   answerBasis: "參考依據",

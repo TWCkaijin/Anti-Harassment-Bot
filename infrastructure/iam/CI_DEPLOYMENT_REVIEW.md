@@ -1,20 +1,23 @@
 # CI deployment policy review
 
-The executable candidate is `scripts/provision_delivery.py`; exact role
-definitions and resource allowlists are in `ci-deployment-policy.json`. This
-revision has not been applied. It removes the previous project-wide Run Admin,
-Functions Developer, Rules Admin, Firestore Index Admin, Build Editor, Firebase
-Viewer, Artifact Reader, and Secret Viewer grants.
+The executable policy is `scripts/provision_delivery.py`; exact role definitions
+and resource allowlists are in `ci-deployment-policy.json`. Read-only IAM policy
+checks on 2026-11-10 found the listed custom and predefined grants on the
+current `rag-deploy` identity, including project-wide Hosting Admin. This is
+policy readback, not an actual deployment using GitHub federation. The policy
+replaces the previous project-wide Run Admin, Functions Developer, Rules Admin,
+Firestore Index Admin, Build Editor, Firebase Viewer, Artifact Reader, and
+Secret Viewer grants.
 
-| Resource | Proposed access |
+| Resource | Current `rag-deploy` grant |
 | --- | --- |
 | Project metadata | Ten listed discovery/source-upload permissions in `ragDeployMetadata` |
 | Existing `api`, `api_preview`, `admin_api`, `admin_api_preview` functions | `get`, `getIamPolicy`, `update`, bound directly to each function |
 | Their four existing Cloud Run services | `get`, `getIamPolicy`, bound directly to each service |
 | Six listed model/signing secrets | Secret Manager Viewer bound to each secret; no secret payload access |
-| Four listed Client/Admin runtime service accounts | Service Account User bound to each account |
+| Four Client/Admin runtime and two build service accounts | Service Account User bound to each account |
 | Existing `asia-east1/gcf-artifacts` repository | `artifactregistry.repositories.get` only |
-| Hosting | Unresolved: predefined project-level Hosting Admin; excluded by default |
+| Hosting | `roles/firebasehosting.admin` is currently granted at project level; no site/channel restriction |
 
 `cloudfunctions.functions.sourceCodeSet` is required on the location parent for
 the signed source-upload URL. It cannot be restricted to an existing function;
@@ -31,10 +34,10 @@ Firebase documents that [Hosting does not support custom
 roles](https://firebase.google.com/docs/projects/iam/permissions#hosting).
 Its site REST API also has no site-level IAM policy methods. Consequently,
 project-wide `roles/firebasehosting.admin` cannot honestly be described as a
-two-site or preview-channel-only grant. The script requires the separate
-`--allow-project-hosting-admin` option to include it. That option must not be used
-until the remaining broad grant has been reviewed and approved. Without it,
-function deployment permissions can be provisioned, but Hosting CI is incomplete.
+two-site or preview-channel-only grant. It is currently present on `rag-deploy`.
+The script still requires the separate `--allow-project-hosting-admin` option
+when provisioning this broad grant in a new environment. Its presence allows
+Hosting API authorization, but a federated CI deployment has not been tested.
 
 ## Firebase CLI 15.33.0 findings
 
@@ -76,8 +79,9 @@ Deploying code as the four runtime identities still grants indirect access to
 those identities' runtime capabilities; this is inherent to authorized code
 deployment and remains limited to the named application identities.
 
-Federation remains restricted to the numeric repository and owner IDs, `push`
-events, and the exact `main/deploy-main.yml` or `dev/deploy-dev.yml` workflow
-references. The shared deployment identity can update both environments; the
+Federation remains restricted to the numeric repository and owner IDs, the
+exact `main/deploy-main.yml` or `dev/deploy-dev.yml` workflow references, and
+their branch refs. Main permits only `workflow_dispatch`; dev permits `push`
+or `workflow_dispatch`. The shared deployment identity can update both environments; the
 Hosting limitation also prevents channel-level IAM separation in this project.
 Branch protections and workflow review therefore remain significant controls.

@@ -1,0 +1,4 @@
+# macOS Apple Silicon; Python 3.11–3.13. Install inside an isolated venv.
+mlx-lm==0.31.1
+mlx==0.30.4
+transformers==5.0.0

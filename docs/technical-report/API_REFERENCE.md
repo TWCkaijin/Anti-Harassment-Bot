@@ -48,7 +48,7 @@ curl --no-buffer http://127.0.0.1:5000/v1/chat/ \
 | --- | --- | --- |
 | `progress` | `phase` 與 `elapsed_ms`；後者是伺服器從收到請求到該階段的實測毫秒數 | 依後端實際執行階段更新提示，不以固定秒數切換、不推估完成百分比 |
 | `analysis` | v3／v4 的實際理解、來源與回答摘要 | 顯示可核對的分析摘要與依據；done 後保留完整摘要 |
-| `reasoning` | v4 供應商公開的文字或摘要 | 與已驗證答案區分，僅頁面暫存，不儲存或匯出 |
+| `reasoning` | v4 供應商標記為公開摘要的內容；原始推理文字不發布 | 與已驗證答案區分，僅頁面暫存，不儲存或匯出 |
 | `delta` | `{"text":"新增的回覆文字"}` | 將文字附加到同一則 AI 訊息 |
 | `guidance` | 累積快照，可含 `interaction_mode`、`clarifying_questions`、`suggested_replies`；陣列最後一項可能尚未生成完畢 | 以整份快照更新問題與選項預覽，不附加重複文字；等 `done` 後才可點選 |
 | `done` | 完整聊天回覆：`reply`、`session_id`、`anonymized`、`rag_used`、`emotion`、`emotion_color`、`suggested_replies`、`action_buttons`、`interaction_mode`、`clarifying_questions`；開發模式可另含 `debug_tool_calls` | 以驗證後的 `reply` 定稿，套用 metadata，結束串流 |

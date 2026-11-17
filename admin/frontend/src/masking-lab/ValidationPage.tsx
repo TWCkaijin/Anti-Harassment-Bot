@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MODEL_ID, MODEL_REVISION, PROMPT_VERSION } from "./config";
+import { ENTITY_TYPES, MODEL_ID, MODEL_REVISION, PROMPT_VERSION } from "./config";
 import { latestModelRevision, rememberModelRevision, savedModelRevision } from "./modelVersion";
 import { BrowserMaskingRuntime } from "./runtime";
 import { createReport, evaluateSplit, type CaseResult, type EvaluationReport, type Split } from "./benchmark";
@@ -10,6 +10,7 @@ import { runBasicChecks, type BasicCheckReport } from "./selfCheck";
 declare global { interface Window { maskingValidationReport?: EvaluationReport } }
 const seconds = (ms: number | null | undefined) => ms == null ? "尚未量測" : `${(ms / 1000).toFixed(2)} 秒`;
 const percent = (fraction: number) => `${(fraction * 100).toFixed(1)}%`;
+const typeNames = { person: "人物", organization: "單位", address: "地址", contact: "聯絡資訊", identifier: "識別號" } as const;
 
 // active follows session access, not navigation: hidden panels keep their worker.
 export default function ValidationPage({ active = true, configuredRevision, groupName }: { active?: boolean; configuredRevision?: string; groupName?: string }) {
@@ -161,8 +162,17 @@ export default function ValidationPage({ active = true, configuredRevision, grou
           const score = report.scores[key];
           return <tr key={key}><td className="p-2">{label}</td><td className="p-2">{score.cases}</td><td className="p-2">{score.successfulChecks}</td><td className="p-2">{score.cases && score.precision !== null ? percent(score.precision) : '—'}</td><td className="p-2">{score.cases ? percent(score.recall) : '—'}</td><td className="p-2">{seconds(score.p95Ms)}</td></tr>;
         })}</tbody></table>
-      <p className="mt-4 font-medium" data-testid="gate-status">{report.gatePassed ? "驗收門檻通過" : cases.length === 120 ? "未通過驗收：暫不替換正式流程" : "尚未完成全部驗證"}</p>
-      <p className="mt-2 text-xs leading-relaxed text-on-surface/65">目標：兩組資料集各自精確率／召回率 ≥ 95%，有效輸出 100%，暖機後 P95 ≤ 5 秒。完整片段比對，部分遮罩同時計為漏遮與誤遮；合成資料成績不代表真實情境保證。</p>
+      <p className="mt-4 font-medium" data-testid="gate-status">{report.gatePassed ? "固定合成案例門檻通過；仍待獨立人工標注保留集" : cases.length === 120 ? "固定合成案例未通過：暫不替換正式流程" : "尚未完成全部驗證"}</p>
+      <p className="mt-2 text-xs leading-relaxed text-on-surface/65">目標：兩組資料集各自整體及每類型精確率／召回率 ≥ 95%，有效輸出 100%，暖機後 P95 ≤ 5 秒。完整片段比對，部分遮罩同時計為漏遮與誤遮；合成資料成績不代表真實情境保證。</p>
+    </section>
+    <section className="overflow-x-auto rounded-2xl border border-outline/20 p-5" aria-label="各類型辨識結果">
+      <h2 className="mb-2 text-lg font-bold">各類型辨識結果</h2>
+      <p className="mb-4 text-xs leading-relaxed text-on-surface/65">姓名與單位分開列示。片段正確但類型錯誤，會在原類型計為漏判、預測類型計為誤判。40 則保留集仍是合成案例；獨立人工標注集尚待建立。</p>
+      <table className="w-full min-w-[38rem] text-left text-sm"><thead><tr>{["資料集", "類型", "預期", "辨識", "精確率", "召回率", "F1", "漏判", "誤判"].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead>
+        <tbody>{([['development', '開發集'], ['holdout', '保留驗證集'], ['all', '全部']] as const).flatMap(([split, label]) => ENTITY_TYPES.map(type => {
+          const score = report.perType[split][type];
+          return <tr key={`${split}-${type}`}><td className="p-2">{label}</td><td className="p-2 font-medium">{typeNames[type]}</td><td className="p-2">{score.expected}</td><td className="p-2">{score.detected}</td><td className="p-2">{score.precision === null ? '—' : percent(score.precision)}</td><td className="p-2">{score.recall === null ? '—' : percent(score.recall)}</td><td className="p-2">{score.f1 === null ? '—' : percent(score.f1)}</td><td className="p-2">{score.falseNegative}</td><td className="p-2">{score.falsePositive}</td></tr>;
+        }))}</tbody></table>
     </section>
     <section className="space-y-3"><h2 className="text-lg font-bold">案例結果</h2>
       {cases.length === 0 && <p className="text-sm text-on-surface/65">完成辨識後，這裡會顯示原文、預期片段與實際遮罩。</p>}

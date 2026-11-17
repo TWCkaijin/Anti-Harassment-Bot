@@ -17,6 +17,7 @@ from rag_core.core.agent_errors import (
     ChatTestContractMismatchError,
 )
 from rag_core.core.logger import get_logger
+from rag_core.core.privacy_claims import is_local_privacy_reply
 from rag_core.core.runtime_config import (
     ConfigConflictError,
     RuntimeConfig,
@@ -181,14 +182,21 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
             data.output_contract != "chat" or data.chat_request.contract_version != 4
         ):
             return jsonify({"detail": "Chat-test fingerprint requires v4 chat"}), 422
-        config = snapshot_config or resolve_runtime_config(get_runtime_config(), data.overrides)
+        base_config = snapshot_config or get_runtime_config()
+        if base_config.source in chat_api._UNAVAILABLE_CONFIG_SOURCES:
+            return chat_api._agent_error(
+                base_config, chat_api.GateUnavailableError("Runtime config unavailable")
+            )
+        config = snapshot_config or resolve_runtime_config(base_config, data.overrides)
     except ValidationError as exc:
         return chat_api._request_validation_error(exc)
     except ValueError as exc:
         return jsonify({"detail": str(exc)}), 422
-    if data.chat_request.image_base64 and not config.enable_image_upload:
+    if data.chat_request.image_base64 and not chat_api.image_upload_enabled(config):
         return chat_api._image_upload_disabled_error()
     diagnostics = {"effective_config": config.public_dict()}
+    if config.gate_enabled and data.output_contract == "chat":
+        diagnostics["gate_reviews"] = []
     try:
         arguments, was_anonymized = chat_api._prepare_agent_input(
             data.chat_request, config, diagnostics, include_input_stages=True
@@ -202,7 +210,42 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
             arguments["expected_chat_test_contract_sha256"] = (
                 data.expected_chat_test_contract_sha256
             )
-        result = asyncio.run(chat_api.get_agent().run(**arguments))
+        if data.output_contract == "applicable_laws_v1":
+            # Prediction is an admin-only evaluation contract, not a user-visible chat turn.
+            result = asyncio.run(chat_api.get_agent().run(**arguments))
+            response = None
+        else:
+            session_id = str(uuid.uuid4())
+            refusal_used = [False]
+
+            def refusal_payload(reply):
+                refusal_used[0] = True
+                return chat_api._gate_refusal_payload(
+                    reply, session_id, was_anonymized, data.chat_request
+                )
+
+            response = asyncio.run(
+                chat_api.run_gated_chat(
+                    chat_api.get_agent(),
+                    chat_api.get_gate(),
+                    chat_api.get_refusal_agent(),
+                    run_kwargs=arguments,
+                    runtime_config=config,
+                    build_payload=lambda result: chat_api._validated_payload(
+                        result, session_id, was_anonymized, config, data.chat_request
+                    ),
+                    build_refusal_payload=refusal_payload,
+                    review_trace=diagnostics.get("gate_reviews"),
+                )
+            )
+            if refusal_used[0] or is_local_privacy_reply(response):
+                # The business task may have finished before Gate denied. Keep
+                # test input diagnostics, but never store the rejected answer.
+                diagnostics = {
+                    key: value
+                    for key, value in diagnostics.items()
+                    if key in {"effective_config", "history", "pii", "input_stages", "gate_reviews"}
+                }
     except ChatTestContractMismatchError:
         return jsonify(
             {
@@ -239,9 +282,7 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
                     "diagnostics": diagnostics,
                 }
             )
-        response = chat_api._response_payload(
-            result, str(uuid.uuid4()), was_anonymized, config, data.chat_request
-        )
+        assert response is not None
     except Exception as exc:
         return chat_api._retryable_error(config, exc)
     payload = jsonify({"response": response, "diagnostics": diagnostics})

@@ -3,10 +3,10 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
-export default defineConfig(() => ({
+export default defineConfig(({ mode }) => ({
   plugins: [tailwindcss(), react()],
   server: { host: "127.0.0.1", port: 5174, strictPort: true, proxy: { "/api": { target: "http://127.0.0.1:8001", changeOrigin: false } } },
-  build: { rollupOptions: { input: ["index.html", "masking-validation.html"] } },
+  build: { rollupOptions: { input: mode === "preview" ? ["index.html", "masking-validation.html"] : "index.html" } },
   test: {
     environment: 'jsdom',
     environmentOptions: {

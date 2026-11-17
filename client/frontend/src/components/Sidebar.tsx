@@ -372,13 +372,6 @@ export default function Sidebar({
                   <span className="text-[10px] text-on-surface/60">緊急報案</span>
                 </div>
               </a>
-              <a href="tel:02-2391-7133" className="flex items-center gap-3 border-t border-outline/10 px-3 py-2.5 text-on-surface hover:bg-surface-container" onClick={() => setIsEmergencyMenuOpen(false)}>
-                <MaterialIcon icon="support_agent" size={20} className="text-secondary" />
-                <div className="flex flex-col text-left">
-                  <span className="font-bold">現代婦女基金會</span>
-                  <span className="text-[10px] text-on-surface/60">性別友善諮詢</span>
-                </div>
-              </a>
             </div>
           </div>
 

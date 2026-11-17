@@ -67,7 +67,7 @@
 <text x="920.0" y="323.0" text-anchor="middle" font-family="Heiti TC, Noto Sans CJK TC, sans-serif" font-size="20" fill="#193A4B">v1-v3 相容路徑</text>
 </svg><figcaption>回答處理流程</figcaption></figure>
 <p>v4 以 answer_units 產生自然段落，完整單元通過局部來源檢查後才送出 delta，不必等整份答案完成。v2/v3 則先取得完整結構化回覆再分段。SSE 包含 progress、analysis、reasoning、delta、guidance、done 與 error；詳細欄位見 <a href="API_REFERENCE.md">API 參考</a>。</p>
-<p>reasoning 僅顯示供應商公開提供的文字／摘要，與正式答案分開，頁面重新整理或匯出時不保留。已顯示內容後不自動完整重播；錯誤或取消會標示未完成，只有通過 done 驗證才提交完整 metadata。</p>
+<p>reasoning 僅顯示供應商標記的公開摘要，原始推理文字不發布；它與正式答案分開，頁面重新整理或匯出時不保留。已顯示內容後不自動完整重播；錯誤或取消會標示未完成，只有通過 done 驗證才提交完整 metadata。</p>
 <p>模型理解與最終回答均傳入嚴格 JSON Schema，並要求支援參數的模型端點；回傳後仍驗證型別、引用與完成狀態，不只依賴文字指令。詳見 <a href="CHAT_CONTRACT.md">聊天契約</a>。</p>
 <h2 id="section-3">3. 摘要與多輪一致性</h2>
 <p>v4 案件 schema 3 使用 summary、summary_origin 及 revision，本機 storage schema 為 4。舊固定欄位會轉為文字並保留 legacyCaseFacts；無法辨識或超長資料不強制覆寫。</p>
