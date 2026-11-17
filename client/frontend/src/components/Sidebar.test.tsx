@@ -80,3 +80,15 @@ it("moves keyboard focus into the mobile portal menu and returns it on Escape", 
   expect(screen.queryByRole("button", { name: "重新命名" })).not.toBeInTheDocument();
   expect(trigger).toHaveFocus();
 });
+
+it("lists only public emergency contacts", () => {
+  vi.stubGlobal("matchMedia", media(false));
+  render(<I18nProvider><Sidebar {...props} isOpen /></I18nProvider>);
+  fireEvent.click(screen.getByRole("button", { name: "緊急協助" }));
+  const links = Array.from(document.querySelectorAll('a[href^="tel:"]'));
+  expect(links.map((link) => link.getAttribute("href"))).toEqual(["tel:113", "tel:110"]);
+  expect(links.map((link) => link.textContent)).toEqual([
+    expect.stringContaining("113 保護專線"),
+    expect.stringContaining("110 報案專線"),
+  ]);
+});

@@ -235,7 +235,7 @@ function DiagnosticConversation({
             replyPrompt={replyPrompt}
             caseRevision={chat.context.revision}
             activeContractVersion={4}
-            allowImageUpload={temporary.enable_image_upload}
+            allowImageUpload={false}
             onClarificationDraftChange={chat.saveClarificationDraft}
           />
         </div>

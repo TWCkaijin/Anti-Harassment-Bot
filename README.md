@@ -2,13 +2,15 @@
 
 React／Vite、Flask、Firebase Functions／Firestore 與 OpenRouter 組成的諮詢系統。Client 提供聊天、摘要、瀏覽器遮罩與 RAG；獨立 Admin 提供設定、Prompt／Skills、診斷、批次測試與檢索資料管理。
 
+目前本機程式會先以瀏覽器規則遮罩 Client 聊天請求，顯示送出內容供使用者檢查及確認。圖片附件在 Client 與 Admin 診斷端點均停用。兩階段 Gate 可由 Admin 設定，但既有環境不會因程式更新而自動開啟；實際模型效果仍須另外驗證。這些敘述不代表雲端版本已更新。
+
 | 文件 | 用途 |
 | --- | --- |
 | [遷移報告與新架構](docs/MIGRATION_REPORT.md) | 架構、資料／權限邊界、已驗證結果與待完成事項 |
 | [操作、執行與部署手冊](docs/OPERATIONS.md) | 安裝、五個本機程序、登入、資料管理、部署、故障排查及回復 |
 | [資料工具](admin/backend/admin_app/scripts/README.md) | 舊資料移轉、來源 manifest 與匯入 CLI |
 | [CI 權限審查](infrastructure/iam/CI_DEPLOYMENT_REVIEW.md) | WIF 信任條件及各項部署權限 |
-| [技術文件與閱讀版手冊](docs/technical-report/README.md) | 已同步新架構的 Markdown／HTML／PDF 與可編輯圖稿 |
+| [技術文件與閱讀版手冊](docs/technical-report/README.md) | 新架構技術資料與 2026-10-09 閱讀版快照；最新隱私流程見 [隱私說明](docs/technical-report/PRIVACY.md) |
 | [資料說明](data/README.md) | 原始來源與知識庫資料 |
 
 ## 目錄與資料庫
@@ -237,7 +239,9 @@ uv run --frozen ruff check client/backend admin/backend shared/python client/tes
 uv run --frozen ruff format --check client/backend admin/backend shared/python client/tests admin/tests shared/tests scripts conftest.py
 uv run --frozen pytest client/tests admin/tests shared/tests -q
 pnpm -r lint
-pnpm -r test
+pnpm --filter @rag/shared test
+pnpm --filter @rag/client test
+pnpm --filter @rag/admin test
 pnpm -r build
 uv run --frozen python scripts/build_functions.py
 uv run --frozen python scripts/quality/check_source_package.py
@@ -248,3 +252,23 @@ Rules 驗收另外執行 `pnpm test:rules`，需 Java 21 與 Firebase CLI 15.33.
 ## 授權
 
 保留 [Apache License 2.0](LICENSE)。外部資料與服務另依其來源條件使用。本系統提供初步資訊與支持，個案法律結論仍需適當的專業判斷。
+
+### main 的獨立 Hosting 預覽
+
+手動 workflow **Deploy — Main Hosting Preview**（branch 選 `main`）通過 CI 後只部署 Client 的 `main-preview` channel；與 `dev-preview` 及正式 `live` 分開。每次部署有效期 30 天，使用 Firebase 實際回傳的網址。Workflow 檔須先推送才會出現在 Actions；正式四項部署另由手動 workflow 控制。
+
+本機也可使用；若正式 API 將強制 App Check，先匯出正式 Client Web App 的四個公開 `VITE_FIREBASE_*`／`VITE_APP_CHECK_SITE_KEY` 變數（完整步驟見 [main-preview 手冊](docs/MAIN_PREVIEW.md)）：
+
+```sh
+VITE_API_BASE_URL=/api VITE_ENV=preview VITE_ANALYTICS_ENABLED=false \
+  VITE_APP_CHECK_ENABLED=true pnpm --filter @rag/client build
+firebase hosting:channel:deploy main-preview \
+  --project anti-harassment-bot --config firebase.main-preview.json \
+  --expires 30d --non-interactive
+```
+
+需先登入 Firebase CLI，或設定本機 `GOOGLE_APPLICATION_CREDENTIALS`。部署僅包含 Client 前端與該 channel 的 Hosting 設定。`/api` 轉送至 `asia-east1` 的既有正式 `api`，共用正式資料、設定與模型費用；預設關閉 Analytics。可用 `<preview-url>/api/v1/health/` 驗證轉送，不需要發出聊天請求。Admin 使用獨立 Hosting target 與 Admin API；此 Client 預覽不涵蓋管理功能。
+
+若正式 API 已強制 App Check，本機建置預覽時也須提供正式 Client Web App 的公開 Firebase 設定、`VITE_APP_CHECK_ENABLED=true` 及對應的 `VITE_APP_CHECK_SITE_KEY`；缺少任一項時聊天會被阻擋。手動 workflow 會從對應的 GitHub Variables 讀取這些值。
+
+同站轉送避免為新預覽網址修改正式 API 的 CORS，但受 [Hosting 60 秒 request timeout](https://firebase.google.com/docs/hosting/functions) 限制，不等同正式站直接呼叫 Functions 的長時間 SSE 路徑。要驗證超長串流需另外設定正式 API 的 CORS 並改用直接 API URL。

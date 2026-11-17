@@ -118,7 +118,8 @@ def test_reasoning_display_gate_preserves_analysis_and_retrieval(monkeypatch, st
     monkeypatch.setattr(
         chat, "get_runtime_config", lambda: runtime_config(enable_reasoning_display=enabled)
     )
-    entry = {"text": "INTERNAL_PROMPT_CANARY", "kind": "text", "stage": "answer"}
+    private_entry = {"text": "INTERNAL_PROMPT_CANARY", "kind": "text", "stage": "answer"}
+    summary_entry = {"text": "公開的回應摘要", "kind": "summary", "stage": "answer"}
     analysis = {"stage": "sources", "summary": "已查詢資料庫"}
     retrieval = {
         "status": "ok",
@@ -129,9 +130,12 @@ def test_reasoning_display_gate_preserves_analysis_and_retrieval(monkeypatch, st
     class Agent:
         async def run(self, on_reasoning=None, on_analysis=None, **kwargs):
             if on_reasoning:
-                await on_reasoning(entry)
+                await on_reasoning(private_entry)
+                await on_reasoning(summary_entry)
                 await on_analysis(analysis)
-            return result(reasoning=[entry], analysis=[analysis], retrieval=retrieval)
+            return result(
+                reasoning=[private_entry, summary_entry], analysis=[analysis], retrieval=retrieval
+            )
 
     monkeypatch.setattr(chat, "get_agent", Agent)
     response = app.test_client().post("/api/v1/chat/", json=request_payload(stream=stream))
@@ -141,7 +145,15 @@ def test_reasoning_display_gate_preserves_analysis_and_retrieval(monkeypatch, st
         if stream
         else response.json
     )
-    assert ("INTERNAL_PROMPT_CANARY" in response.get_data(as_text=True)) is enabled
+    assert "INTERNAL_PROMPT_CANARY" not in response.get_data(as_text=True)
+    if enabled:
+        assert payload["reasoning"] == [summary_entry]
+    else:
+        assert "reasoning" not in payload
+    if stream:
+        assert [data for event, data in frames(response) if event == "reasoning"] == (
+            [summary_entry] if enabled else []
+        )
     assert payload["analysis"][0]["summary"] == "已查詢資料庫"
     assert payload["rag_used"]["retrieval"] == retrieval
     assert payload["rag_used"]["sources"] == []
@@ -460,19 +472,21 @@ def test_unchanged_summary_does_not_advance_context(monkeypatch):
     assert response.json["clarification"]["context_revision"] == 2
 
 
-def test_reasoning_stream_exposes_only_public_fields_preserves_additive_text_and_done(monkeypatch):
+def test_reasoning_stream_exposes_only_summaries_and_preserves_done(monkeypatch):
     monkeypatch.setattr(
         chat, "get_runtime_config", lambda: runtime_config(enable_reasoning_display=True)
     )
     emitted = [
-        {"text": "公開", "kind": "text", "stage": "understanding"},
-        {"text": " ", "kind": "text", "stage": "understanding"},
+        {"text": "公開", "kind": "summary", "stage": "understanding"},
         {"text": "摘要", "kind": "summary", "stage": "answer"},
     ]
 
     class Agent:
         async def run(self, on_reasoning, on_reply_delta, **kwargs):
             await on_reasoning({"kind": "encrypted", "data": "ENCRYPTED_CANARY", "stage": "answer"})
+            await on_reasoning(
+                {"text": "RAW_REASONING_CANARY", "kind": "text", "stage": "understanding"}
+            )
             for entry in emitted:
                 await on_reasoning(
                     {**entry, "signature": "SIGNATURE_CANARY", "tool_args": "ARGS_CANARY"}
@@ -559,7 +573,7 @@ def test_any_visible_v4_output_disables_retry_without_removing_published_text(
     class Agent:
         async def run(self, on_reasoning, on_analysis, on_reply_delta, **kwargs):
             if published == "reasoning":
-                await on_reasoning({"text": "已提供的說明", "kind": "text", "stage": "answer"})
+                await on_reasoning({"text": "已提供的說明", "kind": "summary", "stage": "answer"})
             elif published == "analysis":
                 await on_analysis({"stage": "understanding", "summary": "已完成的整理"})
             else:

@@ -112,7 +112,10 @@ def verify_build_account(project, environment, function):
         )
 
 
-def environment_values(project, environment, service, worker_url=""):
+def environment_values(project, environment, service, worker_url="", app_check_enabled="false"):
+    app_check_setting = str(app_check_enabled).strip().lower()
+    if app_check_setting not in {"", "true", "false"}:
+        raise ValueError("CHAT_APP_CHECK_ENABLED must be true or false")
     production = environment == "production"
     suffix = "prod" if production else "dev"
     values = {
@@ -141,6 +144,8 @@ def environment_values(project, environment, service, worker_url=""):
                 "ADMIN_TASKS_AUDIENCE": worker_url,
             }
         )
+    else:
+        values["CHAT_APP_CHECK_ENABLED"] = "true" if app_check_setting == "true" else "false"
     return values
 
 
@@ -159,31 +164,54 @@ def frontend_env(project, environment, service):
         ("admin", False): "RAG Admin Preview",
         ("client", False): "RAG Client Preview",
     }.get((service, production))
-    if display:
+    requested_app_id = os.getenv(f"{service.upper()}_FIREBASE_APP_ID", "").strip()
+    if requested_app_id:
+        app = next((app for app in apps if app.get("appId") == requested_app_id), None)
+    elif display:
         app = next((app for app in apps if app.get("displayName") == display), None)
     else:
-        app = next((app for app in apps if not app.get("displayName", "").startswith("RAG ")), None)
+        candidates = [
+            app for app in apps if not str(app.get("displayName") or "").startswith("RAG ")
+        ]
+        if len(candidates) != 1:
+            raise RuntimeError("Set CLIENT_FIREBASE_APP_ID to select the production Web App")
+        app = candidates[0]
     if app is None:
         raise RuntimeError(f"Missing {service} {environment} Firebase Web App registration")
     sdk = firebase(project, "apps:sdkconfig", "WEB", app["appId"])
     sdk = sdk.get("sdkConfig", sdk)
     function = "api" if production else "api_preview"
-    return {
+    values = {
         **os.environ,
         "VITE_ENV": environment,
-        "VITE_API_BASE_URL": f"https://{REGION}-{project}.cloudfunctions.net/{function}",
+        "VITE_API_BASE_URL": (
+            f"https://{REGION}-{project}.cloudfunctions.net/{function}"
+            if service == "client"
+            else "/api"
+        ),
         "VITE_FIREBASE_API_KEY": sdk.get("apiKey", ""),
         "VITE_FIREBASE_PROJECT_ID": project,
         "VITE_FIREBASE_APP_ID": app["appId"],
         "VITE_FIREBASE_MEASUREMENT_ID": sdk.get("measurementId", ""),
         "VITE_ANALYTICS_ENABLED": os.getenv("VITE_ANALYTICS_ENABLED", "false"),
     }
+    if service == "client":
+        app_check_setting = os.getenv("VITE_APP_CHECK_ENABLED", "false").strip().lower()
+        if app_check_setting not in {"", "true", "false"}:
+            raise ValueError("VITE_APP_CHECK_ENABLED must be true or false")
+        enabled = app_check_setting == "true"
+        site_key = os.getenv("VITE_APP_CHECK_SITE_KEY", "").strip()
+        if enabled and (not site_key or not sdk.get("apiKey")):
+            raise RuntimeError("App Check requires a site key and Firebase Web App API key")
+        values["VITE_APP_CHECK_ENABLED"] = "true" if enabled else "false"
+        values["VITE_APP_CHECK_SITE_KEY"] = site_key
+    return values
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", choices=["production", "preview"], required=True)
-    parser.add_argument("--service", choices=["client", "admin", "all"], default="all")
+    parser.add_argument("--service", choices=["client", "admin"], required=True)
     parser.add_argument("--project", default="anti-harassment-bot")
     parser.add_argument("--backend-only", action="store_true")
     parser.add_argument("--frontend-only", action="store_true")
@@ -192,7 +220,7 @@ def main():
     if args.backend_only and args.frontend_only:
         parser.error("Select only one partial deployment option")
     verify_firebase_cli()
-    services = ["admin", "client"] if args.service == "all" else [args.service]
+    services = [args.service]
     config = "firebase.json" if args.environment == "production" else "firebase.preview.json"
     production = args.environment == "production"
     functions = {
@@ -228,9 +256,18 @@ def main():
         )
         for service in services:
             function = functions[service]
-            existing = function_info(args.project, function) if service == "admin" else None
+            existing = function_info(args.project, function)
+            app_check_enabled = os.getenv("CHAT_APP_CHECK_ENABLED")
+            if app_check_enabled is None and existing:
+                app_check_enabled = existing.get("environmentVariables", {}).get(
+                    "CHAT_APP_CHECK_ENABLED", "false"
+                )
             values = environment_values(
-                args.project, args.environment, service, existing["uri"] if existing else ""
+                args.project,
+                args.environment,
+                service,
+                existing["uri"] if existing and service == "admin" else "",
+                app_check_enabled or "false",
             )
             target = ROOT / "build" / "functions" / service
             write_env(target, values)
@@ -270,6 +307,8 @@ def main():
                 ["pnpm", "--filter", f"@rag/{service}", "build", "--mode", args.environment],
                 env=frontend_env(args.project, args.environment, service),
             )
+        if production and "admin" in services:
+            run(["node", "scripts/quality/check_admin_bundle.mjs", "--production-only"])
         targets = ",".join(f"hosting:{service}" for service in services)
         if production:
             response = firebase(args.project, "deploy", "--config", config, "--only", targets)

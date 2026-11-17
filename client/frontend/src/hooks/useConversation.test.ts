@@ -103,7 +103,8 @@ describe("v3 conversation contracts", () => {
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await result.current.sendMessage("合成情境"); });
     expect(sendChat).toHaveBeenCalledOnce();
-    expect(result.current.messages.at(-1)).toMatchObject({ isError: true, analysis: [entry] });
+    expect(result.current.messages.at(-1)).toMatchObject({ isError: true, analysis: undefined });
+    expect(localStorage.getItem("harass_bot_conversations")).not.toContain(entry.summary);
   });
 });
 
@@ -730,10 +731,8 @@ describe("useConversation streamed replies", () => {
     });
     expect(sendChat).toHaveBeenCalledOnce();
     expect(result.current.messages).toHaveLength(2);
-    expect(result.current.messages.at(-1)).toMatchObject({
-      content: "只收到一半", isError: true,
-      interruptionReason: expect.stringContaining("回覆中斷"),
-    });
+    expect(result.current.messages.at(-1)).toMatchObject({ content: "服務暫時無法使用：請稍後再試", isError: true });
+    expect(localStorage.getItem("harass_bot_conversations")).not.toContain("只收到一半");
     unmount();
     const restored = renderHook(() => useConversation("interrupted-session"));
     await act(async () => { await Promise.resolve(); });
@@ -743,7 +742,7 @@ describe("useConversation streamed replies", () => {
     expect(vi.mocked(sendChat).mock.calls[1][0].history).toEqual([{ role: "user", content: "第一個問題" }]);
   });
 
-  it("keeps partial text when stopped and does not add a duplicate assistant bubble", async () => {
+  it("retracts partial text when stopped and does not add a duplicate assistant bubble", async () => {
     const pending = deferredResponse();
     const { result } = renderHook(() => useConversation("cancel-stream-session"));
     await act(async () => { await Promise.resolve(); });
@@ -757,8 +756,9 @@ describe("useConversation streamed replies", () => {
       await request;
     });
     expect(result.current.messages).toHaveLength(2);
-    expect(result.current.messages.at(-1)).toMatchObject({ id, content: "這是已經收到的文字", isCancelled: true });
+    expect(result.current.messages.at(-1)).toMatchObject({ id, content: "已停止回覆。", isCancelled: true });
     expect(result.current.messages.at(-1)).not.toHaveProperty("streamingGuidance");
+    expect(localStorage.getItem("harass_bot_conversations")).not.toContain("這是已經收到的文字");
     expect(result.current.isLoading).toBe(false);
     expect(sendChat).toHaveBeenCalledOnce();
   });

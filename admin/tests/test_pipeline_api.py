@@ -11,6 +11,7 @@ from client_app.api import health
 from client_app.main import app
 from rag_core import chat_service as chat
 from rag_core.agents.openrouter_agent import AgentResult
+from rag_core.core import runtime_config as runtime_config_module
 from rag_core.core.clarification_tokens import sign_clarification
 from rag_core.core.runtime_config import RuntimeConfig
 
@@ -86,6 +87,8 @@ def test_admin_test_requires_auth_before_settings_or_model(monkeypatch, app):
 
 @pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_admin_can_enable_images_for_one_request_without_changing_environment(monkeypatch, version):
+    # Exercise request-local override mechanics while the rollout switch is off in production.
+    monkeypatch.setattr(runtime_config_module, "IMAGE_UPLOAD_ROLLOUT_ENABLED", True)
     base = config(enable_image_upload=False)
     calls = []
 
@@ -167,7 +170,8 @@ def test_admin_invalid_images_cannot_be_enabled_by_an_override(monkeypatch, imag
 
 
 @pytest.mark.parametrize("review", [False, True])
-def test_client_review_setting_does_not_change_backend_text_masking_or_images(review):
+def test_client_review_setting_does_not_change_backend_text_masking_or_images(monkeypatch, review):
+    monkeypatch.setattr(runtime_config_module, "IMAGE_UPLOAD_ROLLOUT_ENABLED", True)
     image = "data:image/png;base64,iVBORw0KGgo="
     request_model = chat.ChatRequest(message="請聯絡 0912345678", image_base64=image)
     arguments, masked = chat._prepare_agent_input(
@@ -193,8 +197,9 @@ def test_health_and_admin_expose_independent_image_and_client_review_settings(
         .get("/api/v1/admin/config", headers={"Authorization": "Bearer offline-test-key"})
         .json
     )
+    assert public["enable_image_upload"] is False
+    assert administrative["enable_image_upload"] is images
     for value in (public, administrative):
-        assert value["enable_image_upload"] is images
         assert value["enable_client_privacy_review"] is review
     assert "agent_prompt_sections" not in public
     assert administrative["enable_anonymization"] is True

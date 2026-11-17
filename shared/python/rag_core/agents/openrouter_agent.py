@@ -638,11 +638,12 @@ class OpenRouterAgent:
                 tool_calls=tool_call_traces,
             )
 
-        except RAGUnavailableError:
-            logger.exception("RAG backend unavailable")
+        except RAGUnavailableError as exc:
+            logger.error("RAG backend unavailable error_type=%s", type(exc).__name__)
             raise
-        except Exception:
-            logger.exception("OpenRouter API Error")
+        except Exception as exc:
+            # Provider exceptions can echo private request text in their body.
+            logger.error("OpenRouter API error_type=%s", type(exc).__name__)
             raise
 
     async def _create_message(

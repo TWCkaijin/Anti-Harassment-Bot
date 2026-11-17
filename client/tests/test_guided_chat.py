@@ -14,7 +14,7 @@ from client.tests.test_agent import (
     FakeToolCall,
     fake_runtime_config,
 )
-from client.tests.test_rag import FakeDB
+from client.tests.test_rag import FakeDB, FakeFirestoreDoc
 from client_app.main import app
 from rag_core import chat_service as chat_api
 from rag_core.agents.openrouter_agent import AgentContractError, OpenRouterAgent
@@ -353,7 +353,8 @@ async def test_unknown_version_deadline_replaced_before_streaming(claim):
     result = await agent.run("一般申訴期限", contract_version=2, on_reply_delta=delta)
     assert "一年內" not in "".join(emitted)
     assert claim not in "".join(emitted)
-    assert "期限待核對" in "".join(emitted)
+    assert "目前沒有可核對的官方來源" in "".join(emitted)
+    assert "〔期限待核對〕" not in "".join(emitted)
     assert "自行決定" in "".join(emitted)
     assert json.loads(result.reply)["reply"] == "".join(emitted)
 
@@ -368,8 +369,84 @@ def test_known_old_version_does_not_establish_current_law_or_deadline():
     sources = [{"doc_id": "law/old", "version": "2009"}]
     sections = guided._legal_sections(guided.GuidedAnswer.model_validate(data), sources, "申訴")
     assert "一年" not in sections[1]["text"]
-    assert "版本待核對" in sections[1]["text"]
-    assert "期限待核對" in sections[1]["text"]
+    assert "目前沒有可核對的官方來源" in sections[1]["text"]
+    assert "版本待核對" not in sections[1]["text"]
+    assert "期限待核對" not in sections[1]["text"]
+
+
+def test_completed_judgment_replaces_pending_outcome_but_keeps_other_advice():
+    source = {
+        "doc_id": "rag_judgments/synthetic",
+        "type": "judgment",
+        "label": "合成判決",
+    }
+    data = answer()
+    data["answer_sections"][1] = {
+        "kind": "basis",
+        "text": "此案目前在起訴階段，後續法院將審理。你可以先記錄可核對的事實。",
+        "source_ids": [source["doc_id"]],
+    }
+    sections = guided._legal_sections(
+        guided.GuidedAnswer.model_validate(data),
+        [source],
+        "請找真實判決",
+        documents=[{"source": source, "content": "本院判決處刑如下：主文載明裁判結果。"}],
+    )
+    text = sections[1]["text"]
+    assert "目前在起訴階段" not in text
+    assert "後續法院將審理" not in text
+    assert "判決有裁判結果" in text
+    assert "你可以先記錄可核對的事實" in text
+
+
+def test_judgment_pending_guard_requires_a_completed_verdict_in_cited_source():
+    source = {
+        "doc_id": "rag_judgments/synthetic",
+        "type": "judgment",
+        "label": "合成資料",
+    }
+    data = answer()
+    data["answer_sections"][1] = {
+        "kind": "basis",
+        "text": "此案目前在起訴階段。",
+        "source_ids": [source["doc_id"]],
+    }
+    sections = guided._legal_sections(
+        guided.GuidedAnswer.model_validate(data),
+        [source],
+        "案件進度",
+        documents=[{"source": source, "content": "案件起訴資料，尚無法院裁判。"}],
+    )
+    assert sections[1]["text"] == "此案目前在起訴階段。"
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "此案後續法院將審理。",
+        "法院已認定本案，後續審理結果將依刑事程序裁決。",
+    ],
+)
+def test_judgment_title_blocks_pending_claim_even_when_retrieved_chunk_omits_verdict(claim):
+    source = {
+        "doc_id": "rag_judgments/synthetic-chunk",
+        "type": "judgment",
+        "label": "某法院某年度刑事判決",
+    }
+    data = answer()
+    data["answer_sections"][1] = {
+        "kind": "basis",
+        "text": claim,
+        "source_ids": [source["doc_id"]],
+    }
+    sections = guided._legal_sections(
+        guided.GuidedAnswer.model_validate(data),
+        [source],
+        "案件進度",
+        documents=[{"source": source, "content": "裁判書中的起訴書附件片段。"}],
+    )
+    assert "後續" not in sections[1]["text"]
+    assert "判決有裁判結果" in sections[1]["text"]
 
 
 @pytest.mark.parametrize(
@@ -470,6 +547,15 @@ async def test_mixed_retrieval_uses_one_embedding_and_no_unrequested_collection(
     rag = object.__new__(FirestoreVectorRAG)
     rag.db = FakeDB()
     embeddings = []
+    monkeypatch.setattr(
+        FakeFirestoreDoc,
+        "to_dict",
+        lambda self: {
+            "content": "合成公共資訊。",
+            "metadata": {"source": "合成來源"},
+            "vector_distance": 0.125,
+        },
+    )
 
     async def embed(query):
         embeddings.append(query)

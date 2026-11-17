@@ -25,7 +25,9 @@ from openai import (
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from rag_core.agents.gate_agent import GateAgent
 from rag_core.agents.openrouter_agent import AgentContractError, AgentResult, OpenRouterAgent
+from rag_core.agents.refusal_agent import RefusalAgent
 from rag_core.core.agent_errors import ModelOutputLimitError
 from rag_core.core.anonymizer import anonymize
 from rag_core.core.case_context import (
@@ -41,16 +43,29 @@ from rag_core.core.chat_response import (
     action_key,
 )
 from rag_core.core.clarification_tokens import validate_clarification_answer
+from rag_core.core.gated_chat import GateUnavailableError, run_gated_chat
 from rag_core.core.logger import get_logger
 from rag_core.core.pipeline_config import (
     MAX_INPUT_HISTORY_CHARACTERS,
     MAX_INPUT_HISTORY_MESSAGES,
     trim_request_history,
 )
-from rag_core.core.runtime_config import get_runtime_config, resolve_runtime_config
+from rag_core.core.privacy_claims import (
+    asks_for_third_party_identifiers,
+    has_unsupported_privacy_claim,
+    is_local_privacy_reply,
+    local_privacy_reply,
+    needs_private_completion,
+)
+from rag_core.core.runtime_config import (
+    get_runtime_config,
+    image_upload_enabled,
+    resolve_runtime_config,
+)
 from rag_core.rag.base import RAGUnavailableError
 
 logger = get_logger(__name__)
+_UNAVAILABLE_CONFIG_SOURCES = {"safe_defaults", "last_known_good", "invalid_gate_config"}
 
 
 USER_MESSAGE_MAX_LENGTH = 2000
@@ -90,6 +105,8 @@ _RETRYABLE_AGENT_ERRORS = (AgentContractError, *_TRANSIENT_UPSTREAM_ERRORS)
 # ── 依賴注入（Singleton per process）────────────────────────────────────────
 
 _agent_instance: OpenRouterAgent | None = None
+_gate_instance: GateAgent | None = None
+_refusal_instance: RefusalAgent | None = None
 
 
 def get_agent() -> OpenRouterAgent:
@@ -97,6 +114,20 @@ def get_agent() -> OpenRouterAgent:
     if _agent_instance is None:
         _agent_instance = OpenRouterAgent()
     return _agent_instance
+
+
+def get_gate() -> GateAgent:
+    global _gate_instance
+    if _gate_instance is None:
+        _gate_instance = GateAgent()
+    return _gate_instance
+
+
+def get_refusal_agent() -> RefusalAgent:
+    global _refusal_instance
+    if _refusal_instance is None:
+        _refusal_instance = RefusalAgent()
+    return _refusal_instance
 
 
 def _strip_json_code_fence(text: str) -> str:
@@ -228,8 +259,13 @@ def _service_error(
     # Guided requests and admin tests can contain private facts in provider errors.
     # Record a category only, including in development, never an upstream body.
     request_payload = request.get_json(silent=True) if request.is_json else None
-    private_case_request = getattr(g, "admin_diagnostic", False) or (
-        isinstance(request_payload, dict) and request_payload.get("contract_version") in (2, 3, 4)
+    private_case_request = (
+        runtime_config.gate_enabled
+        or getattr(g, "admin_diagnostic", False)
+        or (
+            isinstance(request_payload, dict)
+            and request_payload.get("contract_version") in (2, 3, 4)
+        )
     )
     if private_case_request:
         error_message = type(exc).__name__
@@ -404,11 +440,11 @@ class AnalysisEntry(BaseModel):
 
 
 class ReasoningEntry(BaseModel):
-    """Only provider-designated public text/summary reaches this transient channel."""
+    """Only provider-designated summaries reach this transient channel."""
 
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=1, max_length=MAX_REASONING_CHARACTERS)
-    kind: Literal["text", "summary"]
+    kind: Literal["summary"]
     stage: Literal["understanding", "answer"]
 
 
@@ -487,6 +523,17 @@ class ClarificationV4(BaseModel):
 
 def _agent_error(runtime_config, exc: Exception):
     """Use the same diagnostic codes for JSON and streaming requests."""
+    if isinstance(exc, ValidationError):
+        return _retryable_error(runtime_config, exc)
+    if isinstance(exc, GateUnavailableError):
+        return _service_error(
+            runtime_config,
+            exc,
+            code="review_unavailable",
+            detail="內容審查暫時無法完成，請重試",
+            retryable=True,
+            status_code=503,
+        )
     if isinstance(exc, ModelOutputLimitError):
         return _service_error(
             runtime_config,
@@ -557,6 +604,7 @@ def _response_payload(
     payload = {
         "reply": structured_response.reply,
         "session_id": session_id,
+        "turn_id": session_id,
         "anonymized": was_anonymized,
         "rag_used": {"status": result.rag_used, "sources": result.sources or []},
         "emotion": structured_response.emotion,
@@ -640,6 +688,82 @@ def _response_payload(
     return payload
 
 
+def _gate_refusal_payload(
+    reply: str, session_id: str, was_anonymized: bool, req_obj: ChatRequest
+) -> dict:
+    """Keep refusal metadata inert under every supported chat contract."""
+    payload = {
+        "reply": reply,
+        "session_id": session_id,
+        "turn_id": session_id,
+        "anonymized": was_anonymized,
+        "rag_used": {"status": False, "sources": []},
+        "emotion": "中性",
+        "emotion_color": "gray",
+        "suggested_replies": [],
+        "action_buttons": [],
+        "interaction_mode": "answer",
+        "clarifying_questions": [],
+    }
+    revision = req_obj.case_context.revision if req_obj.case_context else 0
+    if req_obj.contract_version in (2, 3):
+        payload.update(
+            contract_version=req_obj.contract_version,
+            facts_revision=revision,
+            fact_updates=[],
+            clarification=None,
+            answer_sections=[],
+            execution={"route": "gate_refusal", "model_calls": 1},
+        )
+        if req_obj.contract_version == 3:
+            payload["analysis"] = []
+    elif req_obj.contract_version == 4:
+        payload.update(
+            contract_version=4,
+            context_revision=revision,
+            summary_update=None,
+            clarification=None,
+            analysis=[],
+            execution={"route": "gate_refusal", "model_calls": 1},
+        )
+    return payload
+
+
+def _privacy_replacement_payload(
+    session_id: str, was_anonymized: bool, req_obj: ChatRequest, original_payload: dict
+) -> dict:
+    payload = _gate_refusal_payload(
+        local_privacy_reply(req_obj.message), session_id, was_anonymized, req_obj
+    )
+    if "execution" in payload:
+        payload["execution"]["route"] = "privacy_correction"
+        original_execution = original_payload.get("execution")
+        original_calls = (
+            original_execution.get("model_calls") if isinstance(original_execution, dict) else None
+        )
+        if (
+            isinstance(original_calls, int)
+            and not isinstance(original_calls, bool)
+            and original_calls >= 0
+        ):
+            payload["execution"]["model_calls"] = original_calls
+    return payload
+
+
+def _validated_payload(result, session_id, was_anonymized, runtime_config, req_obj):
+    try:
+        payload = _response_payload(result, session_id, was_anonymized, runtime_config, req_obj)
+    except Exception:
+        if not runtime_config.gate_enabled:
+            raise
+        raise AgentContractError("Invalid full chat response") from None
+    if has_unsupported_privacy_claim(
+        payload, third_party_request=asks_for_third_party_identifiers(req_obj.message)
+    ):
+        return _privacy_replacement_payload(session_id, was_anonymized, req_obj, payload)
+    return payload
+
+
 def _sse_event(event: str, payload: dict) -> str:
     # JSON escaping keeps newlines in reply text inside one SSE data line.
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -707,7 +831,7 @@ def _prepare_agent_input(
     arguments = {
         "user_message": message,
         "history": history,
-        "image_base64": req_obj.image_base64 if runtime_config.enable_image_upload else None,
+        "image_base64": req_obj.image_base64 if image_upload_enabled(runtime_config) else None,
         "use_rag": req_obj.use_rag and runtime_config.pipeline["enable_rag"],
         "runtime_config": runtime_config,
     }
@@ -806,6 +930,9 @@ def _stream_response(
             reasoning_characters = 0
             timings: dict[str, float] = {}
             outcome = "cancelled"
+            private_completion = needs_private_completion(
+                req_obj.message, [item.model_dump() for item in req_obj.history]
+            )
 
             def mark(name: str):
                 timings.setdefault(name, round((monotonic() - started_at) * 1000, 2))
@@ -826,8 +953,19 @@ def _stream_response(
                     {
                         "phase": phase,
                         "elapsed_ms": round((monotonic() - started_at) * 1000, 2),
+                        **({"turn_id": session_id} if runtime_config.gate_enabled else {}),
                     },
                 )
+
+            async def emit_retract(code: str):
+                nonlocal sent_output, current_phase, analysis_entries, reasoning_entries
+                nonlocal reasoning_characters
+                await emit("retract", {"turn_id": session_id, "code": code})
+                sent_output = False
+                current_phase = None
+                analysis_entries = []
+                reasoning_entries = []
+                reasoning_characters = 0
 
             async def emit_delta(text: str):
                 nonlocal sent_output
@@ -889,39 +1027,64 @@ def _stream_response(
                     ):
                         await emit_progress({"phase": "anonymizing"})
                     run_kwargs, was_anonymized = _prepare_agent_input(req_obj, runtime_config)
-                    result = await get_agent().run(
-                        **run_kwargs,
-                        on_reply_delta=emit_delta,
-                        on_guidance=emit_guidance,
-                        on_progress=emit_progress,
-                        on_analysis=emit_analysis,
-                        **(
-                            {"on_reasoning": emit_reasoning}
-                            if req_obj.contract_version == 4
-                            else {}
-                        ),
+
+                    def build_payload(result):
+                        try:
+                            payload = _validated_payload(
+                                result, session_id, was_anonymized, runtime_config, req_obj
+                            )
+                            if is_local_privacy_reply(payload):
+                                return payload
+                            if req_obj.contract_version in (3, 4) and analysis_entries:
+                                if (
+                                    payload.get("analysis")
+                                    and payload["analysis"] != analysis_entries
+                                ):
+                                    raise AgentContractError(
+                                        "Analysis summary changed after publication"
+                                    )
+                                payload["analysis"] = analysis_entries
+                            if req_obj.contract_version == 4 and reasoning_entries:
+                                payload["reasoning"] = reasoning_entries
+                            return payload
+                        except Exception:
+                            raise AgentContractError("Invalid full chat response") from None
+
+                    callbacks = (
+                        {"on_progress": emit_progress}
+                        if private_completion
+                        else {
+                            "on_reply_delta": emit_delta,
+                            "on_guidance": emit_guidance,
+                            "on_progress": emit_progress,
+                            "on_analysis": emit_analysis,
+                            **(
+                                {"on_reasoning": emit_reasoning}
+                                if req_obj.contract_version == 4
+                                else {}
+                            ),
+                        }
                     )
+                    payload = await run_gated_chat(
+                        get_agent(),
+                        get_gate(),
+                        get_refusal_agent(),
+                        run_kwargs=run_kwargs,
+                        runtime_config=runtime_config,
+                        build_payload=build_payload,
+                        build_refusal_payload=lambda reply: _gate_refusal_payload(
+                            reply, session_id, was_anonymized, req_obj
+                        ),
+                        callbacks=callbacks,
+                        on_retract=emit_retract,
+                    )
+                    if private_completion:
+                        await emit_delta(payload["reply"])
                 except Exception as exc:
                     error_response, status = _agent_error(runtime_config, exc)
                 else:
-                    try:
-                        await emit_progress({"phase": "validating"})
-                        payload = _response_payload(
-                            result, session_id, was_anonymized, runtime_config, req_obj
-                        )
-                        if req_obj.contract_version in (3, 4) and analysis_entries:
-                            if payload.get("analysis") and payload["analysis"] != analysis_entries:
-                                raise AgentContractError(
-                                    "Analysis summary changed after publication"
-                                )
-                            payload["analysis"] = analysis_entries
-                        if req_obj.contract_version == 4 and reasoning_entries:
-                            payload["reasoning"] = reasoning_entries
-                    except Exception as exc:
-                        error_response, status = _retryable_error(runtime_config, exc)
-                    else:
-                        await events.put(("done", payload, None))
-                        return
+                    await events.put(("done", payload, None))
+                    return
                 payload = error_response.get_json()
                 payload["status"] = status
                 if sent_output:
@@ -1002,6 +1165,8 @@ def chat():
         return jsonify({"detail": str(e)}), 400
 
     runtime_config = resolve_runtime_config(get_runtime_config())
+    if runtime_config.source in _UNAVAILABLE_CONFIG_SOURCES:
+        return _agent_error(runtime_config, GateUnavailableError("Runtime config unavailable"))
     if runtime_config.maintenance_message:
         return (
             jsonify(
@@ -1013,7 +1178,7 @@ def chat():
             ),
             503,
         )
-    if req_obj.image_base64 and not runtime_config.enable_image_upload:
+    if req_obj.image_base64 and not image_upload_enabled(runtime_config):
         return _image_upload_disabled_error()
     session_id = str(uuid.uuid4())
     if req_obj.stream:
@@ -1026,11 +1191,21 @@ def chat():
 
     try:
         run_kwargs, was_anonymized = _prepare_agent_input(req_obj, runtime_config)
-        result = asyncio.run(get_agent().run(**run_kwargs))
+        payload = asyncio.run(
+            run_gated_chat(
+                get_agent(),
+                get_gate(),
+                get_refusal_agent(),
+                run_kwargs=run_kwargs,
+                runtime_config=runtime_config,
+                build_payload=lambda result: _validated_payload(
+                    result, session_id, was_anonymized, runtime_config, req_obj
+                ),
+                build_refusal_payload=lambda reply: _gate_refusal_payload(
+                    reply, session_id, was_anonymized, req_obj
+                ),
+            )
+        )
     except Exception as exc:
         return _agent_error(runtime_config, exc)
-    try:
-        payload = _response_payload(result, session_id, was_anonymized, runtime_config, req_obj)
-    except Exception as exc:
-        return _retryable_error(runtime_config, exc)
     return jsonify(payload)

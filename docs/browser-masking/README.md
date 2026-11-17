@@ -76,6 +76,8 @@ PLAYWRIGHT_MODULE=/absolute/path/to/playwright \
 node admin/tests/browser_masking_validation.mjs
 ```
 
+若已建立隔離 Chrome 設定檔與模型快取，可設 `BROWSER_PROFILE_DIR` 指向該設定檔，並設 `BROWSER_LOCAL_CACHE_ONLY=true`。此模式攔截並拒絕所有遠端請求；快取不足時驗證會失敗，不會下載模型。
+
 這是本機合成驗證用的自動化測試，不是對話或批次預測命令列入口。它使用獨立 Chrome 設定檔，攔截網路只允許讀取本機頁面與公開模型資源，保存裝置資訊、載入量測、逐案例結果、網路紀錄及畫面。設定檔若已包含快取，第一次載入不能當成冷啟動；使用新的輸出目錄重新量測。可用 `BROWSER_PROFILE_DIR` 指定隔離的既有測試設定檔；此時報告中的 `coldLoad` 只代表該次頁面的第一次載入，不保證是冷啟動。腳本會要求基本檢查有命中且完整案例至少一個真陽性，這只是最低可運作檢查，不等同 95% 品質門檻。
 
 測試結果只代表記錄的裝置與瀏覽器。Chrome User-Agent 可能固定顯示 Intel/macOS 10.15，實際主機架構、CPU 與系統版本需以 `capabilities.json` 的 host 欄位及執行環境紀錄為準。Edge 與手機需另外實測，不由 Chrome 結果推定。

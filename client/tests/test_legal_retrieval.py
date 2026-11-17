@@ -5,6 +5,7 @@ from google.api_core.exceptions import FailedPrecondition
 
 from rag_core.rag.base import RAGDocument
 from rag_core.rag.firestore_vector import FirestoreVectorRAG
+from rag_core.rag.legal_lookup import citation_only_references
 
 
 def document(identifier, *, active=True, distance=0.3):
@@ -120,6 +121,80 @@ def test_known_legacy_bad_deadline_is_filtered_before_import_rollout():
     diagnostics = {}
     assert FirestoreVectorRAG._merge_results([], [doc], 3, diagnostics) == []
     assert diagnostics["results"][0]["filter_reason"] == "legacy_outdated_article_13_one_year_rule"
+
+
+def test_generic_legacy_document_with_law_citation_needs_provenance():
+    legacy = RAGDocument(
+        "性別工作平等法第13條的一般說明",
+        {"collection": "rag_documents", "data_type": "document"},
+        doc_id="old-law-summary",
+    )
+    generic = RAGDocument(
+        "保留訊息並尋求可信任的人支持",
+        {"collection": "rag_documents", "data_type": "document"},
+        doc_id="generic-support",
+    )
+    diagnostics = {}
+    result = FirestoreVectorRAG._merge_results([], [legacy, generic], 2, diagnostics)
+    assert [row.doc_id for row in result] == ["generic-support"]
+    assert diagnostics["results"][0]["filter_reason"] == "unverified_law_provenance"
+
+
+@pytest.mark.asyncio
+async def test_bare_citation_excludes_unverified_and_unrelated_law_vectors(monkeypatch):
+    rag = object.__new__(FirestoreVectorRAG)
+    rag.db = object()
+
+    async def embed(_query):
+        return [0.1]
+
+    def law(doc_id, law_name, article, *, verified=True, method="vector"):
+        metadata = {
+            "collection": "rag_documents",
+            "data_type": "law" if verified else "document",
+            "document_type": "law",
+            "law_name": law_name,
+            "article_number": article,
+            "retrieval_method": method,
+        }
+        if verified:
+            metadata.update(
+                source_url="https://law.moj.gov.tw/example",
+                version="reviewed-version",
+                checked_at="2026-11-10",
+            )
+        return RAGDocument(f"{law_name}第{article}條", metadata, doc_id=doc_id)
+
+    target = law("target", "性騷擾防治法", "14", method="exact")
+    related_law = law("other-law", "性別平等工作法", "13")
+    same_law_other_article = law("other-article", "性騷擾防治法", "2")
+    legacy = law("legacy", "性別工作平等法", "13", verified=False)
+
+    monkeypatch.setattr(rag, "_get_embedding", embed)
+    monkeypatch.setattr(rag, "_retrieve_exact_articles", lambda *_args: [target])
+    monkeypatch.setattr(
+        rag,
+        "_retrieve_from_collection",
+        lambda **kwargs: (
+            [same_law_other_article] if kwargs.get("law_name") else [related_law, legacy]
+        ),
+    )
+
+    diagnostics = {}
+    result = await rag.retrieve("性騷擾防治法第14條", top_k=3, diagnostics=diagnostics)
+    assert [row.doc_id for row in result] == ["target"]
+    reasons = {row["doc_id"]: row["filter_reason"] for row in diagnostics["results"]}
+    assert reasons["legacy"] == "unverified_law_provenance"
+    assert reasons["other-law"] == "unrelated_law_for_exact_citation"
+    assert reasons["other-article"] == "unrelated_law_for_exact_citation"
+
+    narrative = await rag.retrieve("性騷擾防治法第14條與職場規範有何關係", top_k=3)
+    assert [row.doc_id for row in narrative] == ["target", "other-article", "other-law"]
+
+
+def test_citation_scope_only_applies_to_bare_named_articles():
+    assert citation_only_references("性騷擾防治法第14條？") == [("性騷擾防治法", "14")]
+    assert citation_only_references("性騷擾防治法第14條與職場規範有何關係") == []
 
 
 @pytest.mark.asyncio

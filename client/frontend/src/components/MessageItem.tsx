@@ -63,6 +63,16 @@ const normalizeSource = (source: RagSource | string): RagSource => {
   };
 };
 
+const officialCitationUrl = (value?: string | null): string | null => {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:" && !url.username && !url.password
+      && (url.hostname === "gov.tw" || url.hostname.endsWith(".gov.tw"))) return url.href;
+  } catch { /* Keep the source label without a link. */ }
+  return null;
+};
+
 const getSourceStyle = (type: RagSourceType) => {
   switch (type) {
     case "law":
@@ -112,6 +122,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
     message.ragUsed.retrieval.data_types.length > 0
   );
   const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
+  const citedSources = React.useMemo(() => (message.ragUsed?.sources ?? []).map(normalizeSource), [message.ragUsed?.sources]);
   const sourceGroups = React.useMemo(() => {
     const sources = message.ragUsed?.sources ?? [];
     const groups = new Map<RagSourceType, RagSource[]>();
@@ -272,9 +283,21 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
         {/* 底部標示列 */}
         {isCompleteAssistant && (hasRetrieval || (message.ragUsed?.status && sourceGroups.length > 0) || message.anonymized || resourceActions.length > 0) && (
           <div className="mt-4 space-y-3 border-t border-outline/10 pt-4">
-            {hasRetrieval ? (
-              <RetrievalSources retrieval={message.ragUsed?.retrieval} />
-            ) : (
+            {hasRetrieval && citedSources.length > 0 && (
+              <section aria-label={t.citedSources} className="min-w-0 space-y-1.5 text-xs">
+                <p className="font-semibold text-on-surface/65">{t.citedSources}</p>
+                <ul className="flex flex-wrap gap-2">
+                  {citedSources.map((source, index) => {
+                    const url = officialCitationUrl(source.source_url);
+                    return <li key={source.doc_id ?? `${source.label}-${index}`} className="min-w-0 max-w-full rounded-lg border border-primary/15 bg-primary/5 px-2.5 py-1.5">
+                      {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="break-words font-medium text-primary underline">{source.label}</a>
+                        : <span className="break-words text-on-surface/80">{source.label}</span>}
+                    </li>;
+                  })}
+                </ul>
+              </section>
+            )}
+            {hasRetrieval ? <RetrievalSources retrieval={message.ragUsed?.retrieval} /> : (
               message.ragUsed?.status && sourceGroups.length > 0 && (
                 <div className="min-w-0 space-y-2">
                   <p className="text-xs font-semibold text-on-surface/65">{sourceLabel}</p>

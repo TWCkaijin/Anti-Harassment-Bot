@@ -23,6 +23,7 @@ from rag_core.agents.guided_chat import (
     _source,
     _strict_schema,
     check_answer_units,
+    contextless_prior_legal_source_request,
 )
 from rag_core.agents.provider_schema import provider_response_format
 from rag_core.core.agent_errors import (
@@ -593,23 +594,16 @@ def _get(value, key, default=None):
 
 
 def provider_reasoning_text(value):
-    """Allow only explicit public text/summary fields, never opaque reasoning data."""
+    """Expose only provider-designated summaries, never raw reasoning or opaque data."""
     fragments = []
-    raw = _get(value, "reasoning")
-    if isinstance(raw, str) and raw:
-        fragments.append((raw, "text"))
     details = _get(value, "reasoning_details")
     if isinstance(details, list):
         for item in details:
-            kind = _get(item, "type")
-            key = {"reasoning.text": "text", "reasoning.summary": "summary"}.get(kind)
-            text = _get(item, key) if key else None
-            if (
-                isinstance(text, str)
-                and text
-                and (text, "text" if key == "text" else "summary") not in fragments
-            ):
-                fragments.append((text, "text" if key == "text" else "summary"))
+            if _get(item, "type") != "reasoning.summary":
+                continue
+            text = _get(item, "summary")
+            if isinstance(text, str) and text and (text, "summary") not in fragments:
+                fragments.append((text, "summary"))
     return fragments
 
 
@@ -997,6 +991,13 @@ async def run_guided_v4(
                 content_policy=pipeline.get("content_policy", "repair"),
                 diagnostics=diagnostics,
                 seen_reasons=seen_reasons,
+                allow_canonical_public_law=(
+                    not context.summary.strip()
+                    and not history
+                    and not clarification_answer
+                    and not image_base64
+                    and not regenerate_from_summary
+                ),
             )
         except (ValidationError, ValueError):
             raise AgentContractError("Invalid answer unit or citation") from None
@@ -1238,6 +1239,68 @@ async def run_guided_v4(
             metrics["model_ms"] += (monotonic() - started) * 1000
 
     await progress("preparing")
+    if (
+        not history
+        and not context.summary.strip()
+        and not image_base64
+        and not clarification_answer
+        and not regenerate_from_summary
+        and contextless_prior_legal_source_request(user_message)
+    ):
+        # There is no earlier judgment or identified article to look up. A
+        # model retrieval plan here can turn an unspecified request into a
+        # fabricated list of laws, URLs or dates.
+        metrics["route"] = "clarify_missing_prior_judgment"
+        await progress("validating")
+        reply = (
+            "目前這段對話沒有我先前的法律判斷，也沒有指定要核對的法規或條文，"
+            "因此無法提供其官方法規網址、條文原文或資料日期。"
+            "請貼上要核對的判斷，或提供法規名稱與條號；我才能依可核對的官方來源逐項確認。"
+        )
+        unit = {"text": reply, "source_ids": []}
+        payload = AssistantChatResponse.model_validate(
+            {
+                "reply": reply,
+                "emotion": "未知",
+                "emotion_color": "gray",
+                "suggested_replies": ["我要貼上先前的判斷", "我要提供法規名稱與條號"],
+                "action_buttons": [],
+                "interaction_mode": "answer",
+                "clarifying_questions": [],
+            }
+        ).model_dump()
+        if on_reply_delta:
+            await on_reply_delta(reply)
+        await analyze(
+            "answer",
+            "本輪沒有先前法律判斷或指定條文可供核對，已請使用者提供目標。",
+            limitations=["未取得可核對的目標或官方法源。"],
+        )
+        if diagnostics is not None:
+            diagnostics.update(
+                retrieved_sources=[],
+                retrieved_count=0,
+                cited_count=0,
+                retrieval_status="not_requested",
+                final_answer=[unit],
+                execution=metrics,
+                summary_update=None,
+                clarification_decision={"accepted": False},
+            )
+            if expected_chat_test_contract_sha256 is not None:
+                diagnostics["prompt_overlap"] = []
+        return AgentResult(
+            reply=json.dumps(payload, ensure_ascii=False),
+            guidance={
+                "contract_version": 4,
+                "context_revision": context.revision,
+                "summary_update": None,
+                "clarification": None,
+                "analysis": analyses,
+                "execution": metrics,
+                "retrieval": {"status": "not_requested", "data_types": [], "sources": []},
+            },
+        )
     scripts = (
         get_matching_scenario_scripts(
             context.summary if regenerate_from_summary else user_message,

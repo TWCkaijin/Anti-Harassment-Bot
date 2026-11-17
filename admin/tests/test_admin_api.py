@@ -58,6 +58,29 @@ def test_admin_updates_prompt_sections(monkeypatch, signed_in):
     assert prompt_sections["core_mission"]
 
 
+def test_admin_updates_post_gate_prompt_without_replacing_pre_policy(monkeypatch, signed_in):
+    calls = []
+    monkeypatch.setattr(admin_module, "get_runtime_config", lambda **kwargs: _runtime_config())
+    monkeypatch.setattr(
+        admin_module,
+        "update_runtime_config",
+        lambda payload, updated_by, expected_revision: (
+            calls.append((payload, updated_by)) or _runtime_config()
+        ),
+    )
+
+    response = signed_in[0].put(
+        "/api/v1/admin/config",
+        headers={**signed_in[1], "If-Match": "0"},
+        json={"gate_post_prompt": "post policy"},
+    )
+
+    assert response.status_code == 200
+    assert calls == [({"gate_post_prompt": "post policy"}, "shared-admin")]
+    assert response.get_json()["gate_post_prompt"] == _runtime_config().gate_post_prompt
+    assert response.get_json()["gate_prompt"] == _runtime_config().gate_prompt
+
+
 def test_admin_resets_runtime_config_to_local_defaults(monkeypatch, signed_in):
     calls = []
     monkeypatch.setattr(admin_module, "get_runtime_config", lambda **kwargs: _runtime_config())

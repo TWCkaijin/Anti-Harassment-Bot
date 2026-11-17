@@ -34,7 +34,9 @@ def create_app(*, include_corpus=True):
 
     register_rerank_jobs()
     app.register_blueprint(rerank_bp, url_prefix="/api/v1/admin/rerank-tests")
-    app.register_blueprint(rerank_bp, url_prefix="/v1/admin/rerank-tests", name="rerank_tests_direct")
+    app.register_blueprint(
+        rerank_bp, url_prefix="/v1/admin/rerank-tests", name="rerank_tests_direct"
+    )
     if include_corpus:
         from admin_app.corpus import corpus_bp, register_jobs
 

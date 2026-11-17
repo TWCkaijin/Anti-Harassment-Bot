@@ -1,6 +1,8 @@
 # Client／Admin 操作、執行與部署手冊
 
-本手冊對應拆分後程式。實際完成狀態、網址與驗收範圍見 [遷移報告](MIGRATION_REPORT.md)；不要以舊版 PDF 的路徑、固定 Admin token 或部署指令操作新版。
+本手冊對應拆分後程式。實際完成狀態與驗收範圍見 [遷移報告](MIGRATION_REPORT.md)；Preview 網址以部署 JSON 的輸出為準。不要以舊版 PDF 的路徑、固定 Admin token 或部署指令操作新版。
+
+截至 2026-11-10，Preview 已驗證 11 篇有官方來源的法條摘要；Production 尚未發布新版。下列部署命令是操作步驟，不能視為已完成正式切換。
 
 ## 環境對照
 
@@ -67,15 +69,15 @@ export ADMIN_TASKS_AUDIENCE=
 
 ## 管理密碼與登入
 
-正式及 preview 密碼分開，私有庫只存 Argon2id hash。首次初始化由具有對應私有庫寫入權限的操作者執行：
+目標設定是正式與 Preview 使用同一組登入密碼，但兩個私有庫各自保存 Argon2id hash，Session 仍按環境隔離。首次初始化由具有對應私有庫寫入權限的操作者執行：
 
 ```bash
 ADMIN_COOKIE_SECURE=true PYTHONPATH=shared/python:admin/backend uv run --frozen python -m admin_app.password_cli --environment preview --project anti-harassment-bot
 ```
 
-CLI 隱藏輸入且要求重複確認。改密碼加 `--reset`，停用登入加 `--disable`；已存在的密碼不會被首次初始化命令覆蓋。可加 `--use-gcloud-login` 使用目前 gcloud 登入（短效 token 只留記憶體）；或加 `--generate-password-file .admin-local/preview.password` 產生新的 mode `0600` 隨機密碼檔。已有檔案可用 `--password-file` 讀取，權限必須僅限擁有者。production 將 `--environment` 換成 `production` 並使用獨立檔案。不要把密碼放命令列參數或提交 Git。
+CLI 隱藏輸入且要求重複確認。改密碼加 `--reset`，停用登入加 `--disable`；已存在的密碼不會被首次初始化命令覆蓋。可加 `--use-gcloud-login` 使用目前 gcloud 登入（短效 token 只留記憶體）；或加 `--generate-password-file .admin-local/preview.password` 產生新的 mode `0600` 隨機密碼檔。已有檔案可用 `--password-file` 讀取，權限必須僅限擁有者。不要把密碼放命令列參數或提交 Git。
 
-本次已分別初始化 Preview 與 Production 管理密碼，僅存於本機 `.admin-local/preview.password`、`.admin-local/production.password`（均為 0600），不在報告中列出。正式管理入口為 [Admin Production](https://anti-harassment-bot-admin.web.app)，目前發布狀態以遷移報告為準。Preview 管理入口為 [Admin Preview](https://anti-harassment-bot-admin--dev-preview-q53x908r.web.app)，使用者入口為 [Client Preview](https://anti-harassment-bot--dev-preview-w28ypvc3.web.app)。密碼初始化不代表正式切換已完成；發布狀態以遷移報告為準。
+舊版曾分別初始化 Preview 與 Production 密碼，並留有本機 `.admin-local/preview.password`、`.admin-local/production.password`（均為 0600）。在更新正式憑證前，先以現有 Preview 密碼檔驗證 Preview 登入，完成 Preview 四個單元的瀏覽器／API 驗收及必要備份；全部通過後，才用同一檔案對 `--environment production` 執行 `--reset --password-file .admin-local/preview.password`，再分別驗證兩站登入。若 Preview 驗證失敗，不可把可能過期的檔案寫入正式庫。重設會使正式舊 Session 失效；舊 production 密碼檔其後不再作為登入依據。正式管理入口為 [Admin Production](https://anti-harassment-bot-admin.web.app)，發布狀態以遷移報告為準。Preview 網址每次部署後以 deployment JSON 實際輸出為準；舊 channel 網址可能已過期。
 
 本機 development 與 preview 共用 `admin-private-dev` 的密碼 hash，但 sessions 有環境綁定。密碼輪替會使該私有庫所有舊 sessions 失效。
 
@@ -84,6 +86,20 @@ CLI 隱藏輸入且要求重複確認。改密碼加 `--reset`，停用登入加
 ## 設定、Prompt、Skills 與測試
 
 先確認頁面環境。系統設定涵蓋模型、provider 排序、rerank、流程開關及 Prompt；Skills 提供新增、編輯與啟停。儲存採 revision 比對，收到衝突時重新讀取再整合修改，不會直接覆蓋另一個分頁的新版本。Client 一般設定快取約 30 秒、Skills 約 60 秒。
+
+### 聊天隱私與內容審查
+
+Client 瀏覽器先以規則遮罩當次訊息及選入的歷史、摘要、個案欄位與追問資料，再顯示整份待送出內容供使用者檢查及確認；取消時不呼叫聊天 API。此流程不能保證任意自由文字已完全去識別，請在確認視窗中自行刪除仍可識別的人名、單位或事件細節。Admin 診斷及批次工具另有本機遮罩與批次預覽流程，不會逐筆顯示 Client 確認視窗。後端遮罩開關獨立於瀏覽器確認。
+
+Admin Preview／開發環境的瀏覽器 PII 小模型仍僅供手動驗證；固定 120 則與另寫的 16 則合成診斷集均未通過品質門檻，尚未接入 Client 聊天。16 則標註仍待獨立人工審定；實測數字見[遷移報告](MIGRATION_REPORT.md)。
+
+系統設定中的 Gate 預設關閉，須在對應環境設定模型、前段提示詞、後段提示詞及逾時後明確啟用，預設每段逾時為 10 秒。`gate_prompt` 用於輸入審查，`gate_post_prompt` 用於回覆審查；既有設定未存後段欄位時，後端使用版本化預設值，不覆寫前段提示詞。啟用時，輸入審查與主模型並行，但輸入審查允許前不顯示主模型輸出；允許後可先顯示暫定串流，回覆審查若拒絕就撤回該次內容，再由主模型產生簡短拒答。審查或拒答服務失敗時回傳可重試的 `review_unavailable`，不保留暫定回覆。Admin 單筆診斷使用同一流程。合成測試只驗證流程；實際 Gate 模型需另以代表性案例驗證 JSON schema 支援與判斷品質，不能因設定存在就視為已驗收。
+
+圖片附件目前在 Client 及 Admin 診斷端點一律停用，後端收到圖片回 `422 image_upload_disabled`。即使既有 Firestore 的 `enable_image_upload=true`，也不會放行；Admin 頁的該欄位只顯示保留的設定值。
+
+### Client App Check
+
+App Check 預設關閉。先在 Firebase 對 Client Web App 註冊 [reCAPTCHA Enterprise 分數型網站金鑰](https://firebase.google.com/docs/app-check/web/recaptcha-enterprise-provider)，再給前端完整的 `VITE_FIREBASE_API_KEY`、`VITE_FIREBASE_PROJECT_ID`、`VITE_FIREBASE_APP_ID`、`VITE_APP_CHECK_SITE_KEY`，並設 `VITE_APP_CHECK_ENABLED=true`；後端設 `CHAT_APP_CHECK_ENABLED=true`。前端在啟用模式取得不到 token 時不送出聊天請求，後端在啟用模式拒絕缺失或無效的 `X-Firebase-AppCheck` token。兩端開關及 Web App 註冊必須配套核對。部署 workflow 對 dev／production 分別使用 `CLIENT_FIREBASE_APP_ID_DEV/PROD`、`CLIENT_APP_CHECK_ENABLED_DEV/PROD`、`CLIENT_APP_CHECK_SITE_KEY_DEV/PROD` 及 `CLIENT_CHAT_APP_CHECK_ENABLED_DEV/PROD` GitHub Variables；`CLIENT_FIREBASE_APP_ID` 可明確選擇建置使用的 Client Web App。正式環境若有多個未標為 RAG 的 Web App，未指定 ID 時建置會停止，避免挑錯 App。這些變數與 Firebase 註冊狀態尚須由操作者核實。Preview 與 `main-preview` 的實際 Hosting 網域也須在 [reCAPTCHA key 允許網域](https://docs.cloud.google.com/recaptcha/docs/create-key-website)中核對，先用瀏覽器確認能取得有效 token，再啟用對應後端的強制驗證。
 
 單筆診斷提交背景工作並輪詢。Excel 批次與行為測試由瀏覽器逐筆安排，提供暫停、繼續、失敗重試與本機匯出。工作簿、批次紀錄及報表留在本機；後端單次診斷的去識別請求與結果預設 24 小時後不可讀取並清理。job 綁定建立它的 session；重新登入後不能讀取前一個 session 的單次工作。Runtime／Skills／契約版本改變會停止原測試。模型結果不確定時需人工選擇重試，避免自動重複消耗。
 
@@ -97,6 +113,8 @@ PYTHONPATH=shared/python:admin/backend uv run --frozen python -m admin.tests.rel
 ```
 
 實際呼叫再指定 `--smoke` 或 `--all`、`--allow-live`、`--password-file` 及 `--api-url https://ADMIN_HOST/api/v1/admin/test-jobs`；本機預設 `http://127.0.0.1:8001/api/v1/admin/test-jobs`。有需要可指定 `--origin`。CLI 使用 native TypeScript 遮罩 bridge，此工具以 Node 26 驗證；可用 `--node` 指定該執行檔。只準備預覽不等於授權送出真實情境，請先核對來源及目的服務。其他選項見 `--help` 與 [可靠性工具說明](../admin/tests/reliability/README.md)。
+
+截至 2026-11-10，完整工作簿重播尚未完成：後續對外傳送步驟遭自動核准審查拒絕。請勿將本機準備、合成測試或部分執行結果表述為完整真實案例評分。
 
 ## 檢索來源的新增、下載與刪除
 
@@ -113,7 +131,9 @@ PYTHONPATH=shared/python:admin/backend uv run --frozen python -m admin.tests.rel
 ```bash
 uv run --frozen pytest client/tests admin/tests shared/tests -q
 pnpm -r lint
-pnpm -r test
+pnpm --filter @rag/shared test
+pnpm --filter @rag/client test
+pnpm --filter @rag/admin test
 pnpm -r build
 pnpm test:rules
 uv run --frozen python scripts/build_functions.py
@@ -142,11 +162,27 @@ firebase deploy --only firestore --project anti-harassment-bot --config firebase
 ## 發布與背景工作
 
 ```bash
-uv run --frozen python scripts/deploy.py --environment preview --service all --output /tmp/deploy-preview.json
+uv run --frozen python scripts/deploy.py --environment preview --service admin --backend-only --output /tmp/deploy-preview-admin-backend.json
+uv run --frozen python scripts/deploy.py --environment preview --service admin --frontend-only --output /tmp/deploy-preview-admin-frontend.json
+uv run --frozen python scripts/deploy.py --environment preview --service client --backend-only --output /tmp/deploy-preview-client-backend.json
+uv run --frozen python scripts/deploy.py --environment preview --service client --frontend-only --output /tmp/deploy-preview-client-frontend.json
 uv run --frozen python scripts/configure_admin_workers.py --environment preview --apply
 ```
 
-deploy 先建置／發布 Admin、Client 後端，再建置／發布對應前端；preview 從 JSON 取得實際隨機網址，兩個 Hosting site 的 `dev-preview` 均為 30 天。正式使用 `--environment production`，Client site 為 `anti-harassment-bot`，Admin site 為 `anti-harassment-bot-admin`。可用 `--service client|admin` 與 `--backend-only|--frontend-only` 做明確的單一服務操作，通常使用完整發布。
+四個命令分別部署 Admin 後端、Admin 前端、Client 後端、Client 前端；任一項可獨立重跑。Preview 從各 JSON 取得實際隨機網址，兩個 Hosting site 的 `dev-preview` 均為 30 天。正式使用相同四個命令並將 `--environment` 換成 `production`；Client site 為 `anti-harassment-bot`，Admin site 為 `anti-harassment-bot-admin`。先完成 Preview 的四項驗收再切換正式環境。
+
+每次發布前，先在受保護的操作紀錄中記下該環境兩個 Functions 的現行版本與非機密設定、兩個 Hosting site 的現行 release、Runtime／Skills revision、佇列未完成工作及必要的 Firestore／Storage 備份位置。每一步完成後再驗收下一步；任一步失敗只回復該單元，且只能使用保留新架構登入及資料邊界的已知可用版本。
+
+| 單元與順序 | 發布後核對 | 回復依據 |
+| --- | --- | --- |
+| 1. Admin 後端 | 健康檢查、登入／登出、設定 revision、診斷工作與 worker OIDC；若 Function URI 改變，重新核對 worker target | 先前已驗證的 `admin_api` 或 `admin_api_preview` 程式版本與設定快照；確認佇列及 receipt 後再恢復工作 |
+| 2. Admin 前端 | 對應 Admin site 的登入、設定讀寫與診斷頁 | 該 site／channel 的上一個已知可用 Hosting release，不更動 Client site |
+| 3. Client 後端 | 健康檢查、App Check 開關與 token、v1–v4 聊天及 SSE 撤回、資料庫隔離 | 先前已驗證的 `api` 或 `api_preview` 程式版本與設定快照；資料修復依備份及來源 receipt |
+| 4. Client 前端 | 對應 Client site 的人工送出確認、文字串流撤回、圖片封鎖及 App Check | 該 site／channel 的上一個已知可用 Hosting release，不更動 Admin site |
+
+正式環境只在 Preview 的四步瀏覽器與 API 驗收、Runtime IAM 檢查、資料備份及回復演練完成後切換。`main-preview` 仍是獨立的 Client Hosting-only 預覽，不屬於這四步，也不建立新後端。
+
+首次在 Production 強制 Client App Check 時，仍依上表發布四個單元，但第三步的 Client 後端先以 `CHAT_APP_CHECK_ENABLED=false` 部署新程式，避免仍在使用舊前端的正式站與 `main-preview` 立即收到 401。第四步以正式 Client Web App 與已註冊的 Enterprise key 建置並發布正式 Client 前端；再依 [main-preview 手冊](MAIN_PREVIEW.md)單獨更新該 Hosting channel。兩站都先從真實瀏覽器確認能交換 token 並完成聊天；最後以 `CHAT_APP_CHECK_ENABLED=true` 單獨重跑 Client 後端部署，並確認缺失／偽造 token 回 401、有效 token 成功。這是首次啟用的額外設定切換；往後已啟用的發布維持四單元順序。若中途停止，保持後端驗證關閉，直到兩個 Client Hosting channel 均相容。
 
 首次 Admin Function 建立後，腳本以實際 `run.app` URI 配置 worker target／audience。接著 worker 設定工具建立每 5 分鐘的 OIDC Scheduler 維護、私有庫 TTL 與 Storage 暫存生命週期。Cloud Tasks 每環境一個 queue；worker 驗證 OIDC audience 及指定 `rag-tasks-prod/dev` 身分。HTTP service 可公開接收傳輸，但 `/internal` 不接受一般 session 或偽造 header。
 
@@ -154,7 +190,7 @@ deploy 先建置／發布 Admin、Client 後端，再建置／發布對應前端
 
 ### GitHub Actions
 
-`.github/workflows` 保留 main 正式與 dev preview 分支部署，shared 變更觸發兩邊驗證；部署不因新 push 取消。WIF 綁定固定 repository ID、允許的 refs 及 deploy service account，不使用長效 service-account JSON。
+`.github/workflows` 的正式四項部署只允許在 main 手動觸發，逐項或完整選擇；dev preview 在 dev push 時依受影響服務部署，也可在 Actions 明確選擇 dev branch 後手動選一項。正式切換前應先完成 Preview 四項驗收。首次啟用 App Check 時，正式 workflow 的 `client_app_check` 選 `stage` 部署第三步，兩個 Client 前端完成後，再選 `client-backend` 與 `enforce` 進行最後切換；`inherit` 會沿用 Production 變數，且從未啟用狀態切為強制驗證時必須明確選 `enforce`。WIF 綁定固定 repository ID、允許的事件與 workflow refs 及 deploy service account，不使用長效 service-account JSON。
 
 建立 WIF 前先讀 [CI 權限審查](../infrastructure/iam/CI_DEPLOYMENT_REVIEW.md)。`scripts/provision_delivery.py --phase federation` 顯示所需計畫；Functions 的更新權限只綁定四個既有 Functions，其餘資源採逐項限制。Hosting Admin 目前需 project 層級授權。若需實測四個 runtime 服務帳號的跨庫與寫入拒絕矩陣，可執行 `uv run --frozen python scripts/verify_runtime_iam_operator.py` 檢視與執行限時探針。
 

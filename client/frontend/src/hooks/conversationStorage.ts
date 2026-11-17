@@ -5,17 +5,17 @@ import { sanitizeAnalysis } from "../services/analysis";
 import { isRetrievalReport } from "../services/api";
 
 export const STORAGE_KEY = "harass_bot_conversations";
-export type StorageIssue = "unavailable" | "invalid" | "future" | "migration" | null;
+export type StorageIssue = "unavailable" | "invalid" | "future" | "migration" | "changed" | null;
 
-export function loadConversationStorage(): { sessions: ConversationSession[]; issue: StorageIssue; writable: boolean; migrationSnapshot?: string } {
+export function loadConversationStorage(): { sessions: ConversationSession[]; issue: StorageIssue; writable: boolean; snapshot?: string | null; migrationSnapshot?: string } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { sessions: [], issue: null, writable: true };
+    if (!raw) return { sessions: [], issue: null, writable: true, snapshot: raw };
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return { sessions: [], issue: "invalid", writable: false };
+    if (!Array.isArray(parsed)) return { sessions: [], issue: "invalid", writable: false, snapshot: raw };
     if (parsed.some(item => isRecord(item) && ((item.schemaVersion !== undefined && ![2, 3, 4].includes(Number(item.schemaVersion)))
       || (isRecord(item.caseFacts) && ![1, 2, 3].includes(Number(item.caseFacts.schema_version)))))) {
-      return { sessions: [], issue: "future", writable: false };
+      return { sessions: [], issue: "future", writable: false, snapshot: raw };
     }
     let invalid = false;
     let migrationPending = false;
@@ -73,7 +73,7 @@ export function loadConversationStorage(): { sessions: ConversationSession[]; is
     }
     // Keep readable records in memory, but never silently overwrite a damaged file.
     const issue = invalid ? "invalid" : migrationPending ? "migration" : null;
-    return { sessions: issue ? sessions : sessions.slice(-10).map(session => ({ ...session, messages: session.messages.slice(-100) })), issue, writable: issue === null,
+    return { sessions: issue ? sessions : sessions.slice(-10).map(session => ({ ...session, messages: session.messages.slice(-100) })), issue, writable: issue === null, snapshot: raw,
       ...(issue === "migration" ? { migrationSnapshot: raw } : {}) };
   } catch { return { sessions: [], issue: "unavailable", writable: false }; }
 }
@@ -95,15 +95,17 @@ function serializeConversationStorage(sessions: ConversationSession[]): string {
     }));
 }
 
-export function saveConversationStorage(sessions: ConversationSession[]): boolean {
+export function saveConversationStorage(sessions: ConversationSession[], onSaved?: (snapshot: string) => void): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, serializeConversationStorage(sessions));
+    const snapshot = serializeConversationStorage(sessions);
+    localStorage.setItem(STORAGE_KEY, snapshot);
+    onSaved?.(snapshot);
     return true;
   } catch { return false; }
 }
 
 /** Called only after an explicit edit to a migration-only snapshot. One atomic write or no write. */
-export function recoverConversationMigration(sessions: ConversationSession[], expectedRaw: string): "saved" | "pending" | "invalid" | "unavailable" {
+export function recoverConversationMigration(sessions: ConversationSession[], expectedRaw: string, onSaved?: (snapshot: string) => void): "saved" | "pending" | "invalid" | "unavailable" {
   try { if (localStorage.getItem(STORAGE_KEY) !== expectedRaw) return "invalid"; }
   catch { return "unavailable"; }
   let serialized: string;
@@ -112,6 +114,7 @@ export function recoverConversationMigration(sessions: ConversationSession[], ex
   try {
     if (localStorage.getItem(STORAGE_KEY) !== expectedRaw) return "invalid";
     localStorage.setItem(STORAGE_KEY, serialized);
+    onSaved?.(serialized);
     return "saved";
   } catch { return "unavailable"; }
 }

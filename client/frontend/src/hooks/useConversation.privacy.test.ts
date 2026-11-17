@@ -2,7 +2,6 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConversation } from "./useConversation";
 import { ApiError, checkHealth, sendChat, type ChatResponse } from "../services/api";
-import * as privacy from "../services/privateRequest";
 import { reviewedRequestBody } from "../services/clientPrivacy";
 import { emptySummaryContext } from "../services/caseFacts";
 import { STORAGE_KEY } from "./conversationStorage";
@@ -12,40 +11,37 @@ import { DEFAULT_PIPELINE } from "../services/pipeline";
 vi.mock("../services/api", async () => ({ ...await vi.importActual<typeof import("../services/api")>("../services/api"), checkHealth: vi.fn(), sendChat: vi.fn() }));
 vi.mock("../services/analytics", () => ({ hasAnalyticsConsent: () => true, trackAnalytics: vi.fn() }));
 const health = { status: "ok", timestamp: "test", version: "test", environment: "test", capabilities: { chat_contract_versions: [1, 2, 3, 4] } };
-const response = (revision = 0): ChatResponse => ({ reply: "合成回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, suggested_replies: [], action_buttons: [], interaction_mode: "answer", clarifying_questions: [], contract_version: 4, context_revision: revision, summary_update: null, clarification: null, analysis: [], execution: { route: "direct_retrieval", model_calls: 1 } });
+const response = (revision = 0, extra: Partial<ChatResponse> = {}): ChatResponse => ({ reply: "合成回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, suggested_replies: [], action_buttons: [], interaction_mode: "answer", clarifying_questions: [], contract_version: 4, context_revision: revision, summary_update: null, clarification: null, analysis: [], execution: { route: "direct_retrieval", model_calls: 1 }, ...extra });
 beforeEach(() => { localStorage.clear(); vi.mocked(checkHealth).mockReset().mockResolvedValue(health); vi.mocked(sendChat).mockReset().mockResolvedValue(response()); vi.mocked(trackAnalytics).mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-describe("automatic conversation preparation ownership", () => {
-  it.each([undefined, true, false])("automatically sends the first and subsequent messages despite a legacy review setting: %s", async enabled => {
+describe("manual conversation privacy review", () => {
+  it.each([undefined, true, false])("requires review for the first and subsequent messages regardless of legacy setting: %s", async enabled => {
     const settings = { contract_version: 4 as const, enable_image_upload: true, enable_client_privacy_review: enabled, pipeline: DEFAULT_PIPELINE };
     vi.mocked(checkHealth).mockResolvedValue({ ...health, client_settings: settings });
     const { result } = renderHook(() => useConversation("automatic"));
     await act(async () => { await Promise.resolve(); });
     for (const text of ["first@example.test", "second@example.test"]) {
-      await act(async () => { expect(await result.current.sendMessage(text)).not.toBe(false); });
+      let pending!: ReturnType<typeof result.current.sendMessage>;
+      act(() => { pending = result.current.sendMessage(text); });
+      expect(sendChat).not.toHaveBeenCalledTimes(text === "first@example.test" ? 1 : 2);
+      expect(result.current.privacyReview?.request.message).toBe("[電子郵件]");
+      await act(async () => { result.current.confirmPrivacyReview(result.current.privacyReview!); expect(await pending).not.toBe(false); });
     }
     expect(sendChat).toHaveBeenCalledTimes(2);
     for (const [request] of vi.mocked(sendChat).mock.calls) expect(reviewedRequestBody(request)).not.toMatch(/first@|second@/);
   });
 
-  it("passes a validated original image through automatic preparation and refuses new images when admin disables upload", async () => {
+  it("refuses image data even if legacy settings claim uploads are enabled", async () => {
     const image = "data:image/png;base64,iVBORw0KGgo=";
     const settings = { contract_version: 4 as const, enable_image_upload: true, enable_client_privacy_review: true, pipeline: DEFAULT_PIPELINE };
     vi.mocked(checkHealth).mockResolvedValue({ ...health, client_settings: settings });
     const { result } = renderHook(() => useConversation("image-review"));
     await act(async () => { await Promise.resolve(); });
-    let pending!: ReturnType<typeof result.current.sendMessage>;
-    act(() => { pending = result.current.sendMessage("請說明圖片", image, image); });
+    await act(async () => { expect(await result.current.sendMessage("請說明圖片", image, image)).toBe(false); });
     expect(sendChat).not.toHaveBeenCalled();
-    await act(async () => { await pending; });
-    expect(vi.mocked(sendChat).mock.calls[0][0].image_base64).toBe(image);
-    expect(result.current.messages[0].imageUrl).toBe(image);
-    vi.mocked(checkHealth).mockResolvedValue({ ...health, client_settings: { ...settings, enable_image_upload: false } });
-    await act(async () => { await result.current.reconnectBackend(); });
-    await act(async () => { expect(await result.current.sendMessage("另一張", image, image)).toBe(false); });
-    expect(sendChat).toHaveBeenCalledTimes(1);
-    expect(result.current.error).toContain("暫停圖片上傳");
+    expect(result.current.privacyReview).toBeNull();
+    expect(result.current.error).toContain("圖片上傳目前已停用");
   });
 
   it("stores no new raw messages, titles or metrics before preparation, and cancellation leaves the conversation unchanged", async () => {
@@ -73,7 +69,8 @@ describe("automatic conversation preparation ownership", () => {
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("合成甲公司 new@example.com", undefined, undefined, { answers: [{ question: "原始題目", answer: "不应额外存入 extra@example.com" }] }); });
-    await act(async () => { await pending; });
+    expect(result.current.privacyReview).not.toBeNull();
+    await act(async () => { result.current.confirmPrivacyReview(result.current.privacyReview!); await pending; });
     const sent = vi.mocked(sendChat).mock.calls[0][0];
     expect(Object.isFrozen(sent)).toBe(true);
     expect(reviewedRequestBody(sent)).not.toMatch(/new@example\.com|summary@example\.com|history@example\.com/);
@@ -103,36 +100,31 @@ describe("automatic conversation preparation ownership", () => {
       expect(await pending).toBe(false);
     });
     expect(sendChat).not.toHaveBeenCalled();
-    expect(localStorage.getItem(STORAGE_KEY)).not.toContain("尚未確認的問題");
+    expect(localStorage.getItem(STORAGE_KEY) ?? "").not.toContain("尚未確認的問題");
   });
 
-  it("does not send a snapshot after negotiation changes during preparation", async () => {
-    const original = privacy.preparePrivateRequest;
-    let resume!: () => void;
-    vi.spyOn(privacy, "preparePrivateRequest").mockImplementationOnce(async (...args) => {
-      await new Promise<void>(resolve => { resume = resolve; });
-      return original(...args);
-    });
+  it("does not send a snapshot after negotiation changes during review", async () => {
     const { result } = renderHook(() => useConversation("connection"));
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("待確認問題"); });
+    expect(result.current.privacyReview).not.toBeNull();
     vi.mocked(checkHealth).mockResolvedValue({ ...health, capabilities: { chat_contract_versions: [1, 2, 3] } });
     await act(async () => { await result.current.reconnectBackend(); });
-    await act(async () => { resume(); expect(await pending).toBe(false); });
+    await act(async () => { result.current.confirmPrivacyReview(result.current.privacyReview!); expect(await pending).toBe(false); });
     expect(sendChat).not.toHaveBeenCalled();
     expect(result.current.messages).toEqual([]);
     expect(result.current.error).toContain("服務連線已變更");
   });
 
-  it("reuses the exact approved object for automatic retries without repeating preparation", async () => {
+  it("reuses the exact manually approved object for automatic retries", async () => {
     vi.useFakeTimers();
     vi.mocked(sendChat).mockRejectedValueOnce(new ApiError(503, "合成暫時錯誤", undefined, true)).mockResolvedValueOnce(response());
     const { result } = renderHook(() => useConversation("retry"));
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("test@example.com"); });
-    await act(async () => { await Promise.resolve(); });
+    act(() => { result.current.confirmPrivacyReview(result.current.privacyReview!); });
     await act(async () => { await vi.runAllTimersAsync(); await pending; });
     expect(sendChat).toHaveBeenCalledTimes(2);
     const first = vi.mocked(sendChat).mock.calls[0][0], second = vi.mocked(sendChat).mock.calls[1][0];
@@ -147,5 +139,93 @@ describe("automatic conversation preparation ownership", () => {
     act(() => { result.current.saveClarificationDraft("question", { selectedValues: [], other: "draft@example.com", includeOther: true, special: null }); });
     expect(result.current.messages[0].clarificationDraft?.other).toBe("draft@example.com");
     expect(localStorage.getItem(STORAGE_KEY)).not.toContain("draft@example.com");
+  });
+
+  it("drops provisional text and guidance on retraction and saves only the replacement refusal", async () => {
+    let delta!: NonNullable<Parameters<typeof sendChat>[2]>;
+    let guidance!: NonNullable<Parameters<typeof sendChat>[3]>;
+    let analysis!: NonNullable<Parameters<typeof sendChat>[5]>;
+    let retract!: NonNullable<Parameters<typeof sendChat>[7]>;
+    let finish!: (value: ChatResponse) => void;
+    vi.mocked(sendChat).mockImplementation((_request, _signal, onDelta, onGuidance, _progress, onAnalysis, _reasoning, onRetract) => {
+      delta = onDelta!; guidance = onGuidance!; analysis = onAnalysis!; retract = onRetract!;
+      return new Promise<ChatResponse>(resolve => { finish = resolve; });
+    });
+    const { result } = renderHook(() => useConversation("retract"));
+    await act(async () => { await Promise.resolve(); });
+    let pending!: ReturnType<typeof result.current.sendMessage>;
+    act(() => { pending = result.current.sendMessage("合成問題"); });
+    await act(async () => { result.current.confirmPrivacyReview(result.current.privacyReview!); await Promise.resolve(); });
+    act(() => {
+      delta("PROVISIONAL_CANARY");
+      guidance({ interaction_mode: "clarify", clarifying_questions: ["PROVISIONAL_QUESTION"], suggested_replies: [] });
+      analysis({ stage: "understanding", summary: "PROVISIONAL_ANALYSIS", facts: [], source_labels: [], limitations: [] });
+    });
+    expect(JSON.stringify(result.current.messages)).toContain("PROVISIONAL_CANARY");
+    act(() => { retract({ turn_id: "12345678-1234-4234-8234-123456789abc", code: "gate_denied" }); });
+    expect(JSON.stringify(result.current.messages)).not.toMatch(/PROVISIONAL_CANARY|PROVISIONAL_QUESTION|PROVISIONAL_ANALYSIS/);
+    await act(async () => { finish(response(0, { reply: "簡短拒答", summary_update: { base_revision: 0, summary: "SHOULD_NOT_APPLY", evidence: [] } })); await pending; });
+    expect(result.current.messages.at(-1)).toMatchObject({ role: "assistant", content: "簡短拒答" });
+    expect(result.current.caseFacts).toMatchObject({ summary: "" });
+    expect(localStorage.getItem(STORAGE_KEY)).not.toMatch(/PROVISIONAL_CANARY|PROVISIONAL_QUESTION|PROVISIONAL_ANALYSIS|SHOULD_NOT_APPLY/);
+  });
+
+  it.each(["stop", "review_error"] as const)("removes provisional content after %s", async outcome => {
+    let delta!: NonNullable<Parameters<typeof sendChat>[2]>;
+    let retract!: NonNullable<Parameters<typeof sendChat>[7]>;
+    let fail!: (error: Error) => void;
+    vi.mocked(sendChat).mockImplementation((_request, _signal, onDelta, _guidance, _progress, _analysis, _reasoning, onRetract) => {
+      delta = onDelta!; retract = onRetract!;
+      return new Promise<ChatResponse>((_resolve, reject) => { fail = reject; });
+    });
+    const { result } = renderHook(() => useConversation(`interrupted-${outcome}`));
+    await act(async () => { await Promise.resolve(); });
+    let pending!: ReturnType<typeof result.current.sendMessage>;
+    act(() => { pending = result.current.sendMessage("合成問題"); });
+    await act(async () => { result.current.confirmPrivacyReview(result.current.privacyReview!); await Promise.resolve(); });
+    act(() => { delta("PROVISIONAL_CANARY"); });
+    expect(result.current.messages.at(-1)?.content).toContain("PROVISIONAL_CANARY");
+    if (outcome === "stop") act(() => { result.current.stopCurrentResponse(); });
+    else act(() => { retract({ turn_id: "12345678-1234-4234-8234-123456789abc", code: "review_unavailable" }); });
+    await act(async () => {
+      fail(outcome === "stop" ? new DOMException("Aborted", "AbortError") : new ApiError(503, "審查失敗", undefined, true, undefined, "review_unavailable"));
+      await pending;
+    });
+    expect(result.current.messages.at(-1)).toMatchObject(outcome === "stop" ? { isCancelled: true } : { isError: true });
+    expect(JSON.stringify(result.current.messages)).not.toContain("PROVISIONAL_CANARY");
+    expect(localStorage.getItem(STORAGE_KEY)).not.toContain("PROVISIONAL_CANARY");
+    expect(sendChat).toHaveBeenCalledOnce();
+  });
+
+  it("cancels review when another tab changes storage and does not overwrite that tab", async () => {
+    const { result } = renderHook(() => useConversation("cross-tab"));
+    await act(async () => { await Promise.resolve(); });
+    let pending!: ReturnType<typeof result.current.sendMessage>;
+    act(() => { pending = result.current.sendMessage("待確認內容"); });
+    const previous = localStorage.getItem(STORAGE_KEY);
+    const newer = JSON.stringify([{ id: "other-tab", createdAt: 1, messages: [] }]);
+    localStorage.setItem(STORAGE_KEY, newer);
+    await act(async () => {
+      const event = new StorageEvent("storage", { key: STORAGE_KEY, oldValue: previous, newValue: newer });
+      Object.defineProperty(event, "storageArea", { value: localStorage });
+      window.dispatchEvent(event);
+      expect(await pending).toBe(false);
+    });
+    expect(result.current.privacyReview).toBeNull();
+    expect(result.current.storageIssue).toBe("changed");
+    expect(sendChat).not.toHaveBeenCalled();
+    await act(async () => { expect(await result.current.sendMessage("新問題")).toBe(false); });
+    act(() => { result.current.clearAllSessions(); });
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(newer);
+  });
+
+  it("checks the saved snapshot before writing even when a storage event was missed", async () => {
+    const { result } = renderHook(() => useConversation("missed-event"));
+    await act(async () => { await Promise.resolve(); });
+    const newer = JSON.stringify([{ id: "other-tab", createdAt: 1, messages: [] }]);
+    localStorage.setItem(STORAGE_KEY, newer);
+    await act(async () => { result.current.renameSession("missed-event", "新標題"); await Promise.resolve(); });
+    expect(result.current.storageIssue).toBe("changed");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(newer);
   });
 });

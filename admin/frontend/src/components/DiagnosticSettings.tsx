@@ -141,17 +141,12 @@ export default function DiagnosticSettings({
         <h4 className="text-xs font-bold tracking-wide text-on-surface/55">對話功能</h4>
         <Check label="顯示心情分析" checked={showEmotions} onChange={onShowEmotions} />
         <Check
-          label="允許圖片附件"
-          checked={config.enable_image_upload}
-          onChange={(enable_image_upload) => set({ enable_image_upload })}
-        />
-        <Check
           label="後端 PII 遮罩（第二層）"
           checked={config.enable_anonymization}
           onChange={(enable_anonymization) => set({ enable_anonymization })}
         />
         <p className="text-xs leading-relaxed text-on-surface/55">
-          瀏覽器會先遮罩文字。圖片與一般對話相同，以原圖送出。
+          瀏覽器會先遮罩文字；圖片附件目前停用。
         </p>
       </section>
 

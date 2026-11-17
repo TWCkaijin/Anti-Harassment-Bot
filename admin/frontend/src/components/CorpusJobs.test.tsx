@@ -21,8 +21,8 @@ describe("durable corpus jobs", () => {
     expect(screen.getByText(/completed_chunks/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "開啟匯入草稿" }));
     expect(opened).toHaveBeenCalledWith("draft-1");
-    vi.mocked(corpus.getCorpusJob).mockResolvedValue({ ...pending, status: "cancelled" });
     fireEvent.click(screen.getByRole("button", { name: "取消工作" }));
+    vi.mocked(corpus.getCorpusJob).mockResolvedValue({ ...pending, status: "cancelled" });
     await waitFor(() => expect(corpus.cancelCorpusJob).toHaveBeenCalledExactlyOnceWith("queued-job", "csrf"));
     await waitFor(() => expect(completed).toHaveBeenCalledWith(expect.objectContaining({ status: "cancelled" })));
   });

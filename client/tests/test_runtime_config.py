@@ -7,6 +7,7 @@ import pytest
 from google.api_core.exceptions import DeadlineExceeded
 
 import rag_core.core.runtime_config as runtime_config_module
+from rag_core.core.gate_policy import DEFAULT_GATE_POST_PROMPT, DEFAULT_GATE_PROMPT
 from rag_core.core.runtime_config import validate_runtime_config_update
 
 
@@ -388,7 +389,7 @@ def test_client_projection_omits_administrative_and_model_settings(images, revie
         "pipeline",
     }
     assert public["contract_version"] == 4
-    assert public["enable_image_upload"] is images
+    assert public["enable_image_upload"] is False
     assert public["enable_client_privacy_review"] is review
     assert set(public["pipeline"]) == {
         "trim_history",
@@ -474,9 +475,96 @@ def test_pii_model_revision_is_pinned_and_survives_runtime_build():
     from rag_core.core.runtime_config import _build_config, validate_runtime_config_update
 
     revision = "a" * 40
-    assert validate_runtime_config_update({"pii_model_revision": revision}) == {"pii_model_revision": revision}
-    assert _build_config({"pii_model_revision": revision}, "firestore").pii_model_revision == revision
+    assert validate_runtime_config_update({"pii_model_revision": revision}) == {
+        "pii_model_revision": revision
+    }
+    assert (
+        _build_config({"pii_model_revision": revision}, "firestore").pii_model_revision == revision
+    )
     assert _build_config({}, "defaults").pii_model_revision == ""
     for value in ("main", "latest", "../other", "A" * 40, None, 123):
         with pytest.raises(ValueError):
             validate_runtime_config_update({"pii_model_revision": value})
+
+
+def test_existing_gate_documents_keep_pre_policy_and_get_a_distinct_post_default():
+    existing = {
+        "openrouter_model": "existing/main",
+        "gate_enabled": True,
+        "gate_model": "existing/gate",
+        "gate_prompt": "existing pre policy",
+    }
+    config = runtime_config_module._build_config(existing, source="firestore")
+    missing = runtime_config_module._missing_runtime_defaults(
+        existing, runtime_config_module._default_runtime_document()
+    )
+
+    assert config.gate_prompt == "existing pre policy"
+    assert config.gate_post_prompt == DEFAULT_GATE_POST_PROMPT
+    assert config.gate_prompt_for_stage("pre") == "existing pre policy"
+    assert config.gate_prompt_for_stage("post") == DEFAULT_GATE_POST_PROMPT
+    assert missing["gate_post_prompt"] == DEFAULT_GATE_POST_PROMPT
+    assert "gate_prompt" not in missing
+    assert "openrouter_model" not in missing
+    assert config.public_dict()["gate_post_prompt"] == DEFAULT_GATE_POST_PROMPT
+    assert "gate_post_prompt" not in runtime_config_module.client_settings(config)
+
+
+def test_older_app_main_without_gate_fields_preserves_its_existing_values():
+    existing = {"openrouter_model": "existing/main", "temperature": 0.7}
+    defaults = runtime_config_module._default_runtime_document()
+    missing = runtime_config_module._missing_runtime_defaults(existing, defaults)
+    config = runtime_config_module._build_config(existing | missing, source="firestore")
+
+    assert config.openrouter_model == "existing/main"
+    assert config.temperature == 0.7
+    assert config.gate_enabled is False
+    assert config.gate_prompt == DEFAULT_GATE_PROMPT
+    assert config.gate_post_prompt == DEFAULT_GATE_POST_PROMPT
+    assert "openrouter_model" not in missing and "temperature" not in missing
+
+
+def test_gate_post_prompt_can_be_overridden_independently_of_pre_policy():
+    base = runtime_config_module._build_config({"gate_prompt": "pre policy"}, "firestore")
+    effective = runtime_config_module.resolve_runtime_config(
+        base, {"gate_post_prompt": "post policy\\nsecond line"}
+    )
+    assert effective.gate_prompt == "pre policy"
+    assert effective.gate_post_prompt == "post policy\nsecond line"
+    assert base.gate_post_prompt == DEFAULT_GATE_POST_PROMPT
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", 123, "x" * 20_001])
+def test_invalid_post_prompt_rejects_writes_and_marks_enabled_gate_invalid(value):
+    with pytest.raises(ValueError, match="gate_post_prompt"):
+        validate_runtime_config_update({"gate_post_prompt": value})
+    config = runtime_config_module._build_config(
+        {"gate_enabled": True, "gate_post_prompt": value}, source="firestore"
+    )
+    assert config.source == "invalid_gate_config"
+    assert config.gate_post_prompt == DEFAULT_GATE_POST_PROMPT
+
+
+def test_post_prompt_save_backfills_old_document_without_replacing_pre_prompt(monkeypatch):
+    stored = runtime_config_module._default_runtime_document()
+    stored["gate_prompt"] = "persisted pre policy"
+    del stored["gate_post_prompt"]
+    document = Mock()
+    document.get.side_effect = lambda **kwargs: SimpleNamespace(
+        exists=True, to_dict=lambda: dict(stored)
+    )
+    document.set.side_effect = lambda value, **kwargs: stored.update(value)
+    client = Mock()
+    client.collection.return_value.document.return_value = document
+    monkeypatch.setattr(runtime_config_module, "get_business_db", lambda: client)
+    monkeypatch.setattr(runtime_config_module, "_cached_config", None)
+    monkeypatch.setattr(runtime_config_module, "_cached_at", 0.0)
+    monkeypatch.setattr(runtime_config_module, "_last_known_good_config", None)
+
+    result = runtime_config_module.update_runtime_config(
+        {"gate_post_prompt": "new post policy"}, updated_by="offline-admin"
+    )
+
+    assert stored["gate_prompt"] == result.gate_prompt == "persisted pre policy"
+    assert stored["gate_post_prompt"] == result.gate_post_prompt == "new post policy"
+    assert document.set.call_count == 2

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from client_app.main import app
 from rag_core import chat_service as chat_module
 from rag_core.agents import AgentResult
+from rag_core.core import runtime_config as runtime_config_module
 from rag_core.core.runtime_config import RuntimeConfig
 from rag_core.rag.base import RAGVectorSearchError
 
@@ -489,6 +490,8 @@ def test_chat_returns_retryable_503_for_typed_rag_failure(monkeypatch):
 @pytest.mark.parametrize("version", [1, 2, 3, 4])
 @pytest.mark.parametrize("stream", [False, True])
 def test_chat_passes_enabled_images_to_agent_for_every_contract(monkeypatch, path, version, stream):
+    # Exercise the dormant image path without enabling it in this rollout.
+    monkeypatch.setattr(runtime_config_module, "IMAGE_UPLOAD_ROLLOUT_ENABLED", True)
     captured = []
 
     class FakeAgent:
@@ -660,6 +663,7 @@ def test_image_validator_accepts_five_mib_and_rejects_larger_decoded_image():
 
 
 def test_request_body_limit_accepts_five_mib_image_with_maximum_text_message(monkeypatch):
+    monkeypatch.setattr(runtime_config_module, "IMAGE_UPLOAD_ROLLOUT_ENABLED", True)
     content = b"\x89PNG\r\n\x1a\n" + b"x" * (chat_module.MAX_IMAGE_BYTES - 8)
     image = "data:image/png;base64," + base64.b64encode(content).decode("ascii")
     payload = {"message": "合" * chat_module.USER_MESSAGE_MAX_LENGTH, "image_base64": image}
@@ -679,6 +683,24 @@ def test_request_body_limit_accepts_five_mib_image_with_maximum_text_message(mon
     assert response.status_code == 200
     assert captured[0]["image_base64"] == image
     assert captured[0]["user_message"] == payload["message"]
+
+
+@pytest.mark.parametrize("path", ["/api/v1/chat/", "/v1/chat/"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_rollout_rejects_images_even_when_stored_config_enables_them(monkeypatch, path, stream):
+    monkeypatch.setattr(runtime_config_module, "IMAGE_UPLOAD_ROLLOUT_ENABLED", False)
+    monkeypatch.setattr(chat_module, "get_runtime_config", fake_runtime_config)
+    monkeypatch.setattr(
+        chat_module,
+        "get_agent",
+        lambda: (_ for _ in ()).throw(AssertionError("image must not reach main model")),
+    )
+    response = app.test_client().post(
+        path,
+        json={"message": "圖片內容", "image_base64": VALID_PNG_DATA_URL, "stream": stream},
+    )
+    assert response.status_code == 422
+    assert response.get_json()["code"] == "image_upload_disabled"
 
 
 @pytest.mark.parametrize("version", [1, 2, 3, 4])

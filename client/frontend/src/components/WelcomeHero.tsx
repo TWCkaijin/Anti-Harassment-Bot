@@ -60,7 +60,7 @@ export default function WelcomeHero({ onSuggest, disabled = false, allowImageUpl
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-    
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -96,7 +96,7 @@ export default function WelcomeHero({ onSuggest, disabled = false, allowImageUpl
             </button>
           </div>}
           {imageError && <p role="alert" className="mb-3 text-xs leading-relaxed text-error">{imageError}</p>}
-          <div 
+          <div
             onClick={() => textareaRef.current?.focus()}
             className="relative bg-white border border-primary/30 rounded-3xl shadow-lg flex items-end px-4 lg:px-6 py-2 transition-shadow focus-within:shadow-float focus-within:border-primary/50 text-left cursor-text"
           >
@@ -137,9 +137,9 @@ export default function WelcomeHero({ onSuggest, disabled = false, allowImageUpl
                 }
               `}
             >
-              <MaterialIcon 
-                icon="arrow_forward" 
-                size={24} 
+              <MaterialIcon
+                icon="arrow_forward"
+                size={24}
                 className={canSend ? "group-hover:translate-x-0.5 transition-transform" : ""}
               />
             </button>

@@ -78,6 +78,14 @@ beforeEach(() => {
 });
 
 describe("ChatArea follow-up integration", () => {
+  it("pauses sending when another tab changes saved conversations", () => {
+    const onSend = vi.fn();
+    render(<I18nProvider><ChatArea messages={[assistantMessage({ interactionMode: "answer", clarifyingQuestions: [], actionButtons: [] })]} onSend={onSend} onOpenSidebar={vi.fn()} onStop={vi.fn()} isLoading={false} backendConnected storageIssue="changed" /></I18nProvider>);
+    expect(screen.getByRole("alert")).toHaveTextContent("其他分頁已更新對話紀錄");
+    fireEvent.change(screen.getByPlaceholderText("請描述您的狀況或提出問題…"), { target: { value: "新問題" } });
+    expect(screen.getByRole("button", { name: "傳送訊息" })).toBeDisabled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
   it.each([null, false])("blocks the first send while connection is %s and preserves the typed draft", connected => {
     const onSend = vi.fn();
     const props = { messages: [], onSend, onOpenSidebar: vi.fn(), onStop: vi.fn(), isLoading: false };

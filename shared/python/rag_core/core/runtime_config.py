@@ -9,11 +9,12 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from math import isfinite
 from time import monotonic
-from typing import Any
+from typing import Any, Literal
 
 from google.cloud.firestore_v1 import SERVER_TIMESTAMP, transactional
 
 from rag_core.core.config import get_settings
+from rag_core.core.gate_policy import DEFAULT_GATE_POST_PROMPT, DEFAULT_GATE_PROMPT
 from rag_core.core.logger import get_logger
 from rag_core.core.pipeline_config import PIPELINE_DEFAULTS, validate_pipeline_update
 from rag_core.firestore_clients import get_business_db
@@ -34,6 +35,9 @@ AGENT_PROMPT_SECTIONS = (
 )
 PROMPT_MAX_LENGTH = 20000
 FIRESTORE_READ_TIMEOUT_SECONDS = 5.0
+# This rollout has no image PII boundary. Keep stored settings readable, but
+# never advertise or honor image upload until the boundary is validated.
+IMAGE_UPLOAD_ROLLOUT_ENABLED = False
 RERANK_FIELDS = (
     "openrouter_provider_sort",
     "rag_rerank_enabled",
@@ -44,6 +48,11 @@ RERANK_FIELDS = (
 )
 
 WRITABLE_FIELDS = {
+    "gate_enabled",
+    "gate_model",
+    "gate_prompt",
+    "gate_post_prompt",
+    "gate_timeout_seconds",
     "pii_model_revision",
     *RERANK_FIELDS,
     "openrouter_model",
@@ -75,6 +84,11 @@ class RuntimeConfig:
     temperature: float
     top_p: float
     max_tokens: int
+    gate_enabled: bool = False
+    gate_model: str = field(default_factory=lambda: settings.openrouter_model)
+    gate_prompt: str = DEFAULT_GATE_PROMPT
+    gate_post_prompt: str = DEFAULT_GATE_POST_PROMPT
+    gate_timeout_seconds: float = 10.0
     pii_model_revision: str = ""
     openrouter_provider_sort: str = "auto"
     rag_rerank_enabled: bool = False
@@ -86,7 +100,7 @@ class RuntimeConfig:
     agent_prompt_sections: dict[str, str] = field(default_factory=dict)
     rag_collections: dict[str, str] = field(default_factory=dict)
     maintenance_message: str | None = None
-    enable_image_upload: bool = True
+    enable_image_upload: bool = False
     enable_client_privacy_review: bool = True
     development_mode: bool = False
     enable_reasoning_display: bool = False
@@ -108,12 +122,19 @@ class RuntimeConfig:
         result["environment_document_id"] = settings.runtime_config_document_id
         return result
 
+    def gate_prompt_for_stage(self, stage: Literal["pre", "post"]) -> str:
+        if stage == "pre":
+            return self.gate_prompt
+        if stage == "post":
+            return self.gate_post_prompt
+        raise ValueError("Unknown Gate stage")
+
 
 def client_settings(config: RuntimeConfig) -> dict[str, Any]:
     """Expose only controls needed to negotiate and render the public chat UI."""
     return {
         "contract_version": 4,
-        "enable_image_upload": config.enable_image_upload,
+        "enable_image_upload": image_upload_enabled(config),
         "enable_client_privacy_review": config.enable_client_privacy_review,
         "enable_reasoning_display": config.enable_reasoning_display
         and config.pipeline["enable_analysis"],
@@ -128,6 +149,10 @@ def client_settings(config: RuntimeConfig) -> dict[str, Any]:
             )
         },
     }
+
+
+def image_upload_enabled(config: RuntimeConfig) -> bool:
+    return IMAGE_UPLOAD_ROLLOUT_ENABLED and config.enable_image_upload
 
 
 def resolve_runtime_config(
@@ -235,6 +260,16 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
             invalid_fields.add(key)
             logger.warning("Ignoring invalid Firestore runtime field %s: %s", key, exc)
 
+    # A malformed persisted Gate setting makes the review requirement unknown.
+    # Keep the snapshot readable for admin repair, but close public chat.
+    invalid_gate_config = "gate_enabled" in invalid_fields or (
+        validated.get("gate_enabled", False)
+        and bool(
+            invalid_fields
+            & {"gate_model", "gate_prompt", "gate_post_prompt", "gate_timeout_seconds"}
+        )
+    )
+
     rag_collections = _default_rag_collections()
     rag_collections.update(validated.get("rag_collections", {}))
 
@@ -247,6 +282,13 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
         )
     return RuntimeConfig(
         revision=configuration_revision(doc_data),
+        gate_enabled=validated.get("gate_enabled", False),
+        gate_model=validated.get(
+            "gate_model", validated.get("openrouter_model", settings.openrouter_model)
+        ),
+        gate_prompt=validated.get("gate_prompt", DEFAULT_GATE_PROMPT),
+        gate_post_prompt=validated.get("gate_post_prompt", DEFAULT_GATE_POST_PROMPT),
+        gate_timeout_seconds=validated.get("gate_timeout_seconds", 10.0),
         pii_model_revision=validated.get("pii_model_revision", ""),
         **{key: validated.get(key, getattr(settings, key)) for key in RERANK_FIELDS},
         openrouter_model=validated.get("openrouter_model", settings.openrouter_model),
@@ -266,7 +308,7 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
         enable_image_upload=(
             False
             if "enable_image_upload" in invalid_fields
-            else validated.get("enable_image_upload", True)
+            else validated.get("enable_image_upload", False)
         ),
         enable_client_privacy_review=validated.get("enable_client_privacy_review", True),
         enable_reasoning_display=validated.get("enable_reasoning_display", False),
@@ -276,7 +318,7 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
             else validated.get("development_mode", False)
         ),
         rag_distance_threshold=validated.get("rag_distance_threshold"),
-        source=source,
+        source="invalid_gate_config" if invalid_gate_config else source,
         updated_at=_timestamp_to_iso(data.get("updated_at")),
         updated_by=data.get("updated_by") if isinstance(data.get("updated_by"), str) else None,
         pipeline={**PIPELINE_DEFAULTS, **validated.get("pipeline", {})},
@@ -393,21 +435,63 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("rag_rerank_timeout_seconds must be between 0.1 and 10")
             cleaned[key] = float(value)
         elif key == "pii_model_revision":
-            if not isinstance(value, str) or (value and (len(value) != 40 or any(c not in "0123456789abcdef" for c in value))):
-                raise ValueError("pii_model_revision must be empty or a 40-character lowercase commit SHA")
+            if not isinstance(value, str) or (
+                value and (len(value) != 40 or any(c not in "0123456789abcdef" for c in value))
+            ):
+                raise ValueError(
+                    "pii_model_revision must be empty or a 40-character lowercase commit SHA"
+                )
             cleaned[key] = value
-        elif key in {"openrouter_model", "rag_rerank_model", "maintenance_message"}:
+        elif key in {
+            "openrouter_model",
+            "rag_rerank_model",
+            "gate_model",
+            "gate_prompt",
+            "gate_post_prompt",
+            "maintenance_message",
+        }:
             if value is None:
-                if key in {"openrouter_model", "rag_rerank_model"}:
+                if key in {
+                    "openrouter_model",
+                    "rag_rerank_model",
+                    "gate_model",
+                    "gate_prompt",
+                    "gate_post_prompt",
+                }:
                     raise ValueError(f"{key} must be a non-empty string")
                 cleaned[key] = ""
                 continue
             if not isinstance(value, str):
                 raise ValueError(f"{key} must be a string")
-            normalized = value.replace("\\n", "\n").replace("\r\n", "\n").strip()
-            if key in {"openrouter_model", "rag_rerank_model"} and not normalized:
+            normalized = value.replace("\\n", "\n").replace("\r\n", "\n")
+            # Preserve the post policy's authored bytes, including its final
+            # newline: the live-checked policy hash must survive Firestore seeding.
+            if key != "gate_post_prompt":
+                normalized = normalized.strip()
+            if (
+                key
+                in {
+                    "openrouter_model",
+                    "rag_rerank_model",
+                    "gate_model",
+                    "gate_prompt",
+                    "gate_post_prompt",
+                }
+                and not normalized.strip()
+            ):
                 raise ValueError(f"{key} must be a non-empty string")
+            if key in {"gate_prompt", "gate_post_prompt"} and len(normalized) > PROMPT_MAX_LENGTH:
+                raise ValueError(f"{key} must be at most {PROMPT_MAX_LENGTH} characters")
             cleaned[key] = normalized
+        elif key == "gate_timeout_seconds":
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not isfinite(value)
+                or not 1 <= value <= 60
+            ):
+                raise ValueError("gate_timeout_seconds must be between 1 and 60")
+            cleaned[key] = float(value)
         elif key in {"temperature", "top_p"}:
             try:
                 numeric_value = float(value)
@@ -452,6 +536,7 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("rag_distance_threshold must be between 0 and 2")
             cleaned[key] = threshold
         elif key in {
+            "gate_enabled",
             "rag_rerank_enabled",
             "enable_anonymization",
             "enable_image_upload",
@@ -477,6 +562,11 @@ def _default_runtime_document() -> dict[str, Any]:
     from rag_core.agents.openrouter_agent import get_default_prompt_sections
 
     return {
+        "gate_enabled": False,
+        "gate_model": settings.openrouter_model,
+        "gate_prompt": DEFAULT_GATE_PROMPT,
+        "gate_post_prompt": DEFAULT_GATE_POST_PROMPT,
+        "gate_timeout_seconds": 10.0,
         "pii_model_revision": "",
         **{key: getattr(settings, key) for key in RERANK_FIELDS},
         "openrouter_model": settings.openrouter_model,
@@ -490,7 +580,7 @@ def _default_runtime_document() -> dict[str, Any]:
         "enable_anonymization": settings.enable_anonymization,
         "rag_collections": _default_rag_collections(),
         "maintenance_message": "",
-        "enable_image_upload": True,
+        "enable_image_upload": False,
         "enable_client_privacy_review": True,
         "development_mode": False,
         "enable_reasoning_display": False,
@@ -513,6 +603,10 @@ def _missing_runtime_defaults(existing: dict[str, Any], defaults: dict[str, Any]
             or (key == "openrouter_model" and not str(current_value).strip())
         ):
             missing[key] = default_value
+    if "gate_model" not in existing and isinstance(existing.get("openrouter_model"), str):
+        current_model = existing["openrouter_model"].strip()
+        if current_model:
+            missing["gate_model"] = current_model
     return missing
 
 

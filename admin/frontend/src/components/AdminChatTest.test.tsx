@@ -74,23 +74,12 @@ describe("diagnostic conversation parity", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "顯示心情分析" }));
     expect(timeline().queryByText("擔心")).not.toBeInTheDocument();
   });
-  it("attaches an image locally and sends it with the next turn only", async () => {
+  it("keeps image attachments unavailable even when a stored setting is enabled", async () => {
     render(<AdminChatTest csrfToken="csrf" config={config} />);
-    const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=="), char => char.charCodeAt(0));
-    fireEvent.change(screen.getByLabelText("選擇圖片"), { target: { files: [new File([bytes], "fixture.png", { type: "image/png" })] } });
-    await screen.findByAltText("已選擇的圖片");
-    expect(runAdminChatTest).not.toHaveBeenCalled();
-    send("請看這張圖"); await timeline().findByText("合成回答");
-    expect(vi.mocked(runAdminChatTest).mock.calls[0][1].image_base64).toMatch(/^data:image\/png;base64,/);
-    send("下一個問題"); await waitFor(() => expect(runAdminChatTest).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(runAdminChatTest).mock.calls[1][1].image_base64).toBeUndefined();
-  });
-  it("disables image attachments with the temporary setting and restores the environment baseline", async () => {
-    render(<AdminChatTest csrfToken="csrf" config={config} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "允許圖片附件" }));
     expect(screen.queryByRole("button", { name: "加入圖片" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "允許圖片附件" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "還原環境設定" }));
-    expect(screen.getByRole("button", { name: "加入圖片" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "加入圖片" })).not.toBeInTheDocument();
     expect(updateRuntimeConfig).not.toHaveBeenCalled();
   });
   it("aborts on leaving and ignores a late completion after stopping and starting another turn", async () => {

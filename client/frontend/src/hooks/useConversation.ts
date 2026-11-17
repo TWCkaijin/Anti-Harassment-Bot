@@ -33,6 +33,7 @@ import {
 import { applyFactUpdates, applySummaryUpdate, emptySummaryContext, hasCaseContext, isCaseContext, normalizeCaseContext, parseFact, toSummaryContext, type ClarificationDraft, type LegacyCaseContext } from "../services/caseFacts";
 import { appendReasoning } from "../services/reasoning";
 import { preparePrivateRequest } from "../services/privateRequest";
+import type { PrivacyDraft } from "../services/clientPrivacy";
 import { loadConversationStorage, recoverConversationMigration, saveConversationStorage, STORAGE_KEY, type StorageIssue } from "./conversationStorage";
 import { appendProcessingStep, type ProcessingPhase, type ProcessingTrace } from "../services/processingTrace";
 
@@ -116,6 +117,11 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function storageSnapshot(): string | null | undefined {
+  try { return localStorage.getItem(STORAGE_KEY); }
+  catch { return undefined; }
+}
+
 function latestUserRequest(messages: ConversationMessage[]): ConversationMessage | undefined {
   return [...messages].reverse().find(message => message.role === "user" && message.content.trim()
     && message.requestKind !== "clarification" && message.requestKind !== "regeneration" && !message.replyContext?.clarificationAnswer);
@@ -160,11 +166,15 @@ export function useConversation(sessionId?: string) {
   // Token updates are intentionally transient: persist only completed or explicitly
   // interrupted messages, so a page reload cannot promote partial text to a reply.
   const [streamingBySession, setStreamingBySession] = useState<Record<string, ConversationMessage>>({});
+  const [privacyReview, setPrivacyReview] = useState<PrivacyDraft | null>(null);
+  const pendingPrivacyReviewRef = useRef<{ resolve: (draft: PrivacyDraft | null) => void; signal?: AbortSignal; onAbort: () => void } | null>(null);
   const [clarificationDrafts, setClarificationDrafts] = useState<Record<string, Record<string, ClarificationDraft>>>({});
   const [error, setError] = useState<string | null>(null);
   const [retryStatusBySession, setRetryStatusBySession] = useState<Record<string, string>>({});
   const [storageIssue, setStorageIssue] = useState<StorageIssue>(initialState.storage.issue);
   const storageWritableRef = useRef(initialState.storage.writable);
+  const storageSnapshotRef = useRef(initialState.storage.snapshot);
+  const storageChangedRef = useRef(false);
   const migrationSnapshotRef = useRef(initialState.storage.migrationSnapshot ?? null);
   const persistedMigrationSessionsRef = useRef<ConversationSession[] | null>(null);
   const [contractVersion, setContractVersion] = useState<1 | 2 | 3 | 4>(1);
@@ -212,6 +222,34 @@ export function useConversation(sessionId?: string) {
   const abortControllersRef = useRef(new Map<string, AbortController>());
   const ownersRef = useRef(new Map<string, symbol>());
   const reviewingSessionIdsRef = useRef(new Set<string>());
+  const finishPrivacyReview = useCallback((draft: PrivacyDraft | null) => {
+    const pending = pendingPrivacyReviewRef.current;
+    if (!pending) return;
+    pendingPrivacyReviewRef.current = null;
+    pending.signal?.removeEventListener("abort", pending.onAbort);
+    setPrivacyReview(null);
+    pending.resolve(draft);
+  }, []);
+  const reviewPrivacyDraft = useCallback((draft: PrivacyDraft, signal?: AbortSignal) => new Promise<PrivacyDraft | null>(resolve => {
+    if (signal?.aborted) { resolve(null); return; }
+    if (pendingPrivacyReviewRef.current) finishPrivacyReview(null);
+    const onAbort = () => finishPrivacyReview(null);
+    pendingPrivacyReviewRef.current = { resolve, signal, onAbort };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    setPrivacyReview(draft);
+  }), [finishPrivacyReview]);
+  const markStorageChanged = useCallback(() => {
+    if (storageChangedRef.current) return;
+    storageChangedRef.current = true;
+    storageWritableRef.current = false;
+    abortControllersRef.current.forEach(controller => controller.abort());
+    setStorageIssue("changed");
+    setError("其他分頁已更新對話紀錄；請重新整理後再繼續。");
+  }, []);
+  const markStorageUnavailable = useCallback(() => {
+    storageWritableRef.current = false;
+    setStorageIssue("unavailable");
+  }, []);
   const setCurrentSessionId = useCallback((id: string) => {
     for (const pendingId of reviewingSessionIdsRef.current) {
       if (pendingId !== id) abortControllersRef.current.get(pendingId)?.abort();
@@ -224,15 +262,35 @@ export function useConversation(sessionId?: string) {
   });
 
   useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage || (event.key !== STORAGE_KEY && event.key !== null)) return;
+      if (event.newValue !== storageSnapshotRef.current) markStorageChanged();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [markStorageChanged]);
+
+  useEffect(() => {
     if (persistedMigrationSessionsRef.current === sessions) {
       persistedMigrationSessionsRef.current = null;
       return;
     }
     if (storageWritableRef.current) {
-      const saved = saveConversationStorage(sessions);
+      const before = storageSnapshot();
+      if (before === undefined) {
+        storageWritableRef.current = false;
+        queueMicrotask(markStorageUnavailable);
+        return;
+      }
+      if (before !== storageSnapshotRef.current) {
+        storageWritableRef.current = false;
+        queueMicrotask(markStorageChanged);
+        return;
+      }
+      const saved = saveConversationStorage(sessions, snapshot => { storageSnapshotRef.current = snapshot; });
       setStorageIssue(saved ? null : "unavailable");
     }
-  }, [sessions]);
+  }, [sessions, markStorageChanged, markStorageUnavailable]);
 
   useEffect(() => {
     const controllers = abortControllersRef.current;
@@ -295,7 +353,7 @@ export function useConversation(sessionId?: string) {
       createdAt: Date.now(),
       messages: [],
     };
-    
+
     setSessions((prev) => {
       // 在建立新 Session 時，順便清除其他空的 Session，避免清單被「新的對話」洗版
       const filtered = prev.filter(s => s.messages.length > 0 || hasCaseContext(normalizeCaseContext(s.caseFacts)) || s.id === currentSessionId);
@@ -303,7 +361,7 @@ export function useConversation(sessionId?: string) {
       if (trimmed.some(s => s.id === newId)) return trimmed;
       return [...trimmed, newSession];
     });
-    
+
     setCurrentSessionId(newId);
     setError(null);
     return newId;
@@ -315,8 +373,9 @@ export function useConversation(sessionId?: string) {
     async (userInput: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext, contextOverride?: CaseContext, regenerationOriginId?: string) => {
       // UI work can retain an older callback while a
       // reconnect is in flight; consult the current completed handshake.
-      const { connected: isBackendConnected, contractVersion, clientSettings: settings } = connectionRef.current;
-      if (imageBase64 && settings?.enable_image_upload === false) { setError("管理員已暫停圖片上傳，請改用文字描述。"); return false; }
+      const { connected: isBackendConnected, contractVersion } = connectionRef.current;
+      if (storageChangedRef.current) { setError("其他分頁已更新對話紀錄；請重新整理後再繼續。"); return false; }
+      if (imageBase64) { setError("圖片上傳目前已停用，請改用文字描述。"); return false; }
       if (imageUrl && !imageBase64) { setError("圖片資料不完整，請重新選擇圖片。"); return false; }
       const contractV2 = contractVersion >= 2;
       const targetSessionId = currentSessionId;
@@ -393,12 +452,12 @@ export function useConversation(sessionId?: string) {
       let reviewAccepted = false;
       reviewingSessionIdsRef.current.add(targetSessionId);
       try {
-        const approved = await preparePrivateRequest(candidate, abortController.signal);
+        const approved = await preparePrivateRequest(candidate, reviewPrivacyDraft, abortController.signal);
         if (!approved || !isOwner() || abortController.signal.aborted || currentSessionIdRef.current !== targetSessionId) return false;
         const current = sessionsRef.current.find(session => session.id === targetSessionId);
         if (!current || normalizeCaseContext(current.caseFacts ?? emptySummaryContext()).revision !== startingRevision) return false;
         if (connectionRef.current.connected !== true || connectionRef.current.contractVersion !== contractVersion
-          || (approved.image_base64 && connectionRef.current.clientSettings?.enable_image_upload === false)) {
+          || approved.image_base64) {
           setError("服務連線已變更，請重新檢查送出內容。");
           return false;
         }
@@ -445,6 +504,7 @@ export function useConversation(sessionId?: string) {
       let partialReasoning: ReasoningEntry[] = [];
       let partialGuidance: ChatGuidance | undefined;
       let hasVisibleGuidance = false;
+      let wasRetracted = false;
       const publishStream = () => {
         if (!isOwner() || finished) return;
         setStreamingBySession(previous => !isOwner() || finished ? previous : ({
@@ -483,8 +543,9 @@ export function useConversation(sessionId?: string) {
             ? { context: regenerationOriginId ? currentContext : applySummaryUpdate(caseContext, response.summary_update ?? null), pending: [] }
             : (response?.contract_version === 2 || response?.contract_version === 3) && sameRevision && response.facts_revision === caseContext.revision
               ? applyFactUpdates(caseContext, response.fact_updates ?? []) : { context: currentContext, pending: session.pendingFacts ?? [] };
+          const interrupted = assistant.isCancelled || assistant.isError;
           return { ...session, ...(contractV2 ? { caseFacts: accepted.context, pendingFacts: accepted.pending } : {}),
-            messages: [...updated, { ...assistant, analysis: response?.analysis ?? assistant.analysis ?? partialAnalysis, reasoning: partialReasoning, processingTrace: finalTrace, ...(response?.contract_version === 2 || response?.contract_version === 3 || response?.contract_version === 4 ? { factsRevision: accepted.context.revision } : {}) }].slice(-MAX_MESSAGES_PER_SESSION) };
+            messages: [...updated, { ...assistant, analysis: interrupted ? undefined : response?.analysis ?? assistant.analysis ?? partialAnalysis, reasoning: interrupted ? undefined : partialReasoning, processingTrace: finalTrace, ...(response?.contract_version === 2 || response?.contract_version === 3 || response?.contract_version === 4 ? { factsRevision: accepted.context.revision } : {}) }].slice(-MAX_MESSAGES_PER_SESSION) };
         }));
       };
 
@@ -528,15 +589,24 @@ export function useConversation(sessionId?: string) {
               if (connectionRef.current.clientSettings?.enable_reasoning_display !== true) return;
               partialReasoning = appendReasoning(partialReasoning, entry);
               publishStream();
+            }, () => {
+              if (!isOwner() || finished || abortController.signal.aborted) return;
+              wasRetracted = true;
+              partialText = "";
+              partialGuidance = undefined;
+              partialAnalysis = [];
+              partialReasoning = [];
+              hasVisibleGuidance = false;
+              publishStream();
             });
             break;
           } catch (err) {
             if (
-              isOwner() && !abortController.signal.aborted && !partialText && !hasVisibleGuidance && partialAnalysis.length === 0 && partialReasoning.length === 0 &&
+              isOwner() && !abortController.signal.aborted && !wasRetracted && !partialText && !hasVisibleGuidance && partialAnalysis.length === 0 && partialReasoning.length === 0 &&
               err instanceof ApiError && err.retryable &&
               // Never automatically replay after reply, guidance or analysis was shown,
               // or a rate-limited request before its Retry-After window.
-              err.status !== 429 && attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
+              err.status !== 429 && err.code !== "review_unavailable" && attempt < MAX_RETRYABLE_CHAT_ATTEMPTS
             ) {
               partialGuidance = undefined;
               partialAnalysis = [];
@@ -557,6 +627,13 @@ export function useConversation(sessionId?: string) {
         assertResponseContract(request, response);
         if ((response.contract_version === 2 || response.contract_version === 3) && response.facts_revision !== caseContext.revision) throw new ApiError(502, "情境摘要版本不符", "請重新送出訊息", false);
         if (response.contract_version === 4 && response.context_revision !== caseContext.revision) throw new ApiError(502, "情境摘要版本不符", "請重新送出訊息", false);
+        if (wasRetracted) {
+          // A denied turn may only leave the replacement refusal. Do not retain
+          // earlier guidance, retrieval, analysis, or proposed case updates.
+          commitAssistant({ id: assistantId, role: "assistant", content: response.reply, timestamp: assistantTimestamp });
+          metrics.finish("success");
+          return true;
+        }
         commitAssistant({
           id: assistantId,
           role: "assistant",
@@ -580,20 +657,19 @@ export function useConversation(sessionId?: string) {
         if (abortController.signal.aborted) {
           metrics.finish("cancelled");
           commitAssistant({
-            id: assistantId, role: "assistant", content: partialText,
+            id: assistantId, role: "assistant", content: "已停止回覆。",
             timestamp: assistantTimestamp, isCancelled: true,
           });
           return;
         }
         metrics.finish("error", undefined, err instanceof ApiError ? err.status : undefined);
         const errorMsg = err instanceof ApiError
-          ? `服務暫時無法使用：${err.debugMessage ?? err.detail ?? err.message}`
+          ? err.code === "review_unavailable" ? "內容審查暫時無法完成，請重試。" : `服務暫時無法使用：${err.debugMessage ?? err.detail ?? err.message}`
           : "網路連線失敗，請稍後再試";
         setError(errorMsg);
         commitAssistant({
-          id: assistantId, role: "assistant", content: partialText || errorMsg,
+          id: assistantId, role: "assistant", content: errorMsg,
           timestamp: assistantTimestamp, isError: true,
-          ...(partialText ? { interruptionReason: `回覆中斷，以上內容尚未完成。${errorMsg}` } : {}),
         });
       } finally {
         finished = true;
@@ -611,7 +687,7 @@ export function useConversation(sessionId?: string) {
       }
       return true;
     },
-    [currentSessionId, setSessionLoading, setSessionRetryStatus]
+    [currentSessionId, reviewPrivacyDraft, setSessionLoading, setSessionRetryStatus]
   );
 
   const saveCaseFacts = useCallback(async (context: CaseContext, answerAgain = false) => {
@@ -635,7 +711,7 @@ export function useConversation(sessionId?: string) {
       messages: item.messages.map(message => message.role === "assistant" ? { ...message, superseded: true } : message),
     } : item);
     if (editedSummary && migrationSnapshotRef.current !== null) {
-      const recovered = recoverConversationMigration(next, migrationSnapshotRef.current);
+      const recovered = recoverConversationMigration(next, migrationSnapshotRef.current, snapshot => { storageSnapshotRef.current = snapshot; });
       if (recovered === "saved") {
         storageWritableRef.current = true;
         migrationSnapshotRef.current = null;
@@ -708,6 +784,7 @@ export function useConversation(sessionId?: string) {
   // ── 清除所有 Session ───────────────────────────────────────────────────
 
   const clearAllSessions = useCallback(() => {
+    if (storageChangedRef.current) { setError("其他分頁已更新對話紀錄；請重新整理後再清除。"); return; }
     setClarificationDrafts({});
     ownersRef.current.clear();
     abortControllersRef.current.forEach(controller => controller.abort());
@@ -756,6 +833,9 @@ export function useConversation(sessionId?: string) {
     isBackendConnected,
     reconnectBackend,
     storageIssue,
+    privacyReview,
+    confirmPrivacyReview: (draft: PrivacyDraft) => finishPrivacyReview(draft),
+    cancelPrivacyReview: () => finishPrivacyReview(null),
     caseFacts,
     incompatibleSummary: isBackendConnected === true && ((!contractV2 && hasCaseFacts)
       || (contractVersion < 4 && caseFacts.schema_version === 3 && Boolean(caseFacts.summary.trim()))

@@ -83,6 +83,7 @@ describe("AdminPanel Skills actions", () => {
     vi.mocked(getScenarioSkills).mockResolvedValue({ skills: [initialSkill] });
     render(<AdminPanel session={session} onLogout={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Skills 設定/ }));
+    await screen.findByLabelText("情境指令", {}, { timeout: 5000 });
   }
 
   it("preserves phone actions and saves configured URL and option actions with Skill instructions", async () => {
@@ -133,7 +134,7 @@ describe("AdminPanel Skills actions", () => {
         },
       ],
     }));
-  });
+  }, 10000);
 
   it("loads existing URL and option actions for editing and supports removing actions", async () => {
     await openSkills({ ...skill, actions: [
@@ -190,10 +191,39 @@ describe("AdminPanel runtime config", () => {
     await waitFor(() => expect(updateRuntimeConfig).toHaveBeenLastCalledWith("admin-token", expect.objectContaining({ enable_reasoning_display: false, reasoning_effort: "high" })));
   });
 
+  it("saves separate Gate input and reply policies with model and timeout", async () => {
+    vi.mocked(getRuntimeConfig).mockResolvedValue({
+      ...runtimeConfig,
+      gate_enabled: false,
+      gate_model: "synthetic/gate-a",
+      gate_prompt: "只接受相關求助。",
+      gate_post_prompt: "只接受相關回覆。",
+      gate_timeout_seconds: 10,
+    });
+    vi.mocked(updateRuntimeConfig).mockImplementation(async (_token, updates) => ({
+      ...runtimeConfig, ...updates,
+      pipeline: { ...DEFAULT_PIPELINE, ...runtimeConfig.pipeline, ...updates.pipeline },
+    }));
+    await openSystemSettings();
+    fireEvent.click(screen.getByRole("checkbox", { name: "啟用聊天內容審查" }));
+    fireEvent.change(screen.getByLabelText("Gate OpenRouter Model"), { target: { value: "synthetic/gate-b" } });
+    fireEvent.change(screen.getByLabelText("Gate 逾時（秒）"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("Gate 輸入審查提示詞（pre）"), { target: { value: "審查合成測試輸入。" } });
+    fireEvent.change(screen.getByLabelText("Gate 回覆審查提示詞（post）"), { target: { value: "審查合成測試回覆。" } });
+    fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
+    await waitFor(() => expect(updateRuntimeConfig).toHaveBeenCalledWith("admin-token", expect.objectContaining({
+      gate_enabled: true,
+      gate_model: "synthetic/gate-b",
+      gate_prompt: "審查合成測試輸入。",
+      gate_post_prompt: "審查合成測試回覆。",
+      gate_timeout_seconds: 12,
+    })));
+  });
+
   it("saves image settings and no longer offers the retired review switch", async () => {
     vi.mocked(updateRuntimeConfig).mockImplementation(async (_token, update) => ({ ...runtimeConfig, ...update, pipeline: runtimeConfig.pipeline }));
     render(<AdminPanel session={session} onLogout={vi.fn()} />);
-    const images = await screen.findByRole("checkbox", { name: "允許圖片上傳" });
+    const images = await screen.findByRole("checkbox", { name: "預留圖片設定（目前停用）" });
     expect(screen.queryByRole("checkbox", { name: "送出前遮罩確認" })).not.toBeInTheDocument();
     fireEvent.click(images);
     expect(updateRuntimeConfig).not.toHaveBeenCalled();
@@ -208,7 +238,7 @@ describe("AdminPanel runtime config", () => {
     vi.mocked(runAdminChatTest).mockResolvedValue({ response: { contract_version: 4, context_revision: 0, reply: "合成診斷回覆", session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, interaction_mode: "answer", clarifying_questions: [], suggested_replies: [], action_buttons: [] }, diagnostics: {} });
     await openSystemSettings();
     fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "測試訊息" }), { target: { value: "synthetic@example.test" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: "測試訊息" }, { timeout: 5000 }), { target: { value: "synthetic@example.test" } });
     fireEvent.click(screen.getByRole("button", { name: "傳送訊息" }));
     expect(await within(screen.getByLabelText("診斷對話訊息")).findByText("合成診斷回覆")).toBeVisible();
     expect(screen.queryByRole("dialog", { name: "確認即將送出的內容" })).not.toBeInTheDocument();

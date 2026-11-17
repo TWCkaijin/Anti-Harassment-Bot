@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from rag_core.core.chat_response import action_key, action_selector, configured_action_adapter
 from rag_core.core.logger import get_logger
+from rag_core.core.referral_policy import is_private_referral_action
 from rag_core.firestore_clients import get_business_db
 
 logger = get_logger(__name__)
@@ -144,7 +145,8 @@ def _parse_action(value: Any) -> ScenarioAction | None:
         return None
     if "options" in validated:
         validated["options"] = tuple(validated["options"])
-    return ScenarioAction(**validated)
+    action = ScenarioAction(**validated)
+    return None if is_private_referral_action(action) else action
 
 
 def _parse_script(script_id: str, data: dict[str, Any]) -> ScenarioScript | None:

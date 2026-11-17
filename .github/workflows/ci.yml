@@ -63,14 +63,27 @@ jobs:
       - name: Lint shared and both frontends
         run: pnpm -r lint
       - name: Run frontend regressions
-        run: pnpm -r test
+        run: |
+          pnpm --filter @rag/shared test
+          pnpm --filter @rag/client test
+          pnpm --filter @rag/admin test
       - name: Build shared package then both frontends
         run: |
           pnpm --filter @rag/shared build
           pnpm --filter @rag/client build
           pnpm --filter @rag/admin build
+      - name: Verify enabled App Check client bundle
+        env:
+          VITE_APP_CHECK_ENABLED: 'true'
+          VITE_APP_CHECK_SITE_KEY: ci-public-site-key
+          VITE_FIREBASE_API_KEY: ci-public-api-key
+          VITE_FIREBASE_PROJECT_ID: ci-project
+          VITE_FIREBASE_APP_ID: ci-app
+        run: pnpm --filter @rag/client build
       - name: Verify preview-only masking entry
-        run: pnpm --filter @rag/admin exec vite build --mode preview --outDir dist-preview
+        run: |
+          pnpm --filter @rag/admin exec vite build --mode preview --outDir dist-preview
+          node scripts/quality/check_admin_bundle.mjs
 
   firestore-rules:
     name: Firestore Rules Emulator (four databases)

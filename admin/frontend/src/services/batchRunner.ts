@@ -69,7 +69,7 @@ export async function runScriptBatch(options: {
       const request: ChatRequest = { ...createChatRequest(history, test.turns[number - 1], undefined, 4), contract_version: 4,
         case_context: structuredClone(completed.at(-1)?.contextAfter ?? emptySummaryContext()), use_rag: run.overrides.pipeline?.enable_rag !== false };
       let approved: ChatRequest | null;
-      try { approved = await preparePrivateRequest(createPrivacyDraft(request, options.hiddenTerms ?? []).request, signal); }
+      try { approved = await preparePrivateRequest(createPrivacyDraft(request, options.hiddenTerms ?? []).request, async draft => draft, signal); }
       catch { stoppedReason = '無法完成本機遮罩，請檢查訊息、歷史及摘要長度。'; break; }
       if (!approved) { stoppedReason = '本機處理已取消，未送出本輪請求。'; break; }
       if (!await reserve()) break;

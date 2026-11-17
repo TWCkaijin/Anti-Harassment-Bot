@@ -14,6 +14,7 @@ interface SettingsPanelProps {
   onClose: () => void;
   sessions: ConversationSession[];
   onClearAll: () => void;
+  storageChanged?: boolean;
   showEmotions?: boolean;
   onShowEmotionsChange?: (value: boolean) => void;
   preferenceSaveFailed?: boolean;
@@ -24,6 +25,7 @@ export default function SettingsPanel({
   onClose,
   sessions,
   onClearAll,
+  storageChanged = false,
   showEmotions = false, onShowEmotionsChange, preferenceSaveFailed = false,
 }: SettingsPanelProps) {
   const { t, locale, setLocale } = useI18n();
@@ -61,6 +63,7 @@ export default function SettingsPanel({
   };
 
   const handleClearAll = () => {
+    if (storageChanged) return;
     onClearAll();
     setShowConfirm(false);
   };
@@ -169,6 +172,7 @@ export default function SettingsPanel({
             {!showConfirm ? (
               <button
                 onClick={() => setShowConfirm(true)}
+                disabled={storageChanged}
                 className="w-full py-2.5 px-3 rounded-xl text-sm font-medium bg-error-container/30 text-error hover:bg-error-container/50 transition-colors cursor-pointer flex items-center justify-center gap-2"
               >
                 <MaterialIcon icon="delete_forever" size={16} />
@@ -188,6 +192,7 @@ export default function SettingsPanel({
                   </button>
                   <button
                     onClick={handleClearAll}
+                    disabled={storageChanged}
                     className="flex-1 py-2 px-3 rounded-xl text-sm bg-error text-on-error font-medium cursor-pointer hover:opacity-90"
                   >
                     {t.confirm}

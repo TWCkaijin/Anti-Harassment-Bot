@@ -20,6 +20,7 @@ sys.path.append(str(Path(__file__).resolve().parents[3]))
 from google.cloud.firestore_v1.vector import Vector
 
 from rag_core.core.config import get_settings
+from rag_core.core.referral_policy import is_private_referral_resource
 from rag_core.firestore_clients import get_business_db
 from rag_core.rag.embeddings import EmbeddingClient
 
@@ -161,6 +162,10 @@ def build_document_documents(path: Path) -> list[IngestDocument]:
             if chunk.startswith(title) or chunk.startswith(f"# {title}")
             else normalize_ws(f"{title}\n{chunk}")
         )
+        if is_private_referral_resource(chunk_content, {"document_type": document_type}):
+            raise ValueError(
+                f"{path} contains a private organization referral; curate before uploading"
+            )
         documents.append(
             IngestDocument(
                 doc_id=stable_id("document", path.stem, str(chunk_index)),
@@ -330,6 +335,10 @@ def build_remedy_documents(path: Path) -> list[IngestDocument]:
         remedy_channels = infer_remedy_channels(section_text)
         for chunk_index, chunk in enumerate(chunks):
             chunk_content = chunk if chunk.startswith(title) else normalize_ws(f"{title}\n{chunk}")
+            if is_private_referral_resource(chunk_content, {"data_type": "remedy"}):
+                raise ValueError(
+                    f"{path} contains a private organization referral; curate before uploading"
+                )
             documents.append(
                 IngestDocument(
                     doc_id=stable_id("remedy", path.stem, title, str(chunk_index)),

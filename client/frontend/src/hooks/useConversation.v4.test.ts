@@ -110,7 +110,7 @@ describe("v4 summary ownership and ephemeral reasoning", () => {
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await result.current.sendMessage("合成情境"); });
     expect(sendChat).toHaveBeenCalledOnce();
-    expect(result.current.messages.at(-1)).toMatchObject({ isError: true, reasoning: [{ text: "公開摘要片段" }] });
+    expect(result.current.messages.at(-1)).toMatchObject({ isError: true, reasoning: undefined });
     expect(localStorage.getItem(STORAGE_KEY)).not.toContain("公開摘要片段");
   });
 });

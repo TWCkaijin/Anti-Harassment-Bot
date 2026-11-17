@@ -30,6 +30,7 @@ node_modules/
 .pnpm-store/
 client/frontend/dist/
 admin/frontend/dist/
+admin/frontend/dist-preview/
 **/.vite/
 **/coverage/
 *.tsbuildinfo

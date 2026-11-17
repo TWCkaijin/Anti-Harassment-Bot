@@ -17,6 +17,18 @@ POLICY_PATH = Path(__file__).resolve().parents[1] / "infrastructure/iam/ci-deplo
 REGION = "asia-east1"
 
 
+def federation_condition(repository_id: str, owner_id: str, repository: str) -> str:
+    """Authorize only the release events and exact workflow refs for each branch."""
+    main_workflow = f"{repository}/.github/workflows/deploy-main.yml@refs/heads/main"
+    dev_workflow = f"{repository}/.github/workflows/deploy-dev.yml@refs/heads/dev"
+    return (
+        f"assertion.repository_id == '{repository_id}' && "
+        f"assertion.repository_owner_id == '{owner_id}' && ("
+        f"(assertion.event_name == 'workflow_dispatch' && assertion.ref == 'refs/heads/main' && assertion.workflow_ref == '{main_workflow}') || "
+        f"((assertion.event_name == 'push' || assertion.event_name == 'workflow_dispatch') && assertion.ref == 'refs/heads/dev' && assertion.workflow_ref == '{dev_workflow}'))"
+    )
+
+
 def deploy_permissions(p, *, allow_project_hosting_admin=False):
     """Bind update/read access directly to resources, never broad admin roles."""
     policy = json.loads(POLICY_PATH.read_text())
@@ -170,12 +182,7 @@ def federation(p, repository, *, allow_project_hosting_admin=False):
         if p.apply
         else []
     )
-    condition = (
-        f"assertion.repository_id == '{repository_id}' && "
-        f"assertion.repository_owner_id == '{owner_id}' && assertion.event_name == 'push' && ("
-        f"(assertion.ref == 'refs/heads/main' && assertion.workflow_ref == '{repository}/.github/workflows/deploy-main.yml@refs/heads/main') || "
-        f"(assertion.ref == 'refs/heads/dev' && assertion.workflow_ref == '{repository}/.github/workflows/deploy-dev.yml@refs/heads/dev'))"
-    )
+    condition = federation_condition(repository_id, owner_id, repository)
     operation = (
         "update-oidc"
         if any(item["name"].endswith("/github") for item in providers)
