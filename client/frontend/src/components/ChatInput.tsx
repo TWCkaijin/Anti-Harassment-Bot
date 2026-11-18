@@ -143,7 +143,7 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
   const imageControlsDisabled = disabled || Boolean(isLoading) || sendPending;
 
   return (
-    <footer className="shrink-0 px-6 lg:px-10 pb-2 lg:pb-4 bg-transparent">
+    <footer className="chat-column shrink-0 bg-transparent pb-2 lg:pb-4">
       <div className="w-full relative">
         <div ref={panelRef} hidden={!menuVisible} inert={!menuVisible} className="max-h-[min(50dvh,28rem)] overflow-y-auto overscroll-contain">
           {typedQuestion && <TypedClarification key={`${promptKey}-${caseRevision}`} clarification={typedQuestion} revision={caseRevision!} isLoading={Boolean(isLoading || disabled)} onHide={hideMenu} draft={replyPrompt?.clarificationDraft} onDraftChange={draft => { if (replyPrompt) onClarificationDraftChange?.(replyPrompt.id, draft); }} onSend={(message, context) => {

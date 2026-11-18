@@ -67,7 +67,7 @@ try {
       await page.getByText('對方是顧客，我想依更正的情況重新整理。', { exact: true }).waitFor();
       await page.getByRole('dialog', { name: '目前摘要', exact: true }).getByRole('button', { name: '關閉', exact: true }).click();
       assert.equal((await session()).caseFacts.summary, saved.caseFacts.summary);
-      await page.getByRole('button', { name: '開啟側邊欄', exact: true }).click();
+      if (mobile) await page.getByRole('button', { name: '開啟側邊欄', exact: true }).click();
       await page.locator('aside').getByRole('button', { name: /設定/ }).click();
       const event = page.waitForEvent('download');
       await page.getByRole('button', { name: /匯出為 JSON/ }).click();

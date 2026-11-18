@@ -75,7 +75,7 @@ export default function WelcomeHero({ onSuggest, disabled = false, allowImageUpl
 
   return (
     <div className="flex-1 flex flex-col hero-mesh-gradient overflow-y-auto">
-      <section className="w-full px-5 lg:px-10 py-12 lg:py-24 flex flex-col items-center text-center flex-1 justify-center">
+      <section className="chat-column py-8 lg:py-16 flex flex-col items-center text-center flex-1 justify-center">
         {/* 大字標題 */}
         <h2 className="text-3xl lg:text-4xl font-bold tracking-tight text-on-surface max-w-4xl mb-6 leading-tight">
           {t.heroTitle}

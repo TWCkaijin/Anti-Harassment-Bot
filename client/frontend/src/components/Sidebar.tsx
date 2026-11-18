@@ -16,9 +16,10 @@ interface SidebarProps {
   sessions: ConversationSession[];
   currentSessionId: string;
   isOpen: boolean;
+  isDesktop: boolean;
   isCollapsed: boolean;
   onClose: () => void;
-  onToggleCollapsed: () => void;
+  onCollapse: () => void;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onDeleteSession: (id: string) => void;
@@ -57,9 +58,10 @@ export default function Sidebar({
   sessions,
   currentSessionId,
   isOpen,
+  isDesktop,
   isCollapsed,
   onClose,
-  onToggleCollapsed,
+  onCollapse,
   onSelectSession,
   onNewSession,
   onDeleteSession,
@@ -72,56 +74,27 @@ export default function Sidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [isEmergencyMenuOpen, setIsEmergencyMenuOpen] = useState(false);
-  const [desktop, setDesktop] = useState(() => window.matchMedia?.("(min-width: 1024px) and (pointer: fine)").matches ?? false);
-  const [peek, setPeek] = useState(false);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const asideRef = useRef<HTMLElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const hoverInside = useRef(false);
   const emergencyMenuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const media = window.matchMedia?.("(min-width: 1024px) and (pointer: fine)");
-    if (!media) return;
-    const update = () => setDesktop(media.matches);
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  const cancelHide = () => {
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = null;
-  };
-  const scheduleHide = () => {
-    cancelHide();
-    hideTimer.current = setTimeout(() => {
-      if (hoverInside.current || asideRef.current?.contains(document.activeElement) || document.activeElement === triggerRef.current || menuOpenId || editingId || isEmergencyMenuOpen) return;
-      setPeek(false);
-    }, 200);
-  };
-  useEffect(() => () => { if (hideTimer.current) clearTimeout(hideTimer.current); }, []);
   useEffect(() => { if (menuOpenId) menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [menuOpenId]);
-  // Closing a portal menu/rename must resume hover behaviour without requiring
-  // a second mouseleave from the underlying panel.
   useEffect(() => {
-    if (menuOpenId || editingId || isEmergencyMenuOpen) return;
-    const timer = setTimeout(() => {
-      if (!hoverInside.current && !asideRef.current?.contains(document.activeElement) && document.activeElement !== triggerRef.current) setPeek(false);
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [menuOpenId, editingId, isEmergencyMenuOpen]);
-  useEffect(() => {
-    if (desktop || !isOpen) return;
+    if (isDesktop || !isOpen) return;
     const previous = document.activeElement as HTMLElement | null;
     asideRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
     return () => {
-      const target = previous?.isConnected ? previous : document.querySelector<HTMLButtonElement>("[data-sidebar-trigger]");
+      const target = previous?.isConnected && previous !== document.body ? previous : document.querySelector<HTMLButtonElement>("[data-sidebar-trigger]");
       target?.focus();
     };
-  }, [isOpen, desktop]);
-  const visible = desktop ? !isCollapsed || peek : isOpen;
-  const close = () => { setPeek(false); onClose(); };
+  }, [isOpen, isDesktop]);
+  const visible = isDesktop ? !isCollapsed : isOpen;
+  const close = onClose;
+  const placement = isDesktop
+    ? visible ? "relative flex w-72 shrink-0" : "hidden"
+    : "fixed inset-y-0 left-0 flex w-[min(20rem,calc(100vw-3rem))] shadow-xl motion-safe:transition-transform";
+  const drawerPosition = !isDesktop && !visible ? "-translate-x-full invisible" : "";
 
   useEffect(() => {
     if (!isEmergencyMenuOpen) return;
@@ -163,7 +136,7 @@ export default function Sidebar({
   return (
     <>
       {/* 行動端遮罩 */}
-      {!desktop && isOpen && (
+      {!isDesktop && isOpen && (
         <div
           className="fixed inset-0 bg-black/30 z-40"
           onClick={close}
@@ -173,29 +146,25 @@ export default function Sidebar({
       <aside
         ref={asideRef}
         id="conversation-sidebar"
-        aria-label={t.openSidebar}
-        aria-modal={!desktop && isOpen && !menuOpenId ? true : undefined}
-        role={!desktop && isOpen ? "dialog" : "complementary"}
+        aria-label={t.conversationSidebar}
+        aria-modal={!isDesktop && isOpen && !menuOpenId ? true : undefined}
+        role={!isDesktop && isOpen ? "dialog" : "complementary"}
         inert={!visible}
-        onPointerEnter={() => { hoverInside.current = true; cancelHide(); }}
-        onPointerLeave={() => { hoverInside.current = false; scheduleHide(); }}
-        onFocus={cancelHide}
-        onBlur={scheduleHide}
         onKeyDown={event => {
-          if (event.key === "Escape") { event.stopPropagation(); setMenuOpenId(null); setEditingId(null); setIsEmergencyMenuOpen(false); close(); if (desktop && !isCollapsed) onToggleCollapsed(); triggerRef.current?.focus(); }
-          if (desktop || event.key !== "Tab") return;
-          const controls = Array.from(asideRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, a[href], [tabindex="0"]') ?? []).filter(element => element.getClientRects().length > 0);
+          if (event.key === "Escape") { event.stopPropagation(); setMenuOpenId(null); setEditingId(null); setIsEmergencyMenuOpen(false); if (isDesktop) { onCollapse(); document.querySelector<HTMLButtonElement>("[data-sidebar-trigger]")?.focus(); } else close(); }
+          if (isDesktop || event.key !== "Tab") return;
+          const controls = Array.from(asideRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, a[href], [tabindex="0"]') ?? []).filter(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility === "visible");
           const first = controls[0], last = controls.at(-1);
           if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
           else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
         }}
-        className={`${desktop && !isCollapsed ? "relative shrink-0" : "fixed inset-y-0 left-0"} z-50 flex w-[min(320px,90vw)] flex-col gap-5 border-r border-outline/20 bg-white p-6 ${desktop && isCollapsed ? "pl-11 shadow-xl" : ""} ${visible ? "translate-x-0" : "-translate-x-full invisible"} transition-transform duration-200`}
+        className={`${placement} ${drawerPosition} z-50 flex-col gap-4 border-r border-outline/20 bg-white p-4`}
       >
-        <div className="flex min-h-0 flex-1 flex-col gap-5">
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
         {/* 頂部 Logo */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <BrandMark size={48} />
+            <BrandMark size={40} />
             <div>
               <h1 className="text-lg font-bold text-primary leading-tight">{t.brandName}</h1>
               <p className="text-xs text-on-surface/60">{t.brandSub}</p>
@@ -203,7 +172,7 @@ export default function Sidebar({
           </div>
           <button
             onClick={close}
-            className={`${desktop ? "hidden" : "flex"} h-11 w-11 items-center justify-center rounded-lg hover:bg-surface-container transition-colors`}
+            className={`${isDesktop ? "hidden" : "flex"} h-11 w-11 items-center justify-center rounded-lg hover:bg-surface-container transition-colors`}
             aria-label={t.close}
           >
             <MaterialIcon icon="close" size={20} className="text-on-surface/60" />
@@ -216,14 +185,14 @@ export default function Sidebar({
             onNewSession();
             close();
           }}
-          className="w-full py-4 px-4 bg-primary text-white font-bold rounded-2xl shadow-sm hover:opacity-90 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
+          className="w-full min-h-11 px-4 bg-primary text-white font-bold rounded-2xl shadow-sm hover:opacity-90 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
         >
           <MaterialIcon icon="add" size={20} />
           <span>{t.newChat}</span>
         </button>
 
         {/* 對話歷史列表 */}
-        <div className="flex-1 overflow-y-auto space-y-3 -mx-2 px-2 chat-scrollbar">
+        <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1 chat-scrollbar">
           {sortedSessions.length === 0 && (
             <p className="text-sm text-on-surface/50 text-center py-8">
               {t.noHistory}
@@ -376,13 +345,13 @@ export default function Sidebar({
           </div>
 
           {/* 工具連結列 */}
-          <div className="grid grid-cols-2 gap-3 border-t border-outline/10 pt-3">
+          <div className="border-t border-outline/10 pt-2">
             <button
               onClick={() => {
                 setIsEmergencyMenuOpen(false);
                 onOpenSettings();
               }}
-              className="flex flex-col items-center gap-1 text-on-surface/70 hover:text-primary transition-colors cursor-pointer"
+              className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-on-surface/70 hover:bg-surface-container hover:text-primary transition-colors cursor-pointer"
             >
               <MaterialIcon icon="settings" size={20} />
               <span className="text-xs font-medium">
@@ -394,18 +363,6 @@ export default function Sidebar({
         </div>
         </div>
       </aside>
-      {desktop && <button
-        ref={triggerRef} type="button"
-        onPointerEnter={() => { hoverInside.current = true; cancelHide(); if (isCollapsed) setPeek(true); }}
-        onPointerLeave={() => { hoverInside.current = false; scheduleHide(); }}
-        onBlur={scheduleHide}
-        onClick={() => { cancelHide(); setPeek(false); onToggleCollapsed(); }}
-        aria-label={isCollapsed ? "固定開啟對話欄" : "收起對話欄"}
-        aria-expanded={visible} aria-controls="conversation-sidebar"
-        className="fixed top-1/2 z-[60] flex h-20 w-8 -translate-y-1/2 items-center justify-center rounded-r-2xl bg-primary text-white shadow-md hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-        style={{ left: isCollapsed ? 0 : 320 }}>
-        <MaterialIcon icon={isCollapsed ? "chevron_right" : "chevron_left"} size={22} />
-      </button>}
       {openMenuSession && menuPosition && createPortal(
         <>
           <button
@@ -423,8 +380,6 @@ export default function Sidebar({
             role="dialog"
             aria-modal="true"
             aria-label={t.conversationMenu}
-            onPointerEnter={() => { hoverInside.current = true; cancelHide(); }}
-            onPointerLeave={() => { hoverInside.current = false; scheduleHide(); }}
             onKeyDown={event => {
               if (event.key === "Escape") { event.stopPropagation(); setMenuOpenId(null); setMenuPosition(null); menuTriggerRef.current?.focus(); }
               if (event.key !== "Tab") return;

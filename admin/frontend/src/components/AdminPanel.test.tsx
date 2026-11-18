@@ -208,6 +208,9 @@ describe("AdminPanel runtime config", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "啟用聊天內容審查" }));
     fireEvent.change(screen.getByLabelText("Gate OpenRouter Model"), { target: { value: "synthetic/gate-b" } });
     fireEvent.change(screen.getByLabelText("Gate 逾時（秒）"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "編輯內容審查提示詞" }));
+    expect(screen.getByLabelText("Gate 輸入審查提示詞（pre）")).toHaveValue("只接受相關求助。");
+    expect(screen.getByLabelText("Gate 回覆審查提示詞（post）")).toHaveValue("只接受相關回覆。");
     fireEvent.change(screen.getByLabelText("Gate 輸入審查提示詞（pre）"), { target: { value: "審查合成測試輸入。" } });
     fireEvent.change(screen.getByLabelText("Gate 回覆審查提示詞（post）"), { target: { value: "審查合成測試回覆。" } });
     fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));

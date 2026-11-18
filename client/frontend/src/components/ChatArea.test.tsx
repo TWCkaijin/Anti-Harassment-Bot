@@ -437,11 +437,11 @@ describe("ChatArea streaming presentation", () => {
 });
 
 describe("ChatArea v4 layout and current summary", () => {
-  it("shows the brand only before the first message and keeps compact connection controls", () => {
+  it("keeps the same brand and navigation after the first message", () => {
     const { rerender } = render(chat([]));
     const title = screen.getByRole("heading", { name: "溫暖守護" }).textContent!;
     rerender(chat([{ id: "u", role: "user", content: "請陪我整理", timestamp: 1 }]));
-    expect(screen.queryByRole("heading", { name: title })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: title })).toBeVisible();
     expect(screen.getByRole("button", { name: "開啟側邊欄" })).toBeVisible();
     expect(screen.getByRole("button", { name: "傳送訊息" })).toBeVisible();
   });

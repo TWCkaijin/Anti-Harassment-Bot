@@ -3,7 +3,7 @@
  * 整合 Sidebar + ChatArea + EmergencyFab + SettingsPanel，
  * 使用 useConversation hook 管理所有狀態。
  */
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useConversation } from "./hooks/useConversation";
 import Sidebar from "./components/Sidebar";
 import ChatArea from "./components/ChatArea";
@@ -13,7 +13,18 @@ import { useEmotionPreference } from "./hooks/useEmotionPreference";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarLayout, setSidebarLayout] = useState({ scope: "", collapsed: false });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const update = () => {
+      setDesktop(media.matches);
+      setSidebarOpen(false);
+    };
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { showEmotions, updateShowEmotions, preferenceSaveFailed } = useEmotionPreference();
 
@@ -33,11 +44,6 @@ export default function App() {
     caseFacts, pendingFacts, saveCaseFacts, contractV2, contractVersion, clientSettings, saveClarificationDraft, isBackendConnected, reconnectBackend, storageIssue, incompatibleSummary, summaryRequiresConnection, canRegenerate, privacyReview, confirmPrivacyReview, cancelPrivacyReview,
   } = useConversation();
 
-  // A first message or a different conversation starts with an unobstructed
-  // reading area. Streaming updates keep the user's explicit pin choice.
-  const layoutScope = `${currentSessionId}:${messages.length > 0}`;
-  const sidebarCollapsed = sidebarLayout.scope === layoutScope ? sidebarLayout.collapsed : messages.length > 0;
-
   const handleOpenSettings = useCallback(() => {
     setSettingsOpen(true);
     setSidebarOpen(false);
@@ -48,13 +54,13 @@ export default function App() {
     <div className="flex w-full h-dvh bg-background overflow-hidden">
       {/* 側邊欄 */}
       <Sidebar
-        key={layoutScope}
         sessions={sessions}
         currentSessionId={currentSessionId}
         isOpen={sidebarOpen}
+        isDesktop={desktop}
         isCollapsed={sidebarCollapsed}
         onClose={() => setSidebarOpen(false)}
-        onToggleCollapsed={() => setSidebarLayout({ scope: layoutScope, collapsed: !sidebarCollapsed })}
+        onCollapse={() => setSidebarCollapsed(true)}
         onSelectSession={setCurrentSessionId}
         onNewSession={createNewSession}
         onDeleteSession={deleteSession}
@@ -84,10 +90,11 @@ export default function App() {
           canRegenerate={canRegenerate}
           allowImageUpload={false}
         onSend={sendMessage}
+        sidebarExpanded={desktop ? !sidebarCollapsed : sidebarOpen}
+        sidebarModalOpen={!desktop && sidebarOpen}
         onOpenSidebar={() => {
-          if (window.matchMedia("(min-width: 1024px) and (pointer: fine)").matches) {
-            setSidebarLayout({ scope: layoutScope, collapsed: !sidebarCollapsed });
-          } else setSidebarOpen(true);
+          if (desktop) setSidebarCollapsed(collapsed => !collapsed);
+          else setSidebarOpen(true);
         }}
       />
 
