@@ -24,6 +24,7 @@ interface ChatAreaProps {
   onSend: (message: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext) => SendOutcome;
   onOpenSidebar: () => void;
   sidebarExpanded?: boolean;
+  showSidebarTrigger?: boolean;
   sidebarModalOpen?: boolean;
   onStop: () => void;
   caseFacts?: CaseContext;
@@ -49,6 +50,7 @@ export default function ChatArea({
   onSend,
   onOpenSidebar,
   sidebarExpanded = false,
+  showSidebarTrigger = true,
   sidebarModalOpen = false,
   onStop,
   showReasoning = false,
@@ -96,7 +98,7 @@ export default function ChatArea({
       {/* 頂部導航列 */}
       <header className="flex min-h-16 shrink-0 items-center justify-between gap-2 border-b border-outline/10 bg-white px-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          <button
+          {showSidebarTrigger && <button
             data-sidebar-trigger
             type="button"
             onClick={onOpenSidebar}
@@ -107,7 +109,7 @@ export default function ChatArea({
             title={sidebarExpanded ? t.closeSidebar : t.openSidebar}
           >
             <MaterialIcon icon="side_navigation" size={23} />
-          </button>
+          </button>}
           {!summaryMessageId && caseFacts && onSaveCaseFacts && hasCaseContext(caseFacts) && <button data-summary-trigger type="button" aria-label={t.caseSummaryOpen} title={t.caseSummaryOpen} onClick={() => setSummaryOpen(true)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-on-surface/60 hover:bg-primary/10"><MaterialIcon icon="description" size={17} /></button>}
 
           <div className={`flex min-w-0 items-center gap-2.5 ${sidebarExpanded ? "lg:hidden" : ""}`}>

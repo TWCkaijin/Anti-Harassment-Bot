@@ -174,6 +174,7 @@ export interface RuntimeConfig {
   gate_prompt?: string;
   gate_post_prompt?: string;
   gate_timeout_seconds?: number;
+  gate_jev_threshold?: number;
   openrouter_provider_sort?: "auto" | "latency" | "throughput" | "price";
   rag_rerank_enabled?: boolean;
   rag_rerank_model?: string;
@@ -218,6 +219,7 @@ export type RuntimeConfigUpdate = Partial<
     | "gate_prompt"
     | "gate_post_prompt"
     | "gate_timeout_seconds"
+    | "gate_jev_threshold"
     | "pii_model_revision"
     | "openrouter_provider_sort"
     | "rag_rerank_enabled"

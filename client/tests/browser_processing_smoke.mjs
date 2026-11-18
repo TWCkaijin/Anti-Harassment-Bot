@@ -37,7 +37,7 @@ async function savedAssistant(page, index, outcome) {
 async function reopenConversation(page, mobile) {
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByText('已連線', { exact: true }).waitFor({ state: 'attached' });
-  if (mobile) await page.getByRole('button', { name: '開啟側邊欄', exact: true }).click();
+  await page.getByRole('button', { name: mobile ? '開啟側邊欄' : '固定側邊欄', exact: true }).click();
   await page.locator('aside p.truncate').first().click();
 }
 

@@ -27,7 +27,7 @@ it("shows actual searched collections and uncited results without inventing cita
   expect(screen.getByText("合成條文")).toBeVisible();
 });
 
-it("shows cited official links separately from expandable retrieved sources", () => {
+it("groups duplicate citations under retrieval and retains their official links", () => {
   const citedUrl = "https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=N0030014&flno=32-1";
   const uncitedUrl = "https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=N0030014&flno=13";
   renderMessage({
@@ -39,20 +39,21 @@ it("shows cited official links separately from expandable retrieved sources", ()
         status: "ok",
         data_types: ["law", "remedy"],
         sources: [
-          { type: "law", label: "性別平等工作法第32條之1", doc_id: "law/32-1", source_url: citedUrl },
+          { type: "law", label: "性別平等工作法第32條之1", doc_id: "law/32-1" },
           { type: "law", label: "性別平等工作法第13條", doc_id: "law/13", source_url: uncitedUrl },
           { type: "remedy", label: "通報管道指引" },
         ],
       },
     },
   });
-  const citation = screen.getByRole("region", { name: "本次引用來源" });
-  expect(within(citation).getByRole("link", { name: "性別平等工作法第32條之1" })).toHaveAttribute("href", citedUrl);
-  expect(within(citation).queryByText("性別平等工作法第13條")).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "本次引用來源" })).not.toBeInTheDocument();
   expect(screen.getByText("已檢索法律知識庫")).toBeVisible();
   expect(screen.getByText("已檢索救濟管道")).toBeVisible();
   expect(screen.queryByRole("button", { name: "本次引用來源：法律條文" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("已檢索法律知識庫"));
+  expect(screen.getAllByText("性別平等工作法第32條之1")).toHaveLength(1);
+  expect(screen.getByText("性別平等工作法第32條之1")).toBeVisible();
+  expect(screen.getAllByRole("link", { name: "參考依據" }).some(link => link.getAttribute("href") === citedUrl)).toBe(true);
   expect(screen.getByText("性別平等工作法第13條")).toBeVisible();
   expect(screen.getAllByRole("link", { name: "參考依據" }).some(link => link.getAttribute("href") === uncitedUrl)).toBe(true);
 });

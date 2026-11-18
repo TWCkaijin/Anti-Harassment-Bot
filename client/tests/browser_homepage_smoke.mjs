@@ -99,7 +99,11 @@ async function verifyHomepage(page, mobile, text) {
   const body = await page.locator('body').innerText();
   assert(!/\b(auto_awesome|arrow_forward|admin_panel_settings|chevron_left|chevron_right|chat_bubble|expand_less|menu_book)\b/.test(body), 'Material ligature text leaked into UI');
   if (mobile) await assertBrandMark(main.locator('header [data-brand-mark]'));
-  else await assertBrandMark(page.locator('aside [data-brand-mark]'));
+  else {
+    await page.locator('[data-sidebar-trigger]').hover();
+    await assertBrandMark(page.locator('aside [data-brand-mark]'));
+    await page.locator('main header').hover();
+  }
   const documentTitle = await page.title();
   assert(documentTitle.startsWith(text.brand) && !/vite/i.test(documentTitle));
   return { input_width: inputBox.width, header_title_clipped: false, horizontal_overflow: false,
@@ -129,8 +133,7 @@ async function verifyFavicon(page) {
 async function verifySettingsAndInput(page, mobile, text, requests, outputName) {
   if (mobile) await page.getByRole('button', { name: text.open, exact: true }).click();
   else {
-    await page.getByRole('button', { name: '收起對話欄', exact: true }).click();
-    await page.getByRole('button', { name: '固定開啟對話欄', exact: true }).click();
+    await page.locator('[data-sidebar-trigger]').click();
     await page.locator('aside').getByRole('button', { name: text.settings, exact: true }).waitFor();
   }
   await assertBrandMark(page.locator('aside [data-brand-mark]'));
