@@ -1,59 +1,28 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import Sidebar from "./Sidebar";
 import type { ConversationSession } from "../hooks/useConversation";
 const session: ConversationSession = { id: "one", title: "合成測試", createdAt: 1, messages: [{ id: "u", role: "user", content: "測試", timestamp: 1 }] };
-const props = { sessions: [session], currentSessionId: "one", isOpen: false, isCollapsed: true, onClose: vi.fn(), onToggleCollapsed: vi.fn(), onSelectSession: vi.fn(), onNewSession: vi.fn(), onDeleteSession: vi.fn(), onRenameSession: vi.fn(), onOpenSettings: vi.fn(), onOpenAdmin: vi.fn() };
-const media = (matches: boolean) => vi.fn(() => ({ matches, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
-beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); vi.useFakeTimers(); vi.stubGlobal("matchMedia", media(true)); });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+const props = { sessions: [session], currentSessionId: "one", isOpen: false, isDesktop: false, isCollapsed: true, onClose: vi.fn(), onCollapse: vi.fn(), onSelectSession: vi.fn(), onNewSession: vi.fn(), onDeleteSession: vi.fn(), onRenameSession: vi.fn(), onOpenSettings: vi.fn(), onOpenAdmin: vi.fn() };
+beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
 
-it("previews as an overlay with a stationary trigger and waits 200ms after leaving", () => {
-  render(<I18nProvider><Sidebar {...props} /></I18nProvider>);
-  const aside = document.querySelector("aside")!;
-  const trigger = screen.getByRole("button", { name: "固定開啟對話欄" });
-  expect(aside).toHaveAttribute("inert");
-  fireEvent.pointerEnter(trigger);
-  expect(aside).not.toHaveAttribute("inert"); expect(aside).toHaveClass("fixed");
-  expect(trigger).toHaveStyle({ left: "0px" });
-  fireEvent.pointerLeave(trigger); fireEvent.pointerEnter(aside);
-  act(() => vi.advanceTimersByTime(250)); expect(aside).not.toHaveAttribute("inert");
-  fireEvent.pointerLeave(aside);
-  act(() => vi.advanceTimersByTime(199)); expect(aside).not.toHaveAttribute("inert");
-  act(() => vi.advanceTimersByTime(1)); expect(aside).toHaveAttribute("inert");
-});
-
-it("holds the preview for keyboard focus and an open portal menu", () => {
-  render(<I18nProvider><Sidebar {...props} /></I18nProvider>);
-  const aside = document.querySelector("aside")!;
-  fireEvent.pointerEnter(screen.getByRole("button", { name: "固定開啟對話欄" }));
-  const menu = screen.getByRole("button", { name: /對話選項.*合成測試/ });
-  act(() => menu.focus()); fireEvent.pointerLeave(aside);
-  act(() => vi.advanceTimersByTime(300)); expect(aside).not.toHaveAttribute("inert");
-  fireEvent.click(menu); act(() => menu.blur()); fireEvent.pointerLeave(aside);
-  act(() => vi.advanceTimersByTime(300)); expect(aside).not.toHaveAttribute("inert");
-  fireEvent.click(screen.getByRole("button", { name: "關閉對話選單" }));
-  act(() => vi.advanceTimersByTime(250)); expect(aside).not.toHaveAttribute("inert");
-  act(() => menu.blur());
-  act(() => vi.advanceTimersByTime(250)); expect(aside).toHaveAttribute("inert");
-});
-
-it("pins explicitly and keeps it pinned on message updates", () => {
-  const view = (collapsed: boolean, messages = session.messages) => <I18nProvider><Sidebar {...props} isCollapsed={collapsed} sessions={[{ ...session, messages }]} /></I18nProvider>;
+it("keeps a collapsed desktop sidebar closed on hover and requests collapse with Escape", () => {
+  const view = (isCollapsed: boolean) => <I18nProvider><button data-sidebar-trigger>切換側邊欄</button><Sidebar {...props} isDesktop isCollapsed={isCollapsed} /></I18nProvider>;
   const { rerender } = render(view(true));
-  fireEvent.click(screen.getByRole("button", { name: "固定開啟對話欄" }));
-  expect(props.onToggleCollapsed).toHaveBeenCalledOnce();
+  const sidebar = document.querySelector("aside")!;
+  const toggle = screen.getByRole("button", { name: "切換側邊欄" });
+  fireEvent.pointerEnter(toggle);
+  expect(sidebar).toHaveAttribute("inert");
   rerender(view(false));
-  const aside = document.querySelector("aside")!;
-  fireEvent.pointerLeave(aside); act(() => vi.advanceTimersByTime(500));
-  rerender(view(false, [...session.messages, { id: "a", role: "assistant", content: "新段落", timestamp: 2 }]));
-  expect(aside).not.toHaveAttribute("inert"); expect(aside).toHaveClass("relative");
-  expect(screen.getByRole("button", { name: "收起對話欄" })).toHaveStyle({ left: "320px" });
+  expect(sidebar).not.toHaveAttribute("inert");
+  expect(sidebar).toHaveClass("relative");
+  fireEvent.keyDown(sidebar, { key: "Escape" });
+  expect(props.onCollapse).toHaveBeenCalledOnce();
+  expect(toggle).toHaveFocus();
 });
 
 it("uses a click drawer without hover on touch and restores focus on close", () => {
-  vi.stubGlobal("matchMedia", media(false));
   const view = (open: boolean) => <I18nProvider><button>開啟</button><Sidebar {...props} isOpen={open} /></I18nProvider>;
   const { rerender } = render(view(false));
   const open = screen.getByRole("button", { name: "開啟" }); act(() => open.focus());
@@ -66,7 +35,6 @@ it("uses a click drawer without hover on touch and restores focus on close", () 
 });
 
 it("moves keyboard focus into the mobile portal menu and returns it on Escape", () => {
-  vi.stubGlobal("matchMedia", media(false));
   render(<I18nProvider><Sidebar {...props} isOpen /></I18nProvider>);
   const trigger = screen.getByRole("button", { name: /對話選項.*合成測試/ });
   fireEvent.click(trigger);
@@ -82,7 +50,6 @@ it("moves keyboard focus into the mobile portal menu and returns it on Escape", 
 });
 
 it("lists only public emergency contacts", () => {
-  vi.stubGlobal("matchMedia", media(false));
   render(<I18nProvider><Sidebar {...props} isOpen /></I18nProvider>);
   fireEvent.click(screen.getByRole("button", { name: "緊急協助" }));
   const links = Array.from(document.querySelectorAll('a[href^="tel:"]'));

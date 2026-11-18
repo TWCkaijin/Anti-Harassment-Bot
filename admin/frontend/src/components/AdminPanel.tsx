@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   ApiError,
@@ -102,6 +102,7 @@ const tabs: Array<{ id: AdminTab; label: string; icon: string }> = [
 export default function AdminPanel({ session, onLogout, unlocked = true }: AdminPanelProps) {
   const verifiedCsrf = session.csrf_token;
   const [activeTab, setActiveTab] = useState<AdminTab>(() => window.location.hash === "#rerank" ? "rerank" : maskingLabEnabled && window.location.hash === "#masking" ? "masking" : "system");
+  const settingsScrollRef = useRef<HTMLDivElement>(null);
   const [rerankVisited, setRerankVisited] = useState(() => window.location.hash === "#rerank");
   const [corpusVisited, setCorpusVisited] = useState(false);
   const [testVisited, setTestVisited] = useState(false);
@@ -119,6 +120,12 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
   const [loadErrors, setLoadErrors] = useState<{ config?: string; skills?: string }>({});
   const [batchHasData, setBatchHasData] = useState(false);
   const [maskingVisited, setMaskingVisited] = useState(() => maskingLabEnabled && window.location.hash === "#masking");
+
+  useEffect(() => {
+    if (activeTab === "prompts" && settingsScrollRef.current) {
+      settingsScrollRef.current.scrollTop = 0;
+    }
+  }, [activeTab]);
 
   const selectedSkill = skills.find((skill) => skill.id === selectedSkillId) ?? null;
   const runtimeDirty = useMemo(() => {
@@ -421,6 +428,7 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
           </nav>
 
           <div
+            ref={settingsScrollRef}
             className={`min-w-0 min-h-0 flex-1 ${
               activeTab === "test" ? "overflow-hidden" : "overflow-y-auto p-6"
             }`}
@@ -441,6 +449,7 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
                 csrfToken={verifiedCsrf}
                 config={config}
                 savedMaintenanceMessage={lastLoadedConfig?.maintenance_message}
+                onOpenGatePrompts={() => setActiveTab("prompts")}
                 onChange={setConfig}
               />
             )}
@@ -566,12 +575,14 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
 function SystemSettings({
   config,
   savedMaintenanceMessage,
+  onOpenGatePrompts,
   onChange,
   csrfToken,
 }: {
   csrfToken: string;
   config: RuntimeConfig;
   savedMaintenanceMessage?: string;
+  onOpenGatePrompts: () => void;
   onChange: (config: RuntimeConfig) => void;
 }) {
   const set = (updates: Partial<RuntimeConfig>) => onChange({ ...config, ...updates });
@@ -676,20 +687,14 @@ function SystemSettings({
             className="input"
           />
         </Field>
-        <Field label="Gate 輸入審查提示詞（pre）">
-          <textarea
-            value={config.gate_prompt ?? ""}
-            onChange={(event) => set({ gate_prompt: event.target.value })}
-            className="input min-h-40 resize-y"
-          />
-        </Field>
-        <Field label="Gate 回覆審查提示詞（post）">
-          <textarea
-            value={config.gate_post_prompt ?? ""}
-            onChange={(event) => set({ gate_post_prompt: event.target.value })}
-            className="input min-h-40 resize-y"
-          />
-        </Field>
+        <button
+          type="button"
+          onClick={onOpenGatePrompts}
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-primary/20 px-3 text-sm font-medium text-primary hover:bg-primary/5 focus-visible:outline-2"
+        >
+          <MaterialIcon icon="edit_note" size={18} />
+          編輯內容審查提示詞
+        </button>
       </section>
 
       {maskingLabEnabled && <section aria-label="PII 模型版本" className="space-y-3 border-t border-outline/10 pt-6">
@@ -841,9 +846,41 @@ function PromptSettings({
       <div>
         <h3 className="text-xl font-bold">Prompt 設定</h3>
         <p className="mt-1 text-sm text-on-surface/60">
-          留空時使用程式內建 section；各環境分別儲存。
+          各環境分別儲存。主模型提示詞欄位留空時會使用內建內容。
         </p>
       </div>
+      <section aria-labelledby="gate-prompt-heading" className="space-y-4 rounded-xl border border-outline/20 bg-surface-container-low p-4">
+        <div>
+          <h4 id="gate-prompt-heading" className="font-bold">聊天內容審查（Gate）</h4>
+          <p className="mt-1 text-xs leading-relaxed text-on-surface/65">
+            Gate 啟用時會依這兩段提示詞審查。修改後按「儲存變更」，再到「本次診斷測試」確認判定。
+          </p>
+        </div>
+        <Field label="Gate 輸入審查提示詞（pre）">
+          <textarea
+            aria-describedby="gate-input-prompt-help"
+            value={config.gate_prompt ?? ""}
+            onChange={(event) => onChange({ ...config, gate_prompt: event.target.value })}
+            rows={6}
+            maxLength={20_000}
+            className="input resize-y leading-6"
+          />
+        </Field>
+        <p id="gate-input-prompt-help" className="text-xs text-on-surface/65">設定如何判斷使用者輸入，請填寫內容。</p>
+        <Field label="Gate 回覆審查提示詞（post）">
+          <textarea
+            aria-describedby="gate-reply-prompt-help"
+            value={config.gate_post_prompt ?? ""}
+            onChange={(event) => onChange({ ...config, gate_post_prompt: event.target.value })}
+            rows={8}
+            maxLength={20_000}
+            className="input resize-y leading-6"
+          />
+        </Field>
+        <p id="gate-reply-prompt-help" className="text-xs text-on-surface/65">設定如何審查主模型產生的回覆，請填寫內容。</p>
+      </section>
+
+      <h4 className="border-t border-outline/10 pt-5 font-bold">主模型提示詞</h4>
       {PROMPT_SECTION_FIELDS.map(([key, label, rows]) => (
         <Field key={key} label={label}>
           <textarea

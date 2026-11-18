@@ -23,6 +23,8 @@ interface ChatAreaProps {
   retryStatus?: string | null;
   onSend: (message: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext) => SendOutcome;
   onOpenSidebar: () => void;
+  sidebarExpanded?: boolean;
+  sidebarModalOpen?: boolean;
   onStop: () => void;
   caseFacts?: CaseContext;
   pendingFacts?: FactUpdate[];
@@ -46,6 +48,8 @@ export default function ChatArea({
   retryStatus,
   onSend,
   onOpenSidebar,
+  sidebarExpanded = false,
+  sidebarModalOpen = false,
   onStop,
   showReasoning = false,
     caseFacts, onSaveCaseFacts, backendConnected, contractVersion, onReconnect, storageIssue, showEmotions = false, incompatibleSummary = false, summaryRequiresConnection = false, canRegenerate = false, allowImageUpload = true, onClarificationDraftChange,
@@ -88,22 +92,25 @@ export default function ChatArea({
       : undefined;
 
   return (
-    <main className="flex-1 flex flex-col h-full min-h-0 relative bg-white lg:bg-transparent min-w-0">
+    <main inert={sidebarModalOpen} className="flex-1 flex flex-col h-full min-h-0 relative bg-white lg:bg-transparent min-w-0">
       {/* 頂部導航列 */}
-      <header className={`flex items-center justify-between border-b border-outline/10 bg-white shrink-0 ${hasMessages ? "px-3 lg:px-6 py-1" : "px-6 lg:px-10 py-6"}`}>
-        <div className="flex items-center gap-4 min-w-0">
-          {/* 漢堡按鈕（行動端） */}
+      <header className="flex min-h-16 shrink-0 items-center justify-between gap-2 border-b border-outline/10 bg-white px-3 sm:px-6">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button
             data-sidebar-trigger
+            type="button"
             onClick={onOpenSidebar}
-            className="flex h-11 w-11 items-center justify-center rounded-xl hover:bg-surface-container-high transition-colors cursor-pointer shrink-0"
-            aria-label={t.openSidebar}
+            className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-on-surface/70 transition-colors hover:bg-surface-container-high focus-visible:outline-2 focus-visible:outline-primary"
+            aria-controls="conversation-sidebar"
+            aria-expanded={sidebarExpanded}
+            aria-label={sidebarExpanded ? t.closeSidebar : t.openSidebar}
+            title={sidebarExpanded ? t.closeSidebar : t.openSidebar}
           >
-            <MaterialIcon icon="menu" size={24} className="text-on-surface/70" />
+            <MaterialIcon icon="side_navigation" size={23} />
           </button>
           {!summaryMessageId && caseFacts && onSaveCaseFacts && hasCaseContext(caseFacts) && <button data-summary-trigger type="button" aria-label={t.caseSummaryOpen} title={t.caseSummaryOpen} onClick={() => setSummaryOpen(true)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-on-surface/60 hover:bg-primary/10"><MaterialIcon icon="description" size={17} /></button>}
 
-          {!hasMessages && <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`flex min-w-0 items-center gap-2.5 ${sidebarExpanded ? "lg:hidden" : ""}`}>
             <BrandMark size={32} className="lg:hidden" />
             <div className="space-y-1 min-w-0">
               <h2 className="text-base lg:text-lg font-bold text-on-surface truncate">
@@ -113,7 +120,7 @@ export default function ChatArea({
                 <span className="truncate">{t.appSubtitle}</span>
               </div>
             </div>
-          </div>}
+          </div>
         </div>
 
         {/* 連線狀態指示 */}
@@ -138,7 +145,7 @@ export default function ChatArea({
                   : "bg-green-500"
               }`}
             ></span>
-            <span className="hidden sm:inline">
+            <span className="sr-only sm:not-sr-only">
               {isLoading
                 ? t.statusProcessing
                 : connected === false
@@ -159,7 +166,7 @@ export default function ChatArea({
       {/* 訊息區域 */}
       <section className="min-h-0 flex-1 overflow-y-auto chat-scrollbar hero-mesh-gradient flex flex-col">
         {hasMessages ? (
-          <div className="w-full px-3 sm:px-6 lg:px-10 py-6 space-y-8">
+          <div className="chat-column py-6 space-y-6">
             {messages.map((msg) => (
               <MessageItem key={msg.id} message={msg} showEmotions={showEmotions} showReasoning={showReasoning} streamingStatus={msg.isStreaming ? retryStatus : undefined} onOpenSummary={caseFacts && onSaveCaseFacts && msg.id === summaryMessageId ? () => setSummaryOpen(true) : undefined} />
             ))}

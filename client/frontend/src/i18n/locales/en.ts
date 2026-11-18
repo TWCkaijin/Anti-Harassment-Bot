@@ -54,6 +54,8 @@ const en = {
   summaryConnectionFailed: "The service could not be reached. Select Reconnect before continuing this conversation. Your summary remains on this device.",
   statusProcessing: "Processing",
   openSidebar: "Open sidebar",
+  closeSidebar: "Collapse sidebar",
+  conversationSidebar: "Conversation history",
 
   // ── ChatInput ──
   inputPlaceholder: "Describe your situation or ask a question…",

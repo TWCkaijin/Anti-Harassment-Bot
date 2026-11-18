@@ -274,3 +274,9 @@ body {
   background: var(--color-primary-container);
   font-weight: 800;
 }
+
+/* Keep the welcome composer, message stream, and reply composer on one grid. */
+.chat-column {
+  width: min(calc(100% - 2 * clamp(1rem, 3vw, 2rem)), 56rem);
+  margin-inline: auto;
+}
