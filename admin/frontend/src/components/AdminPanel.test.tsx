@@ -206,17 +206,19 @@ describe("AdminPanel runtime config", () => {
     }));
     await openSystemSettings();
     fireEvent.click(screen.getByRole("checkbox", { name: "啟用聊天內容審查" }));
-    fireEvent.change(screen.getByLabelText("Gate OpenRouter Model"), { target: { value: "synthetic/gate-b" } });
+    fireEvent.click(screen.getByRole("button", { name: "選用 Jev 1.14" }));
     fireEvent.change(screen.getByLabelText("Gate 逾時（秒）"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "編輯內容審查提示詞" }));
     expect(screen.getByLabelText("Gate 輸入審查提示詞（pre）")).toHaveValue("只接受相關求助。");
     expect(screen.getByLabelText("Gate 回覆審查提示詞（post）")).toHaveValue("只接受相關回覆。");
+    fireEvent.change(screen.getByLabelText("Jev 判定門檻"), { target: { value: "0.85" } });
     fireEvent.change(screen.getByLabelText("Gate 輸入審查提示詞（pre）"), { target: { value: "審查合成測試輸入。" } });
     fireEvent.change(screen.getByLabelText("Gate 回覆審查提示詞（post）"), { target: { value: "審查合成測試回覆。" } });
     fireEvent.click(screen.getByRole("button", { name: "儲存變更" }));
     await waitFor(() => expect(updateRuntimeConfig).toHaveBeenCalledWith("admin-token", expect.objectContaining({
       gate_enabled: true,
-      gate_model: "synthetic/gate-b",
+      gate_model: "typesafe/jev-1.14-20261014",
+      gate_jev_threshold: 0.85,
       gate_prompt: "審查合成測試輸入。",
       gate_post_prompt: "審查合成測試回覆。",
       gate_timeout_seconds: 12,

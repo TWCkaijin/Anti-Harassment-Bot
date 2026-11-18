@@ -122,7 +122,30 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
     message.ragUsed.retrieval.data_types.length > 0
   );
   const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
-  const citedSources = React.useMemo(() => (message.ragUsed?.sources ?? []).map(normalizeSource), [message.ragUsed?.sources]);
+  const retrieval = message.ragUsed?.retrieval;
+  const listedSources = retrieval?.status === "ok"
+    ? retrieval.sources.map(normalizeSource).filter(source =>
+      retrieval.data_types.some(type => type === source.type))
+    : [];
+  const citations = (message.ragUsed?.sources ?? []).map(normalizeSource);
+  const citationLabel = (label: string) => label.normalize("NFKC").replace(/\s/g, "");
+  const sameSource = (source: RagSource, citation: RagSource) =>
+    source.type === citation.type && (
+      (citation.doc_id && source.doc_id === citation.doc_id &&
+        (!source.collection || !citation.collection || source.collection === citation.collection)) ||
+      citationLabel(source.label) === citationLabel(citation.label)
+    );
+  const citedSources = citations.filter(citation => !listedSources.some(source => sameSource(source, citation)));
+  const retrievalWithCitationLinks = retrieval?.status === "ok" ? {
+    ...retrieval,
+    sources: retrieval.sources.map(item => {
+      const source = normalizeSource(item);
+      if (source.source_url && /^https?:\/\//i.test(source.source_url)) return item;
+      const citation = citations.find(candidate => sameSource(source, candidate) &&
+        officialCitationUrl(candidate.source_url));
+      return citation ? { ...source, source_url: citation.source_url } : item;
+    }),
+  } : retrieval;
   const sourceGroups = React.useMemo(() => {
     const sources = message.ragUsed?.sources ?? [];
     const groups = new Map<RagSourceType, RagSource[]>();
@@ -297,7 +320,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
                 </ul>
               </section>
             )}
-            {hasRetrieval ? <RetrievalSources retrieval={message.ragUsed?.retrieval} /> : (
+            {hasRetrieval ? <RetrievalSources retrieval={retrievalWithCitationLinks} /> : (
               message.ragUsed?.status && sourceGroups.length > 0 && (
                 <div className="min-w-0 space-y-2">
                   <p className="text-xs font-semibold text-on-surface/65">{sourceLabel}</p>

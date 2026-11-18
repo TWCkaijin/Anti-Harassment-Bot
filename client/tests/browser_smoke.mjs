@@ -29,12 +29,19 @@ try {
       const item = JSON.parse(localStorage.getItem(key) || '[]').find(s => s.messages.length);
       return item?.messages.filter(m => m.role === 'assistant' && !m.isStreaming && !m.isError && !m.isCancelled).length >= count;
     }, { key: storageKey, count });
+    const confirmReviewedContent = async (previousCount) => {
+      const confirm = page.getByRole('button', { name: '確認並送出', exact: true });
+      await confirm.waitFor();
+      assert.equal(requests.length, previousCount, 'Chat must wait for privacy confirmation');
+      await confirm.click();
+      await confirm.waitFor({ state: 'hidden' });
+    };
     try {
       await page.goto(base); await page.getByText('已連線', { exact: true }).waitFor({ state: 'attached' });
       await page.locator('main textarea').fill('我在公司遇到不舒服的訊息，我想知道如何申訴。synthetic@example.test');
       await page.getByRole('button', { name: '傳送訊息', exact: true }).click();
+      await confirmReviewedContent(0);
       await completed(1);
-      assert.equal(await page.getByRole('dialog', { name: '確認即將送出的內容', exact: true }).count(), 0);
       assert.equal(requests.length, 1); assert.equal(requests[0].contract_version, 4);
       assert(requests[0].message.includes('[電子郵件]'));
       assert.equal((await session()).caseFacts.schema_version, 3);
@@ -48,6 +55,7 @@ try {
       await page.getByRole('button', { name: '修改摘要', exact: true }).click();
       await page.getByRole('textbox', { name: '已知情境', exact: true }).fill('對方是顧客，我想依更正的情況重新整理。');
       await page.getByRole('button', { name: '儲存並重新回答', exact: true }).click();
+      await confirmReviewedContent(1);
       await completed(2);
       assert.equal(requests.length, 2);
       assert.equal(requests[1].regenerate_from_summary, true);
@@ -55,13 +63,14 @@ try {
       assert(requests[1].case_context.summary.includes('顧客'));
       await page.locator('main textarea').fill('補充訊息：請聯絡 followup@example.test');
       await page.getByRole('button', { name: '傳送訊息', exact: true }).click();
+      await confirmReviewedContent(2);
       await completed(3);
       assert.equal(requests.length, 3);
       assert(!outbound.join('\n').match(/synthetic@example\.test|followup@example\.test/));
       const saved = await session();
       assert(!JSON.stringify(saved).match(/synthetic@example\.test|followup@example\.test/));
       await page.reload(); await page.getByText('已連線', { exact: true }).waitFor({ state: 'attached' });
-      if (mobile) await page.getByRole('button', { name: '開啟側邊欄', exact: true }).click();
+      await page.getByRole('button', { name: mobile ? '開啟側邊欄' : '固定側邊欄', exact: true }).click();
       await page.locator('aside p.truncate').first().click();
       await page.locator('[data-summary-trigger]').click();
       await page.getByText('對方是顧客，我想依更正的情況重新整理。', { exact: true }).waitFor();
@@ -77,7 +86,7 @@ try {
       assert(!exported.match(/synthetic@example\.test|followup@example\.test/));
       await page.screenshot({ path: path.join(output, `${mobile ? 'mobile' : 'desktop'}-automatic.png`), fullPage: true });
       assert.deepEqual(errors, []);
-      checks.push({ viewport: mobile ? 'mobile' : 'desktop', status: 'passed', chat_requests: requests.length, checks: ['v4', 'first-and-subsequent-auto-send', 'masked-network-and-storage', 'summary-save-without-call', 'summary-regeneration', 'reload', 'export', 'no-page-errors'] });
+      checks.push({ viewport: mobile ? 'mobile' : 'desktop', status: 'passed', chat_requests: requests.length, checks: ['v4', 'privacy-confirmed-send', 'masked-network-and-storage', 'summary-save-without-call', 'summary-regeneration', 'reload', 'export', 'no-page-errors'] });
     } catch (error) {
       await page.screenshot({ path: path.join(output, `${mobile ? 'mobile' : 'desktop'}-failure.png`), fullPage: true }).catch(() => {});
       throw error;

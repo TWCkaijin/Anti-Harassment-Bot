@@ -1,8 +1,10 @@
 """Gate and refusal model calls have separate tool-free contracts."""
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from rag_core.agents import gate_agent, refusal_agent
@@ -136,3 +138,70 @@ async def test_invalid_gate_or_refusal_output_fails_closed(monkeypatch, invalid)
         monkeypatch.setattr(refusal_agent, "AsyncOpenAI", fake_client(calls, invalid))
         with pytest.raises(ValueError):
             await RefusalAgent().run(reason_code="technical_implementation", runtime_config=CONFIG)
+
+
+@pytest.mark.parametrize(
+    ("stage", "choice", "score", "threshold", "expected"),
+    [
+        ("pre", "allowed", 0.8, 0.8, "allow"),
+        ("post", "technical_implementation", 0.9, 0.8, "deny"),
+        ("post", "allowed", 0.69, 0.7, None),
+    ],
+)
+async def test_jev_decisions_routes_and_enforces_threshold(
+    monkeypatch, stage, choice, score, threshold, expected
+):
+    client_type = httpx.AsyncClient
+
+    def decisions(request):
+        assert request.url == httpx.URL("https://openrouter.ai/api/alpha/decisions")
+        assert request.headers["authorization"] == "Bearer synthetic-key"
+        body = json.loads(request.content)
+        assert body["model"] == "typesafe/jev-1.14-20261014"
+        assert f"independent {stage} policy" in body["questions"]["review"]["instructions"]
+        state = json.loads(body["state"])
+        assert state["stage"] == stage
+        assert set(state) == (
+            {"stage", "candidate"}
+            if stage == "post"
+            else {"stage", "current_message", "history", "case_context"}
+        )
+        probabilities = {
+            code: score if code == choice else (1 - score) / 2
+            for code in body["questions"]["review"]["criteria"]
+        }
+        return httpx.Response(
+            200,
+            json={
+                "answers": {
+                    "review": {"type": "choice", "choice": choice, "probabilities": probabilities}
+                }
+            },
+        )
+
+    monkeypatch.setattr(
+        gate_agent, "get_settings", lambda: SimpleNamespace(openrouter_api_key="synthetic-key")
+    )
+    monkeypatch.setattr(
+        gate_agent.httpx,
+        "AsyncClient",
+        lambda **kwargs: client_type(transport=httpx.MockTransport(decisions), **kwargs),
+    )
+    config = replace(CONFIG, gate_model="typesafe/jev-1.14-20261014", gate_jev_threshold=threshold)
+    call = GateAgent().run(
+        stage=stage,
+        user_message="masked synthetic question",
+        history=[],
+        case_context={},
+        candidate={"reply": "masked synthetic reply"} if stage == "post" else None,
+        runtime_config=config,
+    )
+    if expected is None:
+        with pytest.raises(gate_agent.GateBelowThreshold) as error:
+            await call
+        assert error.value.probability == score
+    else:
+        result = await call
+        assert result.decision == expected
+        assert result.reason_code == choice
+        assert result.probability == score

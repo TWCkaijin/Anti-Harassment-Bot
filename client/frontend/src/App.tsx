@@ -3,9 +3,11 @@
  * 整合 Sidebar + ChatArea + EmergencyFab + SettingsPanel，
  * 使用 useConversation hook 管理所有狀態。
  */
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useConversation } from "./hooks/useConversation";
 import Sidebar from "./components/Sidebar";
+import MaterialIcon from "./components/MaterialIcon";
+import { useI18n } from "./i18n";
 import ChatArea from "./components/ChatArea";
 import SettingsPanel from "./components/SettingsPanel";
 import PrivacyReviewDialog from "./components/PrivacyReviewDialog";
@@ -13,7 +15,10 @@ import { useEmotionPreference } from "./hooks/useEmotionPreference";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { t } = useI18n();
+  const [sidebarPinned, setSidebarPinned] = useState(false);
+  const [sidebarPeek, setSidebarPeek] = useState(false);
+  const peekTimer = useRef<number | undefined>(undefined);
   const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
 
   useEffect(() => {
@@ -21,9 +26,14 @@ export default function App() {
     const update = () => {
       setDesktop(media.matches);
       setSidebarOpen(false);
+      window.clearTimeout(peekTimer.current);
+      setSidebarPeek(false);
     };
     media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+    return () => {
+      media.removeEventListener("change", update);
+      window.clearTimeout(peekTimer.current);
+    };
   }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { showEmotions, updateShowEmotions, preferenceSaveFailed } = useEmotionPreference();
@@ -44,23 +54,72 @@ export default function App() {
     caseFacts, pendingFacts, saveCaseFacts, contractV2, contractVersion, clientSettings, saveClarificationDraft, isBackendConnected, reconnectBackend, storageIssue, incompatibleSummary, summaryRequiresConnection, canRegenerate, privacyReview, confirmPrivacyReview, cancelPrivacyReview,
   } = useConversation();
 
-  const handleOpenSettings = useCallback(() => {
-    setSettingsOpen(true);
+  const closeSidebar = useCallback(() => {
+    window.clearTimeout(peekTimer.current);
+    setSidebarPeek(false);
     setSidebarOpen(false);
   }, []);
-
+  const unpinSidebar = () => {
+    closeSidebar();
+    setSidebarPinned(false);
+  };
+  const beginPeek = (pointerType: string) => {
+    if (pointerType !== "mouse") return;
+    window.clearTimeout(peekTimer.current);
+    if (!sidebarPinned) setSidebarPeek(true);
+  };
+  const endPeek = () => {
+    window.clearTimeout(peekTimer.current);
+    peekTimer.current = window.setTimeout(() => {
+      if (!document.querySelector("#conversation-sidebar :focus-visible")) setSidebarPeek(false);
+    }, 160);
+  };
+  const handleOpenSettings = useCallback(() => {
+    closeSidebar();
+    setSettingsOpen(true);
+  }, [closeSidebar]);
 
   return (
     <div className="flex w-full h-dvh bg-background overflow-hidden">
+      {desktop && (
+        <div className="relative z-[55] flex w-14 shrink-0 justify-center border-r border-neutral-300 bg-neutral-50 pt-2.5">
+          <button
+            type="button"
+            data-sidebar-trigger
+            aria-label={sidebarPinned ? t.unpinSidebar : t.pinSidebar}
+            aria-expanded={sidebarPinned || sidebarPeek}
+            aria-controls="conversation-sidebar"
+            aria-pressed={sidebarPinned}
+            title={sidebarPinned ? t.unpinSidebar : t.pinSidebar}
+            onPointerEnter={event => beginPeek(event.pointerType)}
+            onPointerLeave={endPeek}
+            onClick={event => {
+              if (event.detail > 1) return;
+              if (sidebarPinned) unpinSidebar();
+              else {
+                closeSidebar();
+                setSidebarPinned(true);
+              }
+            }}
+            onDoubleClick={unpinSidebar}
+            className={`flex h-11 w-11 items-center justify-center rounded-xl border text-on-surface/75 transition-colors hover:bg-neutral-200 focus-visible:outline-2 focus-visible:outline-primary ${sidebarPinned ? "border-neutral-400 bg-neutral-200" : "border-neutral-300 bg-white"}`}
+          >
+            <MaterialIcon icon={sidebarPinned ? "keep" : "side_navigation"} size={22} />
+          </button>
+        </div>
+      )}
       {/* 側邊欄 */}
       <Sidebar
         sessions={sessions}
         currentSessionId={currentSessionId}
         isOpen={sidebarOpen}
         isDesktop={desktop}
-        isCollapsed={sidebarCollapsed}
-        onClose={() => setSidebarOpen(false)}
-        onCollapse={() => setSidebarCollapsed(true)}
+        isCollapsed={!sidebarPinned}
+        isPeeking={desktop && sidebarPeek}
+        onPeekEnter={beginPeek}
+        onPeekLeave={endPeek}
+        onClose={closeSidebar}
+        onCollapse={unpinSidebar}
         onSelectSession={setCurrentSessionId}
         onNewSession={createNewSession}
         onDeleteSession={deleteSession}
@@ -90,12 +149,10 @@ export default function App() {
           canRegenerate={canRegenerate}
           allowImageUpload={false}
         onSend={sendMessage}
-        sidebarExpanded={desktop ? !sidebarCollapsed : sidebarOpen}
+        sidebarExpanded={desktop ? sidebarPinned : sidebarOpen}
         sidebarModalOpen={!desktop && sidebarOpen}
-        onOpenSidebar={() => {
-          if (desktop) setSidebarCollapsed(collapsed => !collapsed);
-          else setSidebarOpen(true);
-        }}
+        showSidebarTrigger={!desktop}
+        onOpenSidebar={() => setSidebarOpen(true)}
       />
 
 

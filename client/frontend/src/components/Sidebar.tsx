@@ -18,6 +18,9 @@ interface SidebarProps {
   isOpen: boolean;
   isDesktop: boolean;
   isCollapsed: boolean;
+  isPeeking?: boolean;
+  onPeekEnter?: (pointerType: string) => void;
+  onPeekLeave?: () => void;
   onClose: () => void;
   onCollapse: () => void;
   onSelectSession: (id: string) => void;
@@ -60,6 +63,9 @@ export default function Sidebar({
   isOpen,
   isDesktop,
   isCollapsed,
+  isPeeking = false,
+  onPeekEnter,
+  onPeekLeave,
   onClose,
   onCollapse,
   onSelectSession,
@@ -89,11 +95,15 @@ export default function Sidebar({
       target?.focus();
     };
   }, [isOpen, isDesktop]);
-  const visible = isDesktop ? !isCollapsed : isOpen;
+  const visible = isDesktop ? !isCollapsed || isPeeking || Boolean(menuOpenId) : isOpen;
   const close = onClose;
   const placement = isDesktop
-    ? visible ? "relative flex w-72 shrink-0" : "hidden"
-    : "fixed inset-y-0 left-0 flex w-[min(20rem,calc(100vw-3rem))] shadow-xl motion-safe:transition-transform";
+    ? !isCollapsed
+      ? "relative flex w-72 shrink-0 border-r border-neutral-300"
+      : visible
+        ? "fixed inset-y-2 left-14 flex w-72 rounded-2xl border border-neutral-300 shadow-xl"
+        : "hidden"
+    : "fixed inset-y-0 left-0 flex w-[min(20rem,calc(100vw-3rem))] border-r border-neutral-300 shadow-xl motion-safe:transition-transform";
   const drawerPosition = !isDesktop && !visible ? "-translate-x-full invisible" : "";
 
   useEffect(() => {
@@ -150,6 +160,11 @@ export default function Sidebar({
         aria-modal={!isDesktop && isOpen && !menuOpenId ? true : undefined}
         role={!isDesktop && isOpen ? "dialog" : "complementary"}
         inert={!visible}
+        onPointerEnter={event => { if (isDesktop) onPeekEnter?.(event.pointerType); }}
+        onPointerLeave={() => { if (isDesktop) onPeekLeave?.(); }}
+        onBlur={event => {
+          if (isDesktop && !event.currentTarget.contains(event.relatedTarget)) onPeekLeave?.();
+        }}
         onKeyDown={event => {
           if (event.key === "Escape") { event.stopPropagation(); setMenuOpenId(null); setEditingId(null); setIsEmergencyMenuOpen(false); if (isDesktop) { onCollapse(); document.querySelector<HTMLButtonElement>("[data-sidebar-trigger]")?.focus(); } else close(); }
           if (isDesktop || event.key !== "Tab") return;
@@ -158,7 +173,7 @@ export default function Sidebar({
           if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
           else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
         }}
-        className={`${placement} ${drawerPosition} z-50 flex-col gap-4 border-r border-outline/20 bg-white p-4`}
+        className={`${placement} ${drawerPosition} z-50 flex-col gap-4 bg-white p-4`}
       >
         <div className="flex min-h-0 flex-1 flex-col gap-4">
         {/* 頂部 Logo */}

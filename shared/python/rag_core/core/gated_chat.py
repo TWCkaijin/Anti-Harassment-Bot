@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from time import monotonic
 from typing import Any
 
+from rag_core.agents.gate_agent import GateBelowThreshold, JevGateDecision
 from rag_core.core.anonymizer import anonymize
 from rag_core.core.gate_policy import FIXED_SHORT_REFUSALS
 from rag_core.core.logger import get_logger
@@ -153,15 +154,20 @@ async def run_gated_chat(
         outcome = "error"
         failure = None
         reason_code = None
+        probability = None
         try:
             async with asyncio.timeout(runtime_config.gate_timeout_seconds):
                 decision = await gate.run(stage=stage, **gate_input, candidate=candidate)
             outcome = decision.decision
             reason_code = decision.reason_code
+            if isinstance(decision, JevGateDecision):
+                probability = decision.probability
             return decision
         except Exception as exc:
             # Upstream errors can contain private request data. Log only its type.
             failure = type(exc).__name__
+            if isinstance(exc, GateBelowThreshold):
+                probability = exc.probability
             raise GateUnavailableError(f"{stage} review unavailable") from None
         finally:
             summary = {
@@ -175,6 +181,9 @@ async def run_gated_chat(
                 "model": runtime_config.gate_model,
                 "failure_type": failure,
             }
+            if probability is not None:
+                summary["probability"] = probability
+                summary["threshold"] = runtime_config.gate_jev_threshold
             if local_replacement_reason is not None:
                 summary["local_replacement_reason"] = local_replacement_reason
             if review_trace is not None:

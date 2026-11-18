@@ -54,6 +54,8 @@ const zhTW = {
   summaryConnectionFailed: "無法連線到服務，請先按「重新連線」再繼續這段對話。情境摘要仍保留在此裝置。",
   statusProcessing: "處理中",
   openSidebar: "開啟側邊欄",
+  pinSidebar: "固定側邊欄",
+  unpinSidebar: "取消固定側邊欄（可雙擊）",
   closeSidebar: "收起側邊欄",
   conversationSidebar: "對話紀錄",
 

@@ -33,6 +33,7 @@ AGENT_PROMPT_SECTIONS = (
     "analysis_rules",
     "retrieval_instructions",
 )
+DEFAULT_GATE_JEV_THRESHOLD = 0.7
 PROMPT_MAX_LENGTH = 20000
 FIRESTORE_READ_TIMEOUT_SECONDS = 5.0
 # This rollout has no image PII boundary. Keep stored settings readable, but
@@ -53,6 +54,7 @@ WRITABLE_FIELDS = {
     "gate_prompt",
     "gate_post_prompt",
     "gate_timeout_seconds",
+    "gate_jev_threshold",
     "pii_model_revision",
     *RERANK_FIELDS,
     "openrouter_model",
@@ -89,6 +91,7 @@ class RuntimeConfig:
     gate_prompt: str = DEFAULT_GATE_PROMPT
     gate_post_prompt: str = DEFAULT_GATE_POST_PROMPT
     gate_timeout_seconds: float = 10.0
+    gate_jev_threshold: float = DEFAULT_GATE_JEV_THRESHOLD
     pii_model_revision: str = ""
     openrouter_provider_sort: str = "auto"
     rag_rerank_enabled: bool = False
@@ -266,7 +269,13 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
         validated.get("gate_enabled", False)
         and bool(
             invalid_fields
-            & {"gate_model", "gate_prompt", "gate_post_prompt", "gate_timeout_seconds"}
+            & {
+                "gate_model",
+                "gate_prompt",
+                "gate_post_prompt",
+                "gate_timeout_seconds",
+                "gate_jev_threshold",
+            }
         )
     )
 
@@ -289,6 +298,7 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
         gate_prompt=validated.get("gate_prompt", DEFAULT_GATE_PROMPT),
         gate_post_prompt=validated.get("gate_post_prompt", DEFAULT_GATE_POST_PROMPT),
         gate_timeout_seconds=validated.get("gate_timeout_seconds", 10.0),
+        gate_jev_threshold=validated.get("gate_jev_threshold", DEFAULT_GATE_JEV_THRESHOLD),
         pii_model_revision=validated.get("pii_model_revision", ""),
         **{key: validated.get(key, getattr(settings, key)) for key in RERANK_FIELDS},
         openrouter_model=validated.get("openrouter_model", settings.openrouter_model),
@@ -483,6 +493,14 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
             if key in {"gate_prompt", "gate_post_prompt"} and len(normalized) > PROMPT_MAX_LENGTH:
                 raise ValueError(f"{key} must be at most {PROMPT_MAX_LENGTH} characters")
             cleaned[key] = normalized
+        elif key == "gate_jev_threshold":
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not 0.5 <= value <= 1
+            ):
+                raise ValueError("gate_jev_threshold must be between 0.5 and 1")
+            cleaned[key] = float(value)
         elif key == "gate_timeout_seconds":
             if (
                 isinstance(value, bool)
@@ -567,6 +585,7 @@ def _default_runtime_document() -> dict[str, Any]:
         "gate_prompt": DEFAULT_GATE_PROMPT,
         "gate_post_prompt": DEFAULT_GATE_POST_PROMPT,
         "gate_timeout_seconds": 10.0,
+        "gate_jev_threshold": DEFAULT_GATE_JEV_THRESHOLD,
         "pii_model_revision": "",
         **{key: getattr(settings, key) for key in RERANK_FIELDS},
         "openrouter_model": settings.openrouter_model,

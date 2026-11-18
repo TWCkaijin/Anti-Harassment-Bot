@@ -201,6 +201,11 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
 
   const saveRuntime = async () => {
     if (!verifiedCsrf || !lastLoadedConfig || isLoading) return;
+    const threshold = config.gate_jev_threshold;
+    if (threshold !== undefined && !(threshold >= 0.5 && threshold <= 1)) {
+      setError("Jev 判定門檻必須介於 0.50 與 1.00。");
+      return;
+    }
     setIsSaving(true);
     setError("");
     try {
@@ -676,6 +681,13 @@ function SystemSettings({
             className="input"
           />
         </Field>
+        <button
+          type="button"
+          onClick={() => set({ gate_model: "typesafe/jev-1.14-20261014" })}
+          className="rounded-md border border-outline/25 px-3 py-2 text-sm text-primary hover:bg-primary/5"
+        >
+          選用 Jev 1.14
+        </button>
         <Field label="Gate 逾時（秒）">
           <input
             type="number"
@@ -856,6 +868,21 @@ function PromptSettings({
             Gate 啟用時會依這兩段提示詞審查。修改後按「儲存變更」，再到「本次診斷測試」確認判定。
           </p>
         </div>
+        <Field label="Jev 判定門檻">
+          <input
+            type="number"
+            min={0.5}
+            max={1}
+            step={0.01}
+            value={Number.isNaN(config.gate_jev_threshold) ? "" : config.gate_jev_threshold ?? 0.7}
+            onChange={(event) => onChange({ ...config, gate_jev_threshold: event.target.valueAsNumber })}
+            aria-describedby="gate-jev-threshold-help"
+            className="input max-w-40"
+          />
+        </Field>
+        <p id="gate-jev-threshold-help" className="text-xs leading-relaxed text-on-surface/65">
+          Jev 的輸入與回覆審查共用此門檻。最高選項機率低於門檻時，系統會請使用者重試。
+        </p>
         <Field label="Gate 輸入審查提示詞（pre）">
           <textarea
             aria-describedby="gate-input-prompt-help"

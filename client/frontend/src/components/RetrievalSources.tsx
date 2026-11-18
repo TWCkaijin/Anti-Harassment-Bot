@@ -11,18 +11,18 @@ export default function RetrievalSources({ retrieval }: { retrieval?: RagInfo["r
     <div className="flex flex-wrap items-start gap-2">
       {retrieval.data_types.map(type => {
         const sources = retrieval.sources.filter(source => typeof source === "string" ? type === "law" : source.type === type);
-        return <details key={type} className="group min-w-0 max-w-full rounded-xl border border-primary/15 bg-primary/5 text-xs">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 font-semibold text-primary [&::-webkit-details-marker]:hidden">
+        return <details key={type} className="group min-w-0 max-w-full overflow-hidden rounded-2xl border border-outline/25 bg-white text-xs open:w-full">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3 font-semibold text-primary focus-visible:outline-2 focus-visible:-outline-offset-2 [&::-webkit-details-marker]:hidden">
             <MaterialIcon icon={type === "law" ? "menu_book" : type === "judgment" ? "gavel" : "support_agent"} size={14} />
             <span>{t.retrievalCompleted}{labels[type]}</span>
             <span className="tabular-nums opacity-70">{sources.length}</span>
-            <span className="transition-transform duration-200 group-open:rotate-180">
+            <span className="ml-auto transition-transform duration-200 group-open:rotate-180">
               <MaterialIcon icon="expand_more" size={14} />
             </span>
           </summary>
-          {sources.length ? <ul className="max-h-52 space-y-2 overflow-y-auto border-t border-primary/10 p-3">
-            {sources.map((source, index) => <li key={index} className="break-words leading-relaxed rounded-md bg-white p-2.5 shadow-xs border border-primary/10">
-              <span className="font-semibold text-on-surface">{typeof source === "string" ? source : source.label}</span>
+          {sources.length ? <ul className="max-h-72 space-y-3 overflow-y-auto overscroll-contain border-t border-outline/15 bg-surface-container-low px-4 py-4 sm:px-5">
+            {sources.map((source, index) => <li key={index} className="min-w-0 break-words rounded-xl border border-outline/20 bg-white px-4 py-3 leading-relaxed">
+              <span className="block text-sm font-semibold text-on-surface">{typeof source === "string" ? source : source.label}</span>
               {typeof source !== "string" && <>
                 {source.article && <p className="mt-1 whitespace-pre-wrap text-on-surface/80">{source.article}</p>}
                 {source.version && <p className="mt-1 text-[11px] text-on-surface/60">{source.version}</p>}

@@ -21,6 +21,7 @@ export function configToUpdate(config: RuntimeConfig): RuntimeConfigUpdate & { r
     gate_model: config.gate_model ?? config.openrouter_model,
     gate_prompt: config.gate_prompt,
     gate_post_prompt: config.gate_post_prompt,
+    gate_jev_threshold: config.gate_jev_threshold,
     gate_timeout_seconds: config.gate_timeout_seconds ?? 10,
     pii_model_revision: config.pii_model_revision ?? "",
     pipeline: { ...DEFAULT_PIPELINE, ...config.pipeline },
