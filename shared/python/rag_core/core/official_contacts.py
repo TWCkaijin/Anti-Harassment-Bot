@@ -65,18 +65,19 @@ def _named_contacts(text: str, *, match_short_codes=True) -> list[OfficialContac
             if match:
                 matches.append((match.start(), match.end(), entry))
     # Prefer the specific unit when its name contains its parent (e.g. 市政府勞工局).
-    return list(dict.fromkeys(
-        entry
-        for start, end, entry in matches
-        if not any(
-            other_start <= start and other_end >= end and other_end - other_start > end - start
-            for other_start, other_end, _ in matches
+    return list(
+        dict.fromkeys(
+            entry
+            for start, end, entry in matches
+            if not any(
+                other_start <= start and other_end >= end and other_end - other_start > end - start
+                for other_start, other_end, _ in matches
+            )
+            and not (
+                text[start:end] in {"高雄市政府", "高雄市府"} and _AGENCY_DETAIL.match(text[end:])
+            )
         )
-        and not (
-            text[start:end] in {"高雄市政府", "高雄市府"}
-            and _AGENCY_DETAIL.match(text[end:])
-        )
-    ))
+    )
 
 
 def _contact_only_request(text: str) -> bool:
@@ -88,7 +89,9 @@ def _contact_only_request(text: str) -> bool:
     )
 
 
-def official_contact_reply(message: str, history: list[dict] | None) -> tuple[str, list[dict]] | None:
+def official_contact_reply(
+    message: str, history: list[dict] | None
+) -> tuple[str, list[dict]] | None:
     """Resolve direct requests and phone corrections without using user-supplied digits."""
     message = unicodedata.normalize("NFKC", message)
     has_topic = bool(_CONTACT.search(message))
@@ -100,11 +103,17 @@ def official_contact_reply(message: str, history: list[dict] | None) -> tuple[st
     )
     entries = (
         _named_contacts(message, match_short_codes=not is_correction)
-        if has_topic or _REQUEST.search(message) else []
+        if has_topic or _REQUEST.search(message)
+        else []
     )
     # A phone correction may refer only to the last public contact request.
-    if is_correction and not entries and refers_back and not re.search(
-        r"(?:縣|市)(?:政府|府)|(?:勞工|社會|教育)局|我的|我本人|私人|手機", message
+    if (
+        is_correction
+        and not entries
+        and refers_back
+        and not re.search(
+            r"(?:縣|市)(?:政府|府)|(?:勞工|社會|教育)局|我的|我本人|私人|手機", message
+        )
     ):
         previous = next(
             (item.get("content") for item in reversed(history or []) if item.get("role") == "user"),
@@ -112,14 +121,20 @@ def official_contact_reply(message: str, history: list[dict] | None) -> tuple[st
         )
         if isinstance(previous, str):
             previous = unicodedata.normalize("NFKC", previous)
-            if _contact_only_request(previous) or (_DECLARATION.search(previous) and _NUMBER.search(previous)):
+            if _contact_only_request(previous) or (
+                _DECLARATION.search(previous) and _NUMBER.search(previous)
+            ):
                 entries = _named_contacts(previous)
     if not entries or not (
-        is_correction or _contact_only_request(message) or (_REQUEST.search(message) and not has_topic and len(message) <= 20)
+        is_correction
+        or _contact_only_request(message)
+        or (_REQUEST.search(message) and not has_topic and len(message) <= 20)
     ):
         return None
     # Keep mixed requests on the main answer path.
-    if not is_correction and re.search(r"(?:還想|順便|另外|以及|並且|怎麼申訴|如何申訴|算性騷擾)", message):
+    if not is_correction and re.search(
+        r"(?:還想|順便|另外|以及|並且|怎麼申訴|如何申訴|算性騷擾)", message
+    ):
         return None
 
     contacts = entries[:2]
@@ -130,7 +145,11 @@ def official_contact_reply(message: str, history: list[dict] | None) -> tuple[st
     for entry in contacts:
         extension = f" 轉 {entry.extension}" if entry.extension else ""
         lines.append(f"- {entry.label}：{entry.phone}{extension}")
-        actions.append({"action": "tel", "phone_number": entry.phone, "label": f"撥打{entry.label}"})
+        actions.append(
+            {"action": "tel", "phone_number": entry.phone, "label": f"撥打{entry.label}"}
+        )
     if len({entry.source_url for entry in contacts}) == 1:
-        actions.append({"action": "url", "url": contacts[0].source_url, "label": "查看官方聯絡資訊"})
+        actions.append(
+            {"action": "url", "url": contacts[0].source_url, "label": "查看官方聯絡資訊"}
+        )
     return "\n".join(lines), actions

@@ -1762,9 +1762,9 @@ async def test_official_city_contact_never_adopts_user_numbers(message, correcti
     assert "07-1111111" not in response["reply"]
     assert "[電話號碼]" not in response["reply"]
     assert ("您提供的更正未經核對" in response["reply"]) == correction
-    assert {action["phone_number"] for action in response["action_buttons"] if action["action"] == "tel"} == {
-        "07-3368333", "07-7995678"
-    }
+    assert {
+        action["phone_number"] for action in response["action_buttons"] if action["action"] == "tel"
+    } == {"07-3368333", "07-7995678"}
     assert any(action["action"] == "url" for action in response["action_buttons"])
     assert deltas == [response["reply"]]
     assert result.guidance["execution"]["model_calls"] == 0
@@ -1773,9 +1773,9 @@ async def test_official_city_contact_never_adopts_user_numbers(message, correcti
 async def test_official_phone_directory_prefers_department_over_city():
     result = await run(agent_for([]), user_message="請問高雄市政府勞工局的電話是多少？")
     response = json.loads(result.reply)
-    assert [action["phone_number"] for action in response["action_buttons"] if action["action"] == "tel"] == [
-        "07-8124613"
-    ]
+    assert [
+        action["phone_number"] for action in response["action_buttons"] if action["action"] == "tel"
+    ] == ["07-8124613"]
     assert "市政府四維行政中心" not in response["reply"]
 
 
@@ -1793,7 +1793,10 @@ async def test_law_links_are_bound_to_the_cited_rag_article_before_streaming():
         deltas.append(text)
 
     result = await run(
-        agent_for([streamed(legal_plan()), streamed(final_answer(answer_units=units))], rag=ReviewedWorkplaceRag()),
+        agent_for(
+            [streamed(legal_plan()), streamed(final_answer(answer_units=units))],
+            rag=ReviewedWorkplaceRag(),
+        ),
         user_message="請核對這次檢索到的連結。",
         on_reply_delta=delta,
     )
@@ -1802,6 +1805,7 @@ async def test_law_links_are_bound_to_the_cited_rag_article_before_streaming():
     assert f"](<{official_url}>)接著閱讀" in reply
     assert wrong_url not in reply
     assert result.sources[0]["source_url"] == official_url
+
 
 def test_law_metadata_with_wrong_article_number_has_no_clickable_source():
     source = {
