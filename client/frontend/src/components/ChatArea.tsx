@@ -2,7 +2,7 @@
  * ChatArea — 主要對話區域（Stitch 新版對話內頁 v0.1）
  * 包含頂部導航列、訊息列表（或 WelcomeHero）、打字動畫、底部輸入框。
  */
-import { useRef, useEffect, useState} from "react";
+import { useRef, useEffect, useState, type ReactNode } from "react";
 import MaterialIcon from "./MaterialIcon";
 import BrandMark from "./BrandMark";
 import { useI18n } from "../i18n";
@@ -24,7 +24,7 @@ interface ChatAreaProps {
   onSend: (message: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext) => SendOutcome;
   onOpenSidebar: () => void;
   sidebarExpanded?: boolean;
-  showSidebarTrigger?: boolean;
+  desktopSidebarTrigger?: ReactNode;
   sidebarModalOpen?: boolean;
   onStop: () => void;
   caseFacts?: CaseContext;
@@ -50,7 +50,7 @@ export default function ChatArea({
   onSend,
   onOpenSidebar,
   sidebarExpanded = false,
-  showSidebarTrigger = true,
+  desktopSidebarTrigger,
   sidebarModalOpen = false,
   onStop,
   showReasoning = false,
@@ -98,11 +98,11 @@ export default function ChatArea({
       {/* 頂部導航列 */}
       <header className="flex min-h-16 shrink-0 items-center justify-between gap-2 border-b border-outline/10 bg-white px-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          {showSidebarTrigger && <button
+          {desktopSidebarTrigger ?? <button
             data-sidebar-trigger
             type="button"
             onClick={onOpenSidebar}
-            className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-on-surface/70 transition-colors hover:bg-surface-container-high focus-visible:outline-2 focus-visible:outline-primary"
+            className="sidebar-trigger"
             aria-controls="conversation-sidebar"
             aria-expanded={sidebarExpanded}
             aria-label={sidebarExpanded ? t.closeSidebar : t.openSidebar}
@@ -112,13 +112,13 @@ export default function ChatArea({
           </button>}
           {!summaryMessageId && caseFacts && onSaveCaseFacts && hasCaseContext(caseFacts) && <button data-summary-trigger type="button" aria-label={t.caseSummaryOpen} title={t.caseSummaryOpen} onClick={() => setSummaryOpen(true)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-on-surface/60 hover:bg-primary/10"><MaterialIcon icon="description" size={17} /></button>}
 
-          <div className={`flex min-w-0 items-center gap-2.5 ${sidebarExpanded ? "lg:hidden" : ""}`}>
-            <BrandMark size={32} className="lg:hidden" />
+          <div className="flex min-w-0 items-center gap-2.5">
+            <BrandMark size={32} />
             <div className="space-y-1 min-w-0">
               <h2 className="text-base lg:text-lg font-bold text-on-surface truncate">
                 {t.appTitle}
               </h2>
-              <div className="flex items-center gap-1.5 lg:gap-2 text-[10px] lg:text-xs text-on-surface/50 truncate">
+              <div className="flex items-center gap-1.5 lg:gap-2 text-[0.625rem] lg:text-xs text-on-surface/50 truncate">
                 <span className="truncate">{t.appSubtitle}</span>
               </div>
             </div>
@@ -160,42 +160,44 @@ export default function ChatArea({
           {connected === false && onReconnect && <button type="button" onClick={onReconnect} className="rounded-lg border border-outline/20 px-3 py-1 text-xs text-primary hover:bg-primary/5">{t.reconnect}</button>}
         </div>
       </header>
-      {storageIssue && <p role="alert" className="border-b border-error/20 bg-error-container/20 px-6 py-3 text-xs text-error">{storageIssue === "migration" ? t.storageMigration : storageIssue === "future" ? t.storageFuture : storageIssue === "invalid" ? t.storageInvalid : storageIssue === "changed" ? t.storageChanged : t.storageUnavailable}</p>}
-      {incompatibleSummary && <p role="alert" className="border-b border-outline/20 bg-surface-container-low px-6 py-3 text-xs">{t.incompatibleSummary}</p>}
-      {summaryRequiresConnection && <p role="status" className="border-b border-outline/20 bg-surface-container-low px-6 py-3 text-xs">{connected === null ? t.summaryCheckingConnection : t.summaryConnectionFailed}</p>}
-      {summaryOpen && caseFacts && onSaveCaseFacts && <CaseSummary context={caseFacts} onSave={onSaveCaseFacts} onStartEdit={onStop} onClose={() => setSummaryOpen(false)} canRegenerate={canRegenerate} />}
+      <div className="conversation-workspace flex min-h-0 flex-1 flex-col">
+        {storageIssue && <p role="alert" className="border-b border-error/20 bg-error-container/20 px-6 py-3 text-xs text-error">{storageIssue === "migration" ? t.storageMigration : storageIssue === "future" ? t.storageFuture : storageIssue === "invalid" ? t.storageInvalid : storageIssue === "changed" ? t.storageChanged : t.storageUnavailable}</p>}
+        {incompatibleSummary && <p role="alert" className="border-b border-outline/20 bg-surface-container-low px-6 py-3 text-xs">{t.incompatibleSummary}</p>}
+        {summaryRequiresConnection && <p role="status" className="border-b border-outline/20 bg-surface-container-low px-6 py-3 text-xs">{connected === null ? t.summaryCheckingConnection : t.summaryConnectionFailed}</p>}
+        {summaryOpen && caseFacts && onSaveCaseFacts && <CaseSummary context={caseFacts} onSave={onSaveCaseFacts} onStartEdit={onStop} onClose={() => setSummaryOpen(false)} canRegenerate={canRegenerate} />}
 
-      {/* 訊息區域 */}
-      <section className="min-h-0 flex-1 overflow-y-auto chat-scrollbar hero-mesh-gradient flex flex-col">
-        {hasMessages ? (
-          <div className="chat-column py-6 space-y-6">
-            {messages.map((msg) => (
-              <MessageItem key={msg.id} message={msg} showEmotions={showEmotions} showReasoning={showReasoning} streamingStatus={msg.isStreaming ? retryStatus : undefined} onOpenSummary={caseFacts && onSaveCaseFacts && msg.id === summaryMessageId ? () => setSummaryOpen(true) : undefined} />
-            ))}
-            {isLoading && !latestMessage?.isStreaming && <TypingIndicator message={retryStatus} />}
-            <div ref={messagesEndRef} className="h-4" />
-          </div>
-        ) : (
-          <WelcomeHero onSuggest={onSend} disabled={sendingDisabled} allowImageUpload={allowImageUpload} />
+        {/* 訊息區域 */}
+        <section className="min-h-0 flex-1 overflow-y-auto chat-scrollbar hero-mesh-gradient flex flex-col">
+          {hasMessages ? (
+            <div className="chat-column py-6 space-y-6">
+              {messages.map((msg) => (
+                <MessageItem key={msg.id} message={msg} showEmotions={showEmotions} showReasoning={showReasoning} streamingStatus={msg.isStreaming ? retryStatus : undefined} onOpenSummary={caseFacts && onSaveCaseFacts && msg.id === summaryMessageId ? () => setSummaryOpen(true) : undefined} />
+              ))}
+              {isLoading && !latestMessage?.isStreaming && <TypingIndicator message={retryStatus} />}
+              <div ref={messagesEndRef} className="h-4" />
+            </div>
+          ) : (
+            <WelcomeHero onSuggest={onSend} disabled={sendingDisabled} allowImageUpload={allowImageUpload} />
+          )}
+        </section>
+
+        {/* 底部輸入框（僅在有訊息時顯示，WelcomeHero 有自己的輸入框） */}
+        {hasMessages && (
+          <ChatInput
+            onSend={onSend}
+            isLoading={isLoading}
+            replyPrompt={replyPrompt}
+            streamingPrompt={latestMessage?.role === "assistant" && latestMessage.isStreaming
+              && !latestMessage.isError && !latestMessage.isCancelled ? latestMessage : undefined}
+            onStop={onStop}
+            caseRevision={caseFacts?.revision}
+            activeContractVersion={connected === true ? contractVersion : undefined}
+            disabled={sendingDisabled}
+            allowImageUpload={allowImageUpload}
+            onClarificationDraftChange={onClarificationDraftChange}
+          />
         )}
-      </section>
-
-      {/* 底部輸入框（僅在有訊息時顯示，WelcomeHero 有自己的輸入框） */}
-      {hasMessages && (
-        <ChatInput
-          onSend={onSend}
-          isLoading={isLoading}
-          replyPrompt={replyPrompt}
-          streamingPrompt={latestMessage?.role === "assistant" && latestMessage.isStreaming
-            && !latestMessage.isError && !latestMessage.isCancelled ? latestMessage : undefined}
-          onStop={onStop}
-          caseRevision={caseFacts?.revision}
-          activeContractVersion={connected === true ? contractVersion : undefined}
-          disabled={sendingDisabled}
-          allowImageUpload={allowImageUpload}
-          onClarificationDraftChange={onClarificationDraftChange}
-        />
-      )}
+      </div>
     </main>
   );
 }

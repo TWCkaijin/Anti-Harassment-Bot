@@ -10,6 +10,7 @@ const zhTW = {
   chatHistory: "對話紀錄",
   noHistory: "尚無對話紀錄",
   deleteChat: "刪除對話",
+  renameChat: "重新命名",
   conversationMenu: "對話選項",
   newConversation: "新的對話",
   messagesCount: (n: number) => `${n} 則`,
@@ -55,7 +56,7 @@ const zhTW = {
   statusProcessing: "處理中",
   openSidebar: "開啟側邊欄",
   pinSidebar: "固定側邊欄",
-  unpinSidebar: "取消固定側邊欄（可雙擊）",
+  unpinSidebar: "取消固定側邊欄",
   closeSidebar: "收起側邊欄",
   conversationSidebar: "對話紀錄",
 
@@ -112,6 +113,10 @@ const zhTW = {
   // ── Settings ──
   settingsTitle: "設定",
   settingLanguage: "語言",
+  settingTextSize: "字體大小",
+  textSizeSmall: "小",
+  textSizeMedium: "中",
+  textSizeLarge: "大",
   settingTheme: "色彩組合",
   settingLocalStorage: "本地紀錄設定",
   settingExport: "匯出對話紀錄",

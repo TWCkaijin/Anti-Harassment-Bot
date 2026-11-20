@@ -1,6 +1,7 @@
 import type { RagInfo } from "../services/api";
 import { useI18n } from "../i18n";
 import MaterialIcon from "./MaterialIcon";
+import { officialCitationUrl } from "./citationLinks";
 
 export default function RetrievalSources({ retrieval }: { retrieval?: RagInfo["retrieval"] }) {
   const { t } = useI18n();
@@ -25,18 +26,18 @@ export default function RetrievalSources({ retrieval }: { retrieval?: RagInfo["r
               <span className="block text-sm font-semibold text-on-surface">{typeof source === "string" ? source : source.label}</span>
               {typeof source !== "string" && <>
                 {source.article && <p className="mt-1 whitespace-pre-wrap text-on-surface/80">{source.article}</p>}
-                {source.version && <p className="mt-1 text-[11px] text-on-surface/60">{source.version}</p>}
-                {typeof source.promulgated_date === "string" && <p className="mt-1 text-[11px] text-on-surface/60">{t.sourcePromulgatedDate}：{source.promulgated_date}</p>}
-                {typeof source.effective_date === "string" && <p className="mt-1 text-[11px] text-on-surface/60">{t.sourceEffectiveDate}：{source.effective_date}</p>}
-                {typeof source.checked_at === "string" && <p className="mt-1 text-[11px] text-on-surface/60">{t.sourceCheckedAt}：{source.checked_at}</p>}
-                {typeof source.effective_note === "string" && <p className="mt-1 text-[11px] text-on-surface/60">{source.effective_note}</p>}
-                {source.source_url && /^https?:\/\//i.test(source.source_url) && <a href={source.source_url} target="_blank" rel="noreferrer" className="mt-1 inline-block text-primary underline">{t.answerBasis}</a>}
+                {source.version && <p className="mt-1 text-[0.6875rem] text-on-surface/60">{source.version}</p>}
+                {typeof source.promulgated_date === "string" && <p className="mt-1 text-[0.6875rem] text-on-surface/60">{t.sourcePromulgatedDate}：{source.promulgated_date}</p>}
+                {typeof source.effective_date === "string" && <p className="mt-1 text-[0.6875rem] text-on-surface/60">{t.sourceEffectiveDate}：{source.effective_date}</p>}
+                {typeof source.checked_at === "string" && <p className="mt-1 text-[0.6875rem] text-on-surface/60">{t.sourceCheckedAt}：{source.checked_at}</p>}
+                {typeof source.effective_note === "string" && <p className="mt-1 text-[0.6875rem] text-on-surface/60">{source.effective_note}</p>}
+                {officialCitationUrl(source.source_url) && <a href={officialCitationUrl(source.source_url) ?? undefined} target="_blank" rel="noreferrer" className="mt-1 inline-block text-primary underline">{t.answerBasis}</a>}
               </>}
             </li>)}
           </ul> : <p className="border-t border-primary/10 p-3 text-on-surface/65">{t.retrievalEmpty}</p>}
         </details>;
       })}
     </div>
-    <p className="text-[11px] text-on-surface/55">{t.retrievalCaption}</p>
+    <p className="text-[0.6875rem] text-on-surface/55">{t.retrievalCaption}</p>
   </section>;
 }

@@ -12,6 +12,7 @@ import ActionButtons from "./ActionButtons";
 import ProcessingTrace from "./ProcessingTrace";
 import RetrievalSources from "./RetrievalSources";
 import { getSafeResourceActions } from "./actionButtonValidation";
+import { historicalLinkSuffix, officialCitationUrl } from "./citationLinks";
 import { useI18n } from "../i18n";
 import React from "react";
 import type { ConversationMessage } from "../hooks/useConversation";
@@ -61,16 +62,6 @@ const normalizeSource = (source: RagSource | string): RagSource => {
     article: source.article,
     version: source.version,
   };
-};
-
-const officialCitationUrl = (value?: string | null): string | null => {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    if (url.protocol === "https:" && !url.username && !url.password
-      && (url.hostname === "gov.tw" || url.hostname.endsWith(".gov.tw"))) return url.href;
-  } catch { /* Keep the source label without a link. */ }
-  return null;
 };
 
 const getSourceStyle = (type: RagSourceType) => {
@@ -129,18 +120,24 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
     : [];
   const citations = (message.ragUsed?.sources ?? []).map(normalizeSource);
   const citationLabel = (label: string) => label.normalize("NFKC").replace(/\s/g, "");
-  const sameSource = (source: RagSource, citation: RagSource) =>
-    source.type === citation.type && (
-      (citation.doc_id && source.doc_id === citation.doc_id &&
-        (!source.collection || !citation.collection || source.collection === citation.collection)) ||
-      citationLabel(source.label) === citationLabel(citation.label)
-    );
+  const sameSource = (source: RagSource, citation: RagSource) => {
+    if (source.type !== citation.type
+      || (source.collection && citation.collection && source.collection !== citation.collection)
+      || (source.version && citation.version && source.version !== citation.version)) return false;
+    if (source.doc_id && citation.doc_id) return citation.doc_id === source.doc_id;
+    return citationLabel(source.label) === citationLabel(citation.label);
+  };
+  const trustedLinks = new Set([
+    ...citations.map(citation => officialCitationUrl(citation.source_url)),
+    ...resourceActions.map(action => action.action === "url" ? officialCitationUrl(action.url) : null),
+  ].filter((url): url is string => url !== null));
+  const trustedLinksByLength = [...trustedLinks].sort((a, b) => b.length - a.length);
   const citedSources = citations.filter(citation => !listedSources.some(source => sameSource(source, citation)));
   const retrievalWithCitationLinks = retrieval?.status === "ok" ? {
     ...retrieval,
     sources: retrieval.sources.map(item => {
       const source = normalizeSource(item);
-      if (source.source_url && /^https?:\/\//i.test(source.source_url)) return item;
+      if (officialCitationUrl(source.source_url)) return item;
       const citation = citations.find(candidate => sameSource(source, candidate) &&
         officialCitationUrl(candidate.source_url));
       return citation ? { ...source, source_url: citation.source_url } : item;
@@ -216,7 +213,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
         {/* 情緒標籤 (僅針對使用者訊息顯示) */}
         {isUser && showEmotions && message.emotion && (
           <span
-            className={`text-[10px] font-medium px-1.5 py-0.5 rounded border ${getEmotionColorClasses(message.emotionColor)}`}
+            className={`text-[0.625rem] font-medium px-1.5 py-0.5 rounded border ${getEmotionColorClasses(message.emotionColor)}`}
           >
             {message.emotion}
           </span>
@@ -250,7 +247,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
             {replyAnswers.map(({ question, answer }, index) => (
               <div key={index} className="space-y-2.5">
                 <blockquote aria-label="回覆的問題" className="border-l-2 border-white/30 pl-3 text-xs leading-relaxed text-white/65">
-                  <span className="mb-1 flex items-center gap-1 text-[10px] font-medium">
+                  <span className="mb-1 flex items-center gap-1 text-[0.625rem] font-medium">
                     <span aria-hidden="true"><MaterialIcon icon="reply" size={14} /></span>回覆
                   </span>
                   <p className="whitespace-pre-wrap break-words">{question}</p>
@@ -267,11 +264,21 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
-                a: ({ children, ...props }) => (
-                  <a {...props} target="_blank" rel="noreferrer">
-                    {children}
-                  </a>
-                ),
+                a: ({ children, href, node }) => {
+                  const url = officialCitationUrl(href);
+                  if (url && trustedLinks.has(url)) {
+                    return <a href={url} target="_blank" rel="noopener noreferrer">{children}</a>;
+                  }
+                  const offset = node?.position?.start.offset;
+                  const isBare = offset !== undefined && /^https?:\/\//i.test(content.slice(offset));
+                  const repaired = isBare && url && typeof children === "string"
+                    ? historicalLinkSuffix(url, children, trustedLinksByLength)
+                    : null;
+                  if (repaired) {
+                    return <><a href={repaired.url} target="_blank" rel="noopener noreferrer">{repaired.url}</a>{repaired.suffix}</>;
+                  }
+                  return <>{children}</>;
+                },
               }}
             >
               {content}
@@ -291,7 +298,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
               模型 Tool Call：{message.debugToolCalls.length > 0 ? `${message.debugToolCalls.length} 次` : "未使用"}
             </summary>
             {message.debugToolCalls.length > 0 && (
-              <div className="mt-2 space-y-2 border-t border-amber-300/50 pt-2 font-mono text-[11px] leading-5">
+              <div className="mt-2 space-y-2 border-t border-amber-300/50 pt-2 font-mono text-[0.6875rem] leading-5">
                 {message.debugToolCalls.map((toolCall, index) => (
                   <div key={`${toolCall.name}-${index}`}>
                     <p className="font-semibold">{toolCall.name}</p>
@@ -333,7 +340,7 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
                         key={type}
                         type="button"
                         onClick={() => setActiveSourceType(isActive ? null : type)}
-                        className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${style.className}`}
+                        className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[0.6875rem] font-semibold transition-colors ${style.className}`}
                         aria-expanded={isActive}
                         aria-label={`${sourceLabel}：${getSourceTypeLabel(type)}`}
                       >
@@ -367,14 +374,14 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
                       {typeof src.effective_date === "string" && <p className="mt-1 text-on-surface/60">{t.sourceEffectiveDate}：{src.effective_date}</p>}
                       {typeof src.checked_at === "string" && <p className="mt-1 text-on-surface/60">{t.sourceCheckedAt}：{src.checked_at}</p>}
                       {typeof src.effective_note === "string" && <p className="mt-1 text-on-surface/60">{src.effective_note}</p>}
-                      {src.source_url && /^https?:\/\//i.test(src.source_url) && <a href={src.source_url} target="_blank" rel="noreferrer" className="ml-2 text-primary underline">{t.answerBasis}</a>}
+                      {officialCitationUrl(src.source_url) && <a href={officialCitationUrl(src.source_url) ?? undefined} target="_blank" rel="noreferrer" className="ml-2 text-primary underline">{t.answerBasis}</a>}
                     </li>
                   ))}
                 </ul>
               </div>
             )}
             {message.anonymized && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-secondary bg-secondary-fixed/50 px-2.5 py-1 rounded-full">
+              <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium text-secondary bg-secondary-fixed/50 px-2.5 py-1 rounded-full">
                 <MaterialIcon icon="shield_with_heart" size={14} />
                 {t.anonymizedLabel}
               </span>

@@ -8,6 +8,7 @@ import MaterialIcon from "./MaterialIcon";
 import { useI18n, type Locale } from "../i18n";
 import type { ConversationSession } from "../hooks/useConversation";
 import { formatConversationText } from "../services/conversationExport";
+import { TEXT_SIZES, type TextSize } from "../hooks/useTextSizePreference";
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -15,6 +16,9 @@ interface SettingsPanelProps {
   sessions: ConversationSession[];
   onClearAll: () => void;
   storageChanged?: boolean;
+  textSize?: TextSize;
+  onTextSizeChange?: (size: TextSize) => void;
+  textSizeSaveFailed?: boolean;
   showEmotions?: boolean;
   onShowEmotionsChange?: (value: boolean) => void;
   preferenceSaveFailed?: boolean;
@@ -26,11 +30,13 @@ export default function SettingsPanel({
   sessions,
   onClearAll,
   storageChanged = false,
+  textSize = "medium", onTextSizeChange, textSizeSaveFailed = false,
   showEmotions = false, onShowEmotionsChange, preferenceSaveFailed = false,
 }: SettingsPanelProps) {
   const { t, locale, setLocale } = useI18n();
   const [analyticsEnabled, setAnalyticsEnabled] = useState(hasAnalyticsConsent);
   const [showConfirm, setShowConfirm] = useState(false);
+  const textSizeLabels = { small: t.textSizeSmall, medium: t.textSizeMedium, large: t.textSizeLarge };
 
   // ── 匯出為 JSON ──
   const exportAsJson = () => {
@@ -121,6 +127,30 @@ export default function SettingsPanel({
               ))}
             </div>
           </section>
+
+          {onTextSizeChange && <fieldset className="min-w-0">
+            <legend className="mb-3 flex items-center gap-2 text-sm font-semibold text-on-surface">
+              <MaterialIcon icon="text_size" size={18} />
+              {t.settingTextSize}
+            </legend>
+            <div className="grid grid-cols-3 gap-1 rounded-xl border border-outline/30 bg-surface-container-low p-1">
+              {TEXT_SIZES.map(size => (
+                <label key={size} className="relative min-w-0">
+                  <input
+                    className="peer sr-only"
+                    type="radio"
+                    name="chat-text-size"
+                    checked={textSize === size}
+                    onChange={() => onTextSizeChange(size)}
+                  />
+                  <span className="flex min-h-[44px] cursor-pointer items-center justify-center rounded-lg border border-transparent px-1 text-center text-sm text-on-surface hover:bg-surface-container peer-checked:border-primary/30 peer-checked:bg-primary-container peer-checked:font-semibold peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary">
+                    {textSizeLabels[size]}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {textSizeSaveFailed && <p role="alert" className="mt-2 text-xs text-error">{t.preferenceSaveFailed}</p>}
+          </fieldset>}
 
           {/* ── 色彩組合 ── */}
           <section>

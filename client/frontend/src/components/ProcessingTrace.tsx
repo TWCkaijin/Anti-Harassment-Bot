@@ -61,12 +61,12 @@ export default function ProcessingTrace({ trace, analysis = [], reasoning = [] }
       <div id={panelId} hidden={!expanded}>
         {reasoning.length > 0 && <section aria-label={t.reasoningTitle} className="my-3 rounded-lg border border-outline/10 bg-white/70 p-3">
           <p className="text-xs font-semibold text-on-surface/75">{t.reasoningTitle}</p>
-          <p className="mt-1 text-[11px] leading-relaxed text-on-surface/65">{t.reasoningCaption}</p>
+          <p className="mt-1 text-[0.6875rem] leading-relaxed text-on-surface/65">{t.reasoningCaption}</p>
           <div className="mt-2 max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-xs italic leading-relaxed text-on-surface/75">
             {reasoning.map((entry, index) => <span key={index}>{index > 0 && reasoning[index - 1].stage !== entry.stage ? "\n\n" : ""}{entry.text}</span>)}
           </div>
         </section>}
-        <p className="mt-2 text-[11px] leading-relaxed text-on-surface/55">{analysis.length ? t.analysisCaption : t.processingTraceCaption}</p>
+        <p className="mt-2 text-[0.6875rem] leading-relaxed text-on-surface/55">{analysis.length ? t.analysisCaption : t.processingTraceCaption}</p>
         {analysis.length > 0 ? <ol aria-label={t.analysisSteps} className="mt-3 max-h-72 space-y-3 overflow-y-auto pr-1 text-xs">
           {analysis.map((entry, index) => <li key={`${entry.stage}-${index}`} className="space-y-1.5 rounded-lg border border-outline/10 bg-white/70 p-3">
             <p className="font-semibold text-on-surface">{t.analysisStages[entry.stage]}</p>

@@ -9,7 +9,7 @@ import re
 from datetime import date, datetime
 from time import monotonic
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, ValidationError, model_validator
@@ -314,6 +314,13 @@ _LAW_CANONICAL = {
 }
 _CURRENT_VERSION = re.compile(r"(?:現行|目前有效|最新)(?=[^，,；;。！？!?\n]{0,8}(?:法|條文))")
 _URL_REF = re.compile(r"https://[^\s<>\]\)）}，。；;]+")
+_WEB_ADDRESS = r"(?:https?://|www\.)[^\s<>\[\]\)）}，。；、！？]+"
+_ANSWER_LINK = re.compile(
+    rf"\[(?P<label>[^\]\r\n]+)\]\(<?(?P<markdown>{_WEB_ADDRESS})>?\)|"
+    rf"<(?P<autolink>{_WEB_ADDRESS})>|(?P<bare>{_WEB_ADDRESS})",
+    re.IGNORECASE,
+)
+_URL_TEXT_SUFFIX = re.compile(r"^[\u3400-\u9fff。，；、！？]|^[.!?]+$")
 _PHONE_REF = re.compile(
     r"(?<![0-9])(?:1(?:10|13|19)|\(?0[2-9]\)?[-\s]?\d{3,4}[-\s]?\d{3,4})(?![0-9])"
 )
@@ -723,14 +730,76 @@ def _official_source(source: dict) -> bool:
     return True
 
 
-def _source_bound_contacts(text: str, sources: list[dict], documents: list[dict]):
+def verified_law_url(source: dict) -> str | None:
+    """Expose an official article link only when it agrees with the corpus metadata."""
+    if not _official_source(source) or not source.get("law_name"):
+        return None
+    code, separator, version_date = (source.get("version") or "").partition("@")
+    number = _article_number(source.get("article_number") or "")
+    url = source["source_url"]
+    parsed = urlsplit(url)
+    params = parse_qs(parsed.query.lower())
+    if (
+        not separator
+        or not re.fullmatch(r"[A-Z]\d{7}", code)
+        or not number
+        or parsed.hostname != "law.moj.gov.tw"
+        or parsed.path.lower() != "/lawclass/lawsingle.aspx"
+        or params.get("pcode") != [code.lower()]
+        or params.get("flno") != [number]
+    ):
+        return None
+    try:
+        date.fromisoformat(version_date)
+    except ValueError:
+        return None
+    return url
+
+
+def _source_bound_answer_urls(text, sources, action_urls):
+    """Build visible links from approved destinations before producing a stream delta."""
+    official = {
+        source["source_url"]: source["doc_id"]
+        for source in sources
+        if (verified_law_url(source) if source.get("type") == "law" else _official_source(source))
+    }
+    trusted = sorted(set(official).union(action_urls), key=len, reverse=True)
+    supported_ids = set()
+    unsupported = False
+
+    def replace(match):
+        nonlocal unsupported
+        raw = match.group("markdown") or match.group("autolink") or match.group("bare")
+        suffix = ""
+        url = raw if raw in trusted else None
+        if url is None and match.group("bare"):
+            for candidate in trusted:
+                trailing = raw[len(candidate):]
+                if raw.startswith(candidate) and _URL_TEXT_SUFFIX.match(trailing):
+                    url, suffix = candidate, trailing
+                    break
+        if url is None:
+            unsupported = True
+            return (match.group("label") or "") + "〔官方網址待核對〕"
+        if url in official:
+            supported_ids.add(official[url])
+        if match.group("markdown"):
+            return match.group()
+        return f"[官方來源](<{url}>)" + suffix
+
+    return _ANSWER_LINK.sub(replace, text), supported_ids, unsupported
+
+
+def _source_bound_contacts(
+    text: str, sources: list[dict], documents: list[dict], *, check_urls=True, approved_phones=(),
+):
     """Check literal phones/URLs against dated, stored official evidence."""
     official = {source["doc_id"]: source for source in sources if _official_source(source)}
     content = {item["source"]["doc_id"]: item["content"] for item in documents}
     supported_ids: set[str] = set()
     unsupported: list[str] = []
     replacements = []
-    for match in _URL_REF.finditer(text):
+    for match in (_URL_REF.finditer(text) if check_urls else ()):
         value = match.group()
         host = urlsplit(value).hostname or ""
         candidates = [
@@ -746,6 +815,8 @@ def _source_bound_contacts(text: str, sources: list[dict], documents: list[dict]
             replacements.append((*match.span(), "〔官方網址待核對〕"))
     for match in _PHONE_REF.finditer(text):
         number = re.sub(r"\D", "", match.group())
+        if number in approved_phones:
+            continue
         candidates = [
             identifier
             for identifier in official
@@ -891,6 +962,8 @@ def check_answer_units(
     documents=None,
     seen_reasons=None,
     allow_canonical_public_law=False,
+    trusted_action_urls=None,
+    approved_phones=(),
 ) -> list[dict]:
     """Validate cited precision without rewriting the surrounding conversation.
 
@@ -975,6 +1048,15 @@ def check_answer_units(
         unsupported_article = False
         reviewed_workplace_32_1 = _reviewed_workplace_32_1(selected)
         section_text = section.text
+        if trusted_action_urls is not None:
+            section_text, link_ids, unverified_link = _source_bound_answer_urls(
+                section_text, selected, trusted_action_urls
+            )
+            retained_ids.update(link_ids)
+            if unverified_link and diagnostics is not None:
+                diagnostics.setdefault("rewrites", []).append(
+                    {"section": getattr(section, "kind", "answer"), "reasons": ["unsupported_url"]}
+                )
         if reviewed_workplace_32_1:
             section_text, power_block_rewritten = _correct_reviewed_workplace_power_block(
                 section_text
@@ -1013,9 +1095,15 @@ def check_answer_units(
                         }
                     )
                 continue
-            if correction_about_contact:
+            if correction_about_contact or (
+                trusted_action_urls is not None and _PHONE_REF.search(claim)
+            ):
                 checked_claim, contact_ids, unsupported = _source_bound_contacts(
-                    claim, selected, documents or []
+                    claim,
+                    selected,
+                    documents or [],
+                    check_urls=trusted_action_urls is None,
+                    approved_phones=approved_phones,
                 )
                 if unsupported:
                     unsupported_contact = True
@@ -1210,7 +1298,7 @@ def check_answer_units(
                         "reasons": ["unverified_statutory_quote"],
                     }
                 )
-        if unsupported_contact:
+        if unsupported_contact and correction_about_contact:
             revised_text = (
                 revised_text.rstrip()
                 + "\n我知道的資訊是目前缺少可核對的官方來源；您說的這個我無法查證。"

@@ -10,6 +10,7 @@ const en = {
   chatHistory: "Chat History",
   noHistory: "No conversation history",
   deleteChat: "Delete chat",
+  renameChat: "Rename conversation",
   conversationMenu: "Conversation options",
   newConversation: "New conversation",
   messagesCount: (n: number) => `${n} msg${n > 1 ? "s" : ""}`,
@@ -55,7 +56,7 @@ const en = {
   statusProcessing: "Processing",
   openSidebar: "Open sidebar",
   pinSidebar: "Pin sidebar",
-  unpinSidebar: "Unpin sidebar (double-click)",
+  unpinSidebar: "Unpin sidebar",
   closeSidebar: "Collapse sidebar",
   conversationSidebar: "Conversation history",
 
@@ -112,6 +113,10 @@ const en = {
   // ── Settings ──
   settingsTitle: "Settings",
   settingLanguage: "Language",
+  settingTextSize: "Text size",
+  textSizeSmall: "Small",
+  textSizeMedium: "Medium",
+  textSizeLarge: "Large",
   settingTheme: "Color Theme",
   settingLocalStorage: "Local Storage",
   settingExport: "Export Conversations",

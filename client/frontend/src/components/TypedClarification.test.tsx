@@ -13,6 +13,23 @@ it.each([["不確定", "unknown"], ["暫不提供", "declined"]])("sends %s as a
   fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
   expect(send).toHaveBeenCalledOnce();
 });
+it("displays the selected Chinese label while submitting the original signed value", () => {
+  const send = vi.fn();
+  const clarification = {
+    ...question,
+    question: "事情發生在哪裡？",
+    options: [{ label: "工作場所", value: "workspac" }],
+    validation_token: "signed-token",
+  };
+  render(<I18nProvider><TypedClarification clarification={clarification} revision={2} isLoading={false} onSend={send} onHide={vi.fn()} /></I18nProvider>);
+  fireEvent.click(screen.getByRole("radio", { name: "工作場所" }));
+  fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
+  expect(send).toHaveBeenCalledExactlyOnceWith("事情發生在哪裡？\n工作場所", expect.objectContaining({
+    answers: [{ question: "事情發生在哪裡？", answer: "工作場所" }],
+    clarificationAnswer: expect.objectContaining({ status: "provided", value: "workspac", validation_token: "signed-token" }),
+  }));
+});
+
 it("does not permit a loading question to submit", () => {
   render(<I18nProvider><TypedClarification clarification={question} revision={2} isLoading onSend={vi.fn()} onHide={vi.fn()} /></I18nProvider>);
   expect(screen.getByRole("radio", { name: "主管" })).toBeDisabled();
@@ -119,11 +136,12 @@ it("does not submit duplicate concrete and free-form values", () => {
 });
 it("returns a v4 freeform question's signed revision without a legacy fact key", () => {
   const send = vi.fn();
-  const clarification = { question_id: "open.2", context_revision: 2, question: "哪些情況符合？", reason: "釐清情境", selection_mode: "multiple" as const, max_selections: 2, validation_token: "signed-v4", options: [{ label: "校外", value: "校外" }] };
+  const clarification = { question_id: "open.2", context_revision: 2, question: "哪些情況符合？", reason: "釐清情境", selection_mode: "multiple" as const, max_selections: 2, validation_token: "signed-v4", options: [{ label: "校外", value: "off-campus" }] };
   render(<I18nProvider><TypedClarification clarification={clarification} revision={2} isLoading={false} onSend={send} onHide={vi.fn()} /></I18nProvider>);
   fireEvent.click(screen.getByRole("checkbox", { name: "校外" }));
   fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));
-  expect(send.mock.calls[0][1].clarificationAnswer).toEqual({ question_id: "open.2", context_revision: 2, status: "provided", value: ["校外"], selection_mode: "multiple", max_selections: 2, validation_token: "signed-v4" });
+  expect(send.mock.calls[0][0]).toBe("哪些情況符合？\n校外");
+  expect(send.mock.calls[0][1].clarificationAnswer).toEqual({ question_id: "open.2", context_revision: 2, status: "provided", value: ["off-campus"], selection_mode: "multiple", max_selections: 2, validation_token: "signed-v4" });
 });
 
 it("submits when pressing Enter in the 自行補充 input, but not during IME composition", () => {

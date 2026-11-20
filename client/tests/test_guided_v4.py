@@ -256,6 +256,27 @@ def clarification_plan(subject="你", **changes):
     )
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"question": "Where did this take place?"},
+        {"reason": "The location affects the next step."},
+        {"options": [{"label": "Workplace", "value": "workspac"}]},
+    ],
+)
+def test_clarification_rejects_entirely_non_chinese_display_fields(change):
+    draft = {
+        "question": "事情發生在哪裡？",
+        "reason": "場域會影響後續處理方式。",
+        "options": [{"label": "工作場所", "value": "workspac"}],
+        "selection_mode": "single",
+        "max_selections": 1,
+    }
+    assert v4.QuestionV4.model_validate(draft).options[0].value == "workspac"
+    with pytest.raises(ValueError, match="Clarification display text must be written in Chinese"):
+        v4.QuestionV4.model_validate({**draft, **change})
+
+
 @pytest.mark.parametrize("streaming", [False, True])
 async def test_school_roles_clarify_in_two_turns_then_retrieve(streaming):
     plans = [clarification_plan(), clarification_plan("對方"), legal_plan(), final_answer()]
@@ -1715,3 +1736,80 @@ async def test_discarding_user_marker_keeps_ungrounded_claim_checks():
     assert "條號待核對" not in text and "期限待核對" not in text
     assert "第999條" not in text and "999天" not in text
     assert result.sources == []
+
+
+@pytest.mark.parametrize(
+    ("message", "correction"),
+    [
+        ("那你可以提供我高雄市政府的電話嗎 因為我住在高雄市", False),
+        ("高雄市府總機電話是[電話號碼]", True),
+        ("高雄市府總機電話是113", True),
+        ("你剛剛說的那支應該是[電話號碼]才對", True),
+    ],
+)
+async def test_official_city_contact_never_adopts_user_numbers(message, correction):
+    history = [
+        {"role": "user", "content": "可以提供高雄市政府電話嗎？"},
+        {"role": "assistant", "content": "先前錯誤的測試號碼是07-1111111。"},
+    ]
+    deltas = []
+
+    async def delta(text):
+        deltas.append(text)
+
+    result = await run(agent_for([]), user_message=message, history=history, on_reply_delta=delta)
+    response = json.loads(result.reply)
+    assert "07-1111111" not in response["reply"]
+    assert "[電話號碼]" not in response["reply"]
+    assert ("您提供的更正未經核對" in response["reply"]) == correction
+    assert {action["phone_number"] for action in response["action_buttons"] if action["action"] == "tel"} == {
+        "07-3368333", "07-7995678"
+    }
+    assert any(action["action"] == "url" for action in response["action_buttons"])
+    assert deltas == [response["reply"]]
+    assert result.guidance["execution"]["model_calls"] == 0
+
+
+async def test_official_phone_directory_prefers_department_over_city():
+    result = await run(agent_for([]), user_message="請問高雄市政府勞工局的電話是多少？")
+    response = json.loads(result.reply)
+    assert [action["phone_number"] for action in response["action_buttons"] if action["action"] == "tel"] == [
+        "07-8124613"
+    ]
+    assert "市政府四維行政中心" not in response["reply"]
+
+
+async def test_law_links_are_bound_to_the_cited_rag_article_before_streaming():
+    source_id = "rag_documents/law-N0030014-32-1"
+    official_url = "https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=N0030014&flno=32-1"
+    wrong_url = "https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=N0030014&flno=13"
+    units = [
+        {"text": "官方來源：" + official_url + "接著閱讀。", "source_ids": [source_id]},
+        {"text": f"另見[聲稱相同條文的網址]({wrong_url})。", "source_ids": [source_id]},
+    ]
+    deltas = []
+
+    async def delta(text):
+        deltas.append(text)
+
+    result = await run(
+        agent_for([streamed(legal_plan()), streamed(final_answer(answer_units=units))], rag=ReviewedWorkplaceRag()),
+        user_message="請核對這次檢索到的連結。",
+        on_reply_delta=delta,
+    )
+    reply = json.loads(result.reply)["reply"]
+    assert reply == "".join(deltas)
+    assert f"](<{official_url}>)接著閱讀" in reply
+    assert wrong_url not in reply
+    assert result.sources[0]["source_url"] == official_url
+
+def test_law_metadata_with_wrong_article_number_has_no_clickable_source():
+    source = {
+        "doc_id": "rag_documents/law-N0030014-32-1",
+        "law_name": "性別平等工作法",
+        "article_number": "32-1",
+        "version": "N0030014@2023-08-16",
+        "checked_at": "2026-11-20",
+        "source_url": "https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=N0030014&flno=13",
+    }
+    assert v4.verified_law_url(source) is None

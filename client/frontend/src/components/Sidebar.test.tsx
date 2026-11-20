@@ -7,7 +7,7 @@ const session: ConversationSession = { id: "one", title: "合成測試", created
 const props = { sessions: [session], currentSessionId: "one", isOpen: false, isDesktop: false, isCollapsed: true, onClose: vi.fn(), onCollapse: vi.fn(), onSelectSession: vi.fn(), onNewSession: vi.fn(), onDeleteSession: vi.fn(), onRenameSession: vi.fn(), onOpenSettings: vi.fn(), onOpenAdmin: vi.fn() };
 beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
 
-it("keeps a collapsed desktop sidebar closed on hover and requests collapse with Escape", () => {
+it("keeps the closed preview inert and requests collapse with Escape from the pinned sidebar", () => {
   const view = (isCollapsed: boolean) => <I18nProvider><button data-sidebar-trigger>切換側邊欄</button><Sidebar {...props} isDesktop isCollapsed={isCollapsed} /></I18nProvider>;
   const { rerender } = render(view(true));
   const sidebar = document.querySelector("aside")!;
@@ -16,7 +16,7 @@ it("keeps a collapsed desktop sidebar closed on hover and requests collapse with
   expect(sidebar).toHaveAttribute("inert");
   rerender(view(false));
   expect(sidebar).not.toHaveAttribute("inert");
-  expect(sidebar).toHaveClass("relative");
+  expect(sidebar).toHaveAttribute("data-sidebar-mode", "pinned");
   fireEvent.keyDown(sidebar, { key: "Escape" });
   expect(props.onCollapse).toHaveBeenCalledOnce();
   expect(toggle).toHaveFocus();
