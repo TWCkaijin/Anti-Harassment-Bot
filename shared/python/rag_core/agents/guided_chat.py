@@ -774,7 +774,7 @@ def _source_bound_answer_urls(text, sources, action_urls):
         url = raw if raw in trusted else None
         if url is None and match.group("bare"):
             for candidate in trusted:
-                trailing = raw[len(candidate):]
+                trailing = raw[len(candidate) :]
                 if raw.startswith(candidate) and _URL_TEXT_SUFFIX.match(trailing):
                     url, suffix = candidate, trailing
                     break
@@ -791,7 +791,12 @@ def _source_bound_answer_urls(text, sources, action_urls):
 
 
 def _source_bound_contacts(
-    text: str, sources: list[dict], documents: list[dict], *, check_urls=True, approved_phones=(),
+    text: str,
+    sources: list[dict],
+    documents: list[dict],
+    *,
+    check_urls=True,
+    approved_phones=(),
 ):
     """Check literal phones/URLs against dated, stored official evidence."""
     official = {source["doc_id"]: source for source in sources if _official_source(source)}
@@ -799,7 +804,7 @@ def _source_bound_contacts(
     supported_ids: set[str] = set()
     unsupported: list[str] = []
     replacements = []
-    for match in (_URL_REF.finditer(text) if check_urls else ()):
+    for match in _URL_REF.finditer(text) if check_urls else ():
         value = match.group()
         host = urlsplit(value).hostname or ""
         candidates = [

@@ -1250,7 +1250,9 @@ async def run_guided_v4(
         finally:
             metrics["model_ms"] += (monotonic() - started) * 1000
 
-    async def direct_answer(reply, route, analysis_summary, *, suggestions, actions=(), limitations=()):
+    async def direct_answer(
+        reply, route, analysis_summary, *, suggestions, actions=(), limitations=()
+    ):
         metrics["route"] = route
         await progress("validating")
         unit = {"text": reply, "source_ids": []}
@@ -1345,9 +1347,12 @@ async def run_guided_v4(
         if pipeline.get("enable_skills", True)
         else []
     )
-    approved_phones = frozenset(re.sub(r"\D", "", contact.phone) for contact in contact_catalog()[1])
+    approved_phones = frozenset(
+        re.sub(r"\D", "", contact.phone) for contact in contact_catalog()[1]
+    )
     actions = [
-        action for action in available_actions(scripts)
+        action
+        for action in available_actions(scripts)
         if action["action"] != "tel" or re.sub(r"\D", "", action["phone_number"]) in approved_phones
     ]
     trusted_action_urls = tuple(action["url"] for action in actions if action["action"] == "url")
