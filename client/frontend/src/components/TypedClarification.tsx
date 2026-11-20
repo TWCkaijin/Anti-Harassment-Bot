@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useI18n } from "../i18n";
 import type { ReplyContext } from "../hooks/useConversation";
-import { factText, isClarificationDraft, MAX_FACT_VALUE_LENGTH, type Clarification, type CaseFact, type ClarificationDraft } from "../services/caseFacts";
+import { isClarificationDraft, MAX_FACT_VALUE_LENGTH, type Clarification, type CaseFact, type ClarificationDraft } from "../services/caseFacts";
 import { limitDistinctOptions, MAX_TYPED_PREDEFINED_OPTIONS } from "./choiceOptions";
 import HideOptionsButton from "./HideOptionsButton";
 import { settleSendOutcome, type SendOutcome } from "../services/sendOutcome";
@@ -14,8 +14,13 @@ export default function TypedClarification({ clarification, revision, isLoading,
   const options = limitDistinctOptions(clarification.options.filter(option => !reservedChoices.has(option.value.trim()) && !reservedChoices.has(option.label.trim())), MAX_TYPED_PREDEFINED_OPTIONS);
   const multiple = clarification.selection_mode === "multiple";
   const maximum = multiple ? Math.min(4, Math.max(2, clarification.max_selections ?? 4)) : 1;
-  const selectedValues = draft.selectedValues.filter(value => options.some(option => option.value === value));
-  const providedValues = [...selectedValues, ...(draft.includeOther && draft.other.trim() ? [draft.other.trim()] : [])];
+  const selectedOptions = draft.selectedValues
+    .map(value => options.find(option => option.value === value))
+    .filter(option => option !== undefined);
+  const selectedValues = selectedOptions.map(option => option.value);
+  const supplementalText = draft.other.trim();
+  const otherValues = draft.includeOther && supplementalText ? [supplementalText] : [];
+  const providedValues = [...selectedValues, ...otherValues];
   const valid = draft.special !== null || (providedValues.length > 0 && providedValues.length <= maximum
     && new Set(providedValues).size === providedValues.length && (!draft.includeOther || (draft.other.trim().length > 0 && draft.other.length <= MAX_FACT_VALUE_LENGTH)));
   const updateDraft = (next: ClarificationDraft) => { if (!isLoading && !sent) { setDraft(next); onDraftChange?.(next); } };
@@ -33,7 +38,9 @@ export default function TypedClarification({ clarification, revision, isLoading,
   const submit = () => {
     if (!valid || isLoading || sent) return;
     const fact: CaseFact = draft.special ? { status: draft.special } : { status: "provided", value: multiple ? providedValues : providedValues[0] };
-    const answer = fact.status === "provided" ? factText(fact.value) : fact.status === "unknown" ? t.caseFactUnknown : t.caseFactDeclined;
+    const answer = fact.status === "provided"
+      ? [...selectedOptions.map(option => option.label), ...otherValues].join("、")
+      : fact.status === "unknown" ? t.caseFactUnknown : t.caseFactDeclined;
     setSent(true);
     try { settleSendOutcome(onSend(`${clarification.question}\n${answer}`, { answers: [{ question: clarification.question, answer }], factsRevision: revision, clarificationAnswer: { question_id: clarification.question_id, ...(clarification.fact_key ? { fact_key: clarification.fact_key } : {}), ...fact,
       ...(clarification.context_revision !== undefined ? { context_revision: clarification.context_revision } : {}),

@@ -69,3 +69,8 @@ resource/behavior-tests-*.json
 
 # Workload Identity Federation credential files
 gha-creds-*.json
+
+# Local Apple design guidance
+/AGENTS.md
+/DESIGN.md
+/.agents/skills/apple-hig/

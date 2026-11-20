@@ -208,7 +208,7 @@ export default function FollowUpPanel({
                 </button>
               </nav>
             )}
-            <p id={`${panelId}-status`} role={statusError ? "alert" : undefined} className={`text-[11px] ${statusError ? "text-error" : "text-on-surface/45"}`}>
+            <p id={`${panelId}-status`} role={statusError ? "alert" : undefined} className={`text-[0.6875rem] ${statusError ? "text-error" : "text-on-surface/45"}`}>
               {statusError ?? (isStreaming ? "正在產生問題與選項…" : groups.length > 1 ? `已填 ${groups.filter((group) => getAnswer(group).trim()).length} / ${groups.length} 題` : "選好後送出，也可以自由補充")}
             </p>
           </div>

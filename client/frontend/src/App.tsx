@@ -12,12 +12,14 @@ import ChatArea from "./components/ChatArea";
 import SettingsPanel from "./components/SettingsPanel";
 import PrivacyReviewDialog from "./components/PrivacyReviewDialog";
 import { useEmotionPreference } from "./hooks/useEmotionPreference";
+import { useTextSizePreference } from "./hooks/useTextSizePreference";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { t } = useI18n();
   const [sidebarPinned, setSidebarPinned] = useState(false);
   const [sidebarPeek, setSidebarPeek] = useState(false);
+  const desktopTriggerRef = useRef<HTMLButtonElement>(null);
   const peekTimer = useRef<number | undefined>(undefined);
   const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
 
@@ -37,6 +39,7 @@ export default function App() {
   }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { showEmotions, updateShowEmotions, preferenceSaveFailed } = useEmotionPreference();
+  const { textSize, updateTextSize, textSizeSaveFailed } = useTextSizePreference();
 
   const {
     sessions,
@@ -62,6 +65,7 @@ export default function App() {
   const unpinSidebar = () => {
     closeSidebar();
     setSidebarPinned(false);
+    desktopTriggerRef.current?.focus();
   };
   const beginPeek = (pointerType: string) => {
     if (pointerType !== "mouse") return;
@@ -80,34 +84,7 @@ export default function App() {
   }, [closeSidebar]);
 
   return (
-    <div className="flex w-full h-dvh bg-background overflow-hidden">
-      {desktop && (
-        <div className="relative z-[55] flex w-14 shrink-0 justify-center border-r border-neutral-300 bg-neutral-50 pt-2.5">
-          <button
-            type="button"
-            data-sidebar-trigger
-            aria-label={sidebarPinned ? t.unpinSidebar : t.pinSidebar}
-            aria-expanded={sidebarPinned || sidebarPeek}
-            aria-controls="conversation-sidebar"
-            aria-pressed={sidebarPinned}
-            title={sidebarPinned ? t.unpinSidebar : t.pinSidebar}
-            onPointerEnter={event => beginPeek(event.pointerType)}
-            onPointerLeave={endPeek}
-            onClick={event => {
-              if (event.detail > 1) return;
-              if (sidebarPinned) unpinSidebar();
-              else {
-                closeSidebar();
-                setSidebarPinned(true);
-              }
-            }}
-            onDoubleClick={unpinSidebar}
-            className={`flex h-11 w-11 items-center justify-center rounded-xl border text-on-surface/75 transition-colors hover:bg-neutral-200 focus-visible:outline-2 focus-visible:outline-primary ${sidebarPinned ? "border-neutral-400 bg-neutral-200" : "border-neutral-300 bg-white"}`}
-          >
-            <MaterialIcon icon={sidebarPinned ? "keep" : "side_navigation"} size={22} />
-          </button>
-        </div>
-      )}
+    <div className="conversation-layout flex h-dvh w-full overflow-hidden bg-background" data-sidebar-pinned={desktop && sidebarPinned}>
       {/* 側邊欄 */}
       <Sidebar
         sessions={sessions}
@@ -151,7 +128,43 @@ export default function App() {
         onSend={sendMessage}
         sidebarExpanded={desktop ? sidebarPinned : sidebarOpen}
         sidebarModalOpen={!desktop && sidebarOpen}
-        showSidebarTrigger={!desktop}
+        desktopSidebarTrigger={desktop ? (
+          <button
+            ref={desktopTriggerRef}
+            type="button"
+            data-sidebar-trigger
+            data-pinned={sidebarPinned}
+            aria-label={sidebarPinned ? t.unpinSidebar : t.pinSidebar}
+            aria-expanded={sidebarPinned || sidebarPeek}
+            aria-controls="conversation-sidebar"
+            aria-pressed={sidebarPinned}
+            title={sidebarPinned ? t.unpinSidebar : t.pinSidebar}
+            onPointerEnter={event => beginPeek(event.pointerType)}
+            onPointerLeave={endPeek}
+            onKeyDown={event => {
+              if (event.key === "Escape" && (sidebarPinned || sidebarPeek)) {
+                event.preventDefault();
+                unpinSidebar();
+              }
+            }}
+            onClick={event => {
+              if (event.detail > 1) return;
+              if (sidebarPinned) {
+                unpinSidebar();
+              } else {
+                closeSidebar();
+                setSidebarPinned(true);
+                if (event.detail === 0) {
+                  requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("#conversation-sidebar [data-sidebar-new]")?.focus());
+                }
+              }
+            }}
+            onDoubleClick={unpinSidebar}
+            className="sidebar-trigger"
+          >
+            <MaterialIcon icon={sidebarPinned ? "keep" : "side_navigation"} size={21} />
+          </button>
+        ) : undefined}
         onOpenSidebar={() => setSidebarOpen(true)}
       />
 
@@ -164,6 +177,9 @@ export default function App() {
         sessions={sessions}
         onClearAll={clearAllSessions}
         storageChanged={storageIssue === "changed"}
+        textSize={textSize}
+        onTextSizeChange={updateTextSize}
+        textSizeSaveFailed={textSizeSaveFailed}
         showEmotions={showEmotions}
         onShowEmotionsChange={updateShowEmotions}
         preferenceSaveFailed={preferenceSaveFailed}

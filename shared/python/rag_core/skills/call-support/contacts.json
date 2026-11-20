@@ -1,0 +1,85 @@
+{
+  "version": "2026-11-20",
+  "contacts": [
+    {
+      "label": "110 報案專線",
+      "aliases": ["110報案", "報案專線", "警方報案電話", "警察報案電話", "110"],
+      "phone": "110",
+      "extension": null,
+      "source_url": "https://dep.mohw.gov.tw/DOMHAOH/fp-327-8715-107.html",
+      "checked_at": "2026-11-20"
+    },
+    {
+      "label": "113 保護專線",
+      "aliases": ["113保護專線", "保護專線", "113"],
+      "phone": "113",
+      "extension": null,
+      "source_url": "https://dep.mohw.gov.tw/DOPs/fp-1183-6499-105.html",
+      "checked_at": "2026-11-20"
+    },
+    {
+      "label": "高雄市政府四維行政中心總機",
+      "aliases": ["高雄市政府四維行政中心", "四維行政中心", "高雄市政府", "高雄市府"],
+      "phone": "07-3368333",
+      "extension": null,
+      "source_url": "https://wwwap.kcg.gov.tw/cp.aspx?n=8A33013523400F35",
+      "checked_at": "2026-11-20"
+    },
+    {
+      "label": "高雄市政府鳳山行政中心總機",
+      "aliases": ["高雄市政府鳳山行政中心", "鳳山行政中心", "高雄市政府", "高雄市府"],
+      "phone": "07-7995678",
+      "extension": null,
+      "source_url": "https://wwwap.kcg.gov.tw/cp.aspx?n=8A33013523400F35",
+      "checked_at": "2026-11-20"
+    },
+    {
+      "label": "高雄市政府勞工局總機",
+      "aliases": ["高雄市政府勞工局", "高雄市勞工局", "高雄勞工局", "高雄市勞動主管機關"],
+      "phone": "07-8124613",
+      "extension": null,
+      "source_url": "https://labor.kcg.gov.tw/cp.aspx?n=681E1CC0824180D3",
+      "checked_at": "2026-11-20"
+    },
+    {
+      "label": "高雄市政府勞工局勞動條件科",
+      "aliases": ["高雄市政府勞工局勞動條件科", "高雄市勞工局勞動條件科", "高雄市勞動條件科"],
+      "phone": "07-8124651",
+      "extension": null,
+      "source_url": "https://labor.kcg.gov.tw/cp.aspx?n=681E1CC0824180D3",
+      "checked_at": "2026-11-20"
+    },
+    {
+      "label": "高雄市政府社會局婦女及保護服務科",
+      "aliases": ["高雄市政府社會局婦女及保護服務科", "婦女及保護服務科", "高雄市一般性騷擾申訴"],
+      "phone": "07-3303353",
+      "extension": null,
+      "source_url": "https://kcpd-wcpb.kcg.gov.tw/Content_List.aspx?n=9AF6E42D19C693CE",
+      "checked_at": "2026-11-20"
+    },
+    {
+      "label": "119 消防救護專線",
+      "aliases": ["119消防救護", "消防救護專線", "119"],
+      "phone": "119",
+      "extension": null,
+      "source_url": "https://dep.mohw.gov.tw/DOMHAOH/fp-327-8715-107.html",
+      "checked_at": "2026-11-20"
+    },
+    {
+      "label": "屏東縣政府社會處婦幼科",
+      "aliases": ["屏東縣政府社會處婦幼科", "屏東縣社會處婦幼科", "屏東縣政府社會處", "屏東縣一般性騷擾申訴", "屏東一般性騷擾申訴"],
+      "phone": "08-7320415",
+      "extension": "5329",
+      "source_url": "https://dep.mohw.gov.tw/DOPS/cp-1228-6771-105.html",
+      "checked_at": "2026-11-20"
+    },
+    {
+      "label": "屏東縣政府勞動暨青年發展處",
+      "aliases": ["屏東縣政府勞動暨青年發展處", "屏東縣勞動暨青年發展處", "屏東縣勞青處", "屏東勞青處", "屏東縣勞動主管機關"],
+      "phone": "08-7558048",
+      "extension": null,
+      "source_url": "https://eeweb.mol.gov.tw/front/202",
+      "checked_at": "2026-11-20"
+    }
+  ]
+}

@@ -269,7 +269,7 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
 
           <p
             id="chat-message-length"
-            className={`mt-1 px-4 text-right text-[11px] ${messageValidationError ? "text-error" : "text-on-surface/45"}`}
+            className={`mt-1 px-4 text-right text-[0.6875rem] ${messageValidationError ? "text-error" : "text-on-surface/45"}`}
             role={messageValidationError ? "alert" : undefined}
           >
             {messageValidationError ?? `${messageLength.toLocaleString("en-US")} / ${MAX_USER_MESSAGE_CHARACTERS.toLocaleString("en-US")}`}
@@ -278,7 +278,7 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
 
         {/* 底部免責聲明 */}
         <div className="mt-2 text-center">
-          <p className="text-[10px] leading-4 text-on-surface/40">
+          <p className="text-[0.625rem] leading-4 text-on-surface/40">
             {t.aiDisclaimer}{" "}
             <span className="text-primary font-bold cursor-pointer hover:underline">
               {t.hotline113}

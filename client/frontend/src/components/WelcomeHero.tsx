@@ -147,7 +147,7 @@ export default function WelcomeHero({ onSuggest, disabled = false, allowImageUpl
 
           <p
             id="welcome-message-length"
-            className={`mt-1 px-4 text-right text-[11px] ${messageValidationError ? "text-error" : "text-on-surface/45"}`}
+            className={`mt-1 px-4 text-right text-[0.6875rem] ${messageValidationError ? "text-error" : "text-on-surface/45"}`}
             role={messageValidationError ? "alert" : undefined}
           >
             {messageValidationError ?? `${messageLength.toLocaleString("en-US")} / ${MAX_USER_MESSAGE_CHARACTERS.toLocaleString("en-US")}`}
@@ -166,7 +166,7 @@ export default function WelcomeHero({ onSuggest, disabled = false, allowImageUpl
               </button>
             ))}
           </div>
-          <p className="mt-4 mx-auto max-w-xl text-[11px] leading-relaxed text-on-surface/50">
+          <p className="mt-4 mx-auto max-w-xl text-[0.6875rem] leading-relaxed text-on-surface/50">
             {t.heroPrivacyNote}
           </p>
         </div>

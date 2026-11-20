@@ -332,3 +332,21 @@ describe("MessageItem resource action placement", () => {
     expect(screen.queryByRole("group", { name: "相關資源" })).not.toBeInTheDocument();
   });
 });
+
+it("repairs a historical bare URL using the exact cited destination and leaves the Chinese text outside the link", () => {
+  const url = "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=N0030014";
+  const suffix = "請接著閱讀";
+  renderMessage({
+    ...base, role: "assistant", content: `可查看 ${url}${suffix}。`,
+    ragUsed: { status: true, sources: [{ label: "已核對法源", type: "law", source_url: url }] },
+  });
+  expect(screen.getByRole("link", { name: url })).toHaveAttribute("href", url);
+  expect(screen.getByText(suffix, { exact: false })).toBeVisible();
+});
+
+it("keeps an unverified historical law link as text even when it uses an official domain", () => {
+  const url = "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=N0030014";
+  renderMessage({ ...base, role: "assistant", content: `可參考[法規資料](${url})。` });
+  expect(screen.getByText("法規資料", { exact: false })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "法規資料" })).not.toBeInTheDocument();
+});

@@ -325,7 +325,7 @@ def test_fingerprints_track_provider_format_and_local_constraints(
 
 
 @pytest.mark.parametrize("kind", ["chat", "prediction"])
-def test_non_gemini_contract_fingerprint_preserves_previous_format(kind):
+def test_non_gemini_contract_fingerprint_uses_local_schema(kind):
     config = fake_runtime_config(openrouter_model=OTHER)
     chat = kind == "chat"
     contract = {
@@ -342,10 +342,12 @@ def test_non_gemini_contract_fingerprint_preserves_previous_format(kind):
         ]["schema"],
         "scenario_catalog_sha256": v4.applicable_laws_scenario_catalog_sha256(config),
     }
-    previous = hashlib.sha256(
+    if chat:
+        contract["public_contacts_version"] = v4.contact_catalog()[0]
+    expected = hashlib.sha256(
         json.dumps(
             contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode()
     ).hexdigest()
     fingerprint = v4.chat_test_contract_sha256 if chat else v4.applicable_laws_contract_sha256
-    assert fingerprint(config) == previous
+    assert fingerprint(config) == expected
