@@ -13,6 +13,7 @@ from client.tests.test_agent import FakeClient, FakeCompletions, fake_runtime_co
 from client.tests.test_guided_v4 import Rag, plan, response
 from client_app.main import app
 from rag_core import chat_service as chat
+from rag_core.agents import v4_contract
 from rag_core.agents.openrouter_agent import OpenRouterAgent
 from rag_core.core.agent_prompts import get_default_prompt_sections
 from rag_core.core.scenario_scripts import ScenarioScript
@@ -72,7 +73,7 @@ def test_changed_schema_or_instruction_changes_chat_fingerprint(attribute, monke
         value += "合成變更"
     else:
         value["json_schema"]["schema"]["description"] = "Synthetic change"
-    monkeypatch.setattr(v4, attribute, value)
+    monkeypatch.setattr(v4_contract, attribute, value)
     assert before != v4.chat_test_contract_sha256(config)
 
 

@@ -20,6 +20,7 @@ from client.tests.test_guided_v4 import (
     understanding,
 )
 from rag_core.agents import guided_v4 as v4
+from rag_core.agents import v4_contract
 from rag_core.agents.openrouter_agent import AgentContractError
 from rag_core.agents.provider_schema import provider_response_format
 from rag_core.core.agent_prompts import assemble_service_instruction
@@ -252,14 +253,14 @@ def test_fingerprints_track_provider_format_and_local_constraints(
         result["json_schema"]["schema"]["description"] = "Changed provider compilation"
         return result
 
-    monkeypatch.setattr(v4, "provider_response_format", changed)
+    monkeypatch.setattr(v4_contract, "provider_response_format", changed)
     assert fingerprint(config) != before
-    monkeypatch.setattr(v4, "provider_response_format", original)
+    monkeypatch.setattr(v4_contract, "provider_response_format", original)
     local = deepcopy(getattr(v4, formats[0]))
     local["json_schema"]["schema"]["maxLength"] = 456
     # This local bound is removed on the wire, but must still change the hash.
     assert original(GEMINI, local) == original(GEMINI, getattr(v4, formats[0]))
-    monkeypatch.setattr(v4, formats[0], local)
+    monkeypatch.setattr(v4_contract, formats[0], local)
     assert fingerprint(config) != before
 
 

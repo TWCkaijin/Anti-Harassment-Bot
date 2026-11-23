@@ -18,6 +18,7 @@ from client.tests.test_agent import FakeClient, FakeCompletions, fake_runtime_co
 from client.tests.test_guided_v4 import Rag, understanding
 from client_app.main import app
 from rag_core import chat_service as chat
+from rag_core.agents import v4_contract
 from rag_core.agents.openrouter_agent import (
     AgentContractError,
     AgentResult,
@@ -140,7 +141,7 @@ def test_contract_fingerprint_detects_fixed_prompt_and_schema_changes(attribute,
         value += "合成變更"
     else:
         value["json_schema"]["schema"]["description"] = "Synthetic schema change"
-    monkeypatch.setattr(v4, attribute, value)
+    monkeypatch.setattr(v4_contract, attribute, value)
     assert original != v4.applicable_laws_contract_sha256(config)
 
 
