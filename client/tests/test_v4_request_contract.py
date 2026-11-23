@@ -63,7 +63,7 @@ def test_explicit_masking_master_toggle_controls_case_summary():
         message="想了解程序",
         case_context={"schema_version": 3, "summary": "please call 0912345678 now"},
     )
-    kwargs, modified = chat_api._prepare_agent_input(
+    kwargs, modified = chat_api.prepare_agent_input(
         request, fake_runtime_config(enable_anonymization=False)
     )
     assert not modified

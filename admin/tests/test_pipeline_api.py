@@ -122,7 +122,7 @@ def test_admin_disabled_image_policy_rejects_before_agent(monkeypatch, version, 
         admin, "get_runtime_config", lambda **kwargs: config(enable_image_upload=override)
     )
     prepare = Mock(side_effect=AssertionError("disabled image must not be prepared"))
-    monkeypatch.setattr(chat, "_prepare_agent_input", prepare)
+    monkeypatch.setattr(chat, "prepare_agent_input", prepare)
     response = run_diagnostic(
         {
             "request": {
@@ -161,7 +161,7 @@ def test_client_review_setting_does_not_change_backend_text_masking_or_images(mo
     monkeypatch.setattr(runtime_config_module, "IMAGE_UPLOAD_ROLLOUT_ENABLED", True)
     image = "data:image/png;base64,iVBORw0KGgo="
     request_model = chat.ChatRequest(message="請聯絡 0912345678", image_base64=image)
-    arguments, masked = chat._prepare_agent_input(
+    arguments, masked = chat.prepare_agent_input(
         request_model, config(enable_image_upload=True, enable_client_privacy_review=review)
     )
     assert masked is True
@@ -212,7 +212,7 @@ def test_health_and_admin_expose_independent_image_and_client_review_settings(
 )
 def test_chat_rejects_images_in_unknown_or_multimodal_fields(monkeypatch, admin_test, fields):
     prepare = Mock(side_effect=AssertionError("must not prepare invalid request"))
-    monkeypatch.setattr(chat, "_prepare_agent_input", prepare)
+    monkeypatch.setattr(chat, "prepare_agent_input", prepare)
     payload = {"message": "合成文字需求", **fields}
     path = "/api/v1/chat/"
     if admin_test:
@@ -282,7 +282,7 @@ def test_history_budget_retains_complete_recent_turn_and_only_counts_diagnostics
         ],
     )
     diagnostics = {}
-    arguments, _ = chat._prepare_agent_input(
+    arguments, _ = chat.prepare_agent_input(
         request, config(pipeline={"history_max_messages": 3}), diagnostics
     )
     assert [item["content"] for item in arguments["history"]] == ["recent user", "recent answer"]

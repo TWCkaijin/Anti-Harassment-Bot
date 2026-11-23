@@ -177,22 +177,22 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
         if data.expected_chat_test_contract_sha256 is not None and data.output_contract != "chat":
             return jsonify({"detail": "Chat-test fingerprint requires v4 chat"}), 422
         base_config = snapshot_config or get_runtime_config()
-        if base_config.source in chat_api._UNAVAILABLE_CONFIG_SOURCES:
-            return chat_api._agent_error(
+        if base_config.source in chat_api.UNAVAILABLE_CONFIG_SOURCES:
+            return chat_api.agent_error(
                 base_config, chat_api.GateUnavailableError("Runtime config unavailable")
             )
         config = snapshot_config or resolve_runtime_config(base_config, data.overrides)
     except ValidationError as exc:
-        return chat_api._request_validation_error(exc)
+        return chat_api.request_validation_error(exc)
     except ValueError as exc:
         return jsonify({"detail": str(exc)}), 422
     if data.chat_request.image_base64 and not chat_api.image_upload_enabled(config):
-        return chat_api._image_upload_disabled_error()
+        return chat_api.image_upload_disabled_error()
     diagnostics = {"effective_config": config.public_dict()}
     if config.gate_enabled and data.output_contract == "chat":
         diagnostics["gate_reviews"] = []
     try:
-        arguments, was_anonymized = chat_api._prepare_agent_input(
+        arguments, was_anonymized = chat_api.prepare_agent_input(
             data.chat_request, config, diagnostics, include_input_stages=True
         )
         if data.output_contract == "applicable_laws_v1":
@@ -214,7 +214,7 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
 
             def refusal_payload(reply):
                 refusal_used[0] = True
-                return chat_api._gate_refusal_payload(
+                return chat_api.gate_refusal_payload(
                     reply, session_id, was_anonymized, data.chat_request
                 )
 
@@ -254,7 +254,7 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
             }
         ), 409
     except Exception as exc:
-        return chat_api._agent_error(config, exc)
+        return chat_api.agent_error(config, exc)
     try:
         if data.output_contract == "applicable_laws_v1":
             from rag_core.agents.guided_v4 import ApplicableLawPrediction
@@ -275,7 +275,7 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
             )
         assert response is not None
     except Exception as exc:
-        return chat_api._retryable_error(config, exc)
+        return chat_api.retryable_error(config, exc)
     payload = jsonify({"response": response, "diagnostics": diagnostics})
     payload.headers["Cache-Control"] = "no-store"
     return payload

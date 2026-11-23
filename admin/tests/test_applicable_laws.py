@@ -24,6 +24,7 @@ from rag_core.agents.openrouter_agent import (
     ApplicableLawPredictionResult,
     OpenRouterAgent,
 )
+from rag_core.chat import payloads as chat_payloads
 from rag_core.core.agent_errors import ApplicableLawsContractMismatchError, ModelOutputLimitError
 from rag_core.core.runtime_config import WRITABLE_FIELDS
 from rag_core.core.scenario_scripts import ScenarioScript
@@ -621,7 +622,9 @@ def test_admin_prediction_is_ephemeral_separate_and_no_store(isolated_admin, mon
             )
 
     monkeypatch.setattr(chat, "get_agent", Agent)
-    monkeypatch.setattr(chat, "_response_payload", lambda *a: pytest.fail("No chat projection"))
+    monkeypatch.setattr(
+        chat_payloads, "response_payload", lambda *a: pytest.fail("No chat projection")
+    )
     write = Mock(side_effect=AssertionError("must not persist overrides"))
     monkeypatch.setattr(admin, "update_runtime_config", write)
     result = run_diagnostic(admin_request(overrides={"temperature": 0.6}))

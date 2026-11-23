@@ -709,7 +709,7 @@ def test_text_only_versions_keep_omitted_or_null_image_compatibility(version, im
     request_model = chat_module.ChatRequest(
         message="合成文字需求", contract_version=version, **image_field
     )
-    arguments, _ = chat_module._prepare_agent_input(
+    arguments, _ = chat_module.prepare_agent_input(
         request_model, fake_runtime_config(enable_image_upload=True)
     )
     assert arguments["user_message"] == "合成文字需求"

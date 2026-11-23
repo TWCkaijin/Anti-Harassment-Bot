@@ -16,7 +16,7 @@ from client.tests.test_agent import (
     fake_runtime_config,
 )
 from rag_core.agents.openrouter_agent import AgentContractError, OpenRouterAgent
-from rag_core.chat_service import _public_reasoning_entry
+from rag_core.chat_service import public_reasoning_entry
 from rag_core.core.agent_prompts import assemble_service_instruction, get_default_prompt_sections
 from rag_core.core.case_context import CaseContext
 from rag_core.core.clarification_tokens import sign_clarification, validate_clarification_answer
@@ -805,14 +805,14 @@ def test_raw_provider_reasoning_is_never_public_even_when_display_is_enabled():
     )
     assert v4.provider_reasoning_text(value) == [("已核對本輪可用資料。", "summary")]
     assert (
-        _public_reasoning_entry(
+        public_reasoning_entry(
             {"text": "Internal implementation steps", "kind": "text", "stage": "answer"},
             100,
         )
         is None
     )
     assert (
-        _public_reasoning_entry(
+        public_reasoning_entry(
             {"text": "已核對本輪可用資料。", "kind": "summary", "stage": "answer"},
             100,
         )

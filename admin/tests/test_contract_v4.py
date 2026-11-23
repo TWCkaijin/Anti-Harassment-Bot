@@ -201,7 +201,7 @@ def test_context_rejects_ambiguous_version_or_summary(snapshot):
 @pytest.mark.parametrize("version,schema", [(4, 3)])
 def test_request_versions_use_only_their_matching_context_schema(version, schema):
     req = chat.ChatRequest(message="合成問題", contract_version=version)
-    arguments, _ = chat._prepare_agent_input(req, runtime_config())
+    arguments, _ = chat.prepare_agent_input(req, runtime_config())
     assert arguments["case_context"]["schema_version"] == schema
     for other_schema in {1, 2, 3} - {schema}:
         with pytest.raises(ValidationError):
@@ -270,7 +270,7 @@ def test_v4_choice_accepts_bound_revision_presets_and_one_freeform():
     issued = question(revision=4)
     answer = selected_answer(issued)
     req = chat.ChatRequest(**request_payload(case_context=context(4), clarification_answer=answer))
-    arguments, _ = chat._prepare_agent_input(req, runtime_config())
+    arguments, _ = chat.prepare_agent_input(req, runtime_config())
     assert "fact_key" not in arguments["clarification_answer"]
     assert arguments["clarification_constraints"]["context_revision"] == 4
     assert "allowed_values" not in arguments["clarification_constraints"]
@@ -351,7 +351,7 @@ def test_summary_masking_keeps_more_than_300_characters_and_semantic_tail():
     text = "已知情境。" * 650 + "聯絡電話0912345678；日期20260930-20261001；現在不安全。"
     req = chat.ChatRequest(**request_payload(case_context=context(8, text)))
     diagnostics = {}
-    arguments, changed = chat._prepare_agent_input(req, runtime_config(), diagnostics)
+    arguments, changed = chat.prepare_agent_input(req, runtime_config(), diagnostics)
     summary = arguments["case_context"]["summary"]
     assert changed
     assert len(summary) > 3000

@@ -10,6 +10,7 @@ from client.tests.test_agent import v4_result
 from client_app.main import app
 from rag_core import chat_service
 from rag_core.agents.gate_agent import GateDecision
+from rag_core.chat import payloads as chat_payloads
 from rag_core.chat_service import ChatRequest
 from rag_core.core.privacy_claims import (
     GENERAL_REPLY,
@@ -37,8 +38,8 @@ CONFIG = RuntimeConfig(
 @pytest.mark.parametrize("version", [4])
 def test_false_claim_replaced_with_inert_contract_for_every_version(monkeypatch, version):
     monkeypatch.setattr(
-        chat_service,
-        "_response_payload",
+        chat_payloads,
+        "response_payload",
         lambda *args: {
             "reply": "可以詢問申訴窗口。",
             "suggested_replies": [FALSE_CLAIM, "其他問題"],
@@ -47,7 +48,7 @@ def test_false_claim_replaced_with_inert_contract_for_every_version(monkeypatch,
         },
     )
     request = ChatRequest(message=PRIVATE_REQUEST, contract_version=version)
-    payload = chat_service._validated_payload(None, "turn-1", True, CONFIG, request)
+    payload = chat_service.validated_payload(None, "turn-1", True, CONFIG, request)
     assert payload["reply"] == THIRD_PARTY_REPLY
     assert payload["rag_used"] == {"status": False, "sources": []}
     assert payload["suggested_replies"] == payload["action_buttons"] == []
@@ -178,10 +179,10 @@ def test_local_correction_closes_if_post_review_disagrees_or_fails(monkeypatch, 
 
 def test_general_privacy_claim_uses_general_local_reply(monkeypatch):
     monkeypatch.setattr(
-        chat_service,
-        "_response_payload",
+        chat_payloads,
+        "response_payload",
         lambda *args: {"reply": "我們不會儲存任何個人資料。"},
     )
     request = ChatRequest(message="你們會儲存我的資料嗎？")
-    payload = chat_service._validated_payload(None, "turn-1", False, CONFIG, request)
+    payload = chat_service.validated_payload(None, "turn-1", False, CONFIG, request)
     assert payload["reply"] == GENERAL_REPLY

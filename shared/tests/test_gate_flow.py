@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from rag_core.agents.gate_agent import GateDecision
-from rag_core.chat_service import ChatRequest, _gate_refusal_payload
+from rag_core.chat_service import ChatRequest, gate_refusal_payload
 from rag_core.core.gate_policy import FIXED_SHORT_REFUSALS
 from rag_core.core.gated_chat import GateUnavailableError, run_gated_chat
 from rag_core.core.runtime_config import (
@@ -324,7 +324,7 @@ async def test_review_trace_hashes_the_actual_pre_and_post_prompts(pre_decision)
 @pytest.mark.parametrize("version", [4])
 def test_refusal_payload_keeps_each_client_contract_inert(version):
     request = ChatRequest(message="hello", contract_version=version)
-    payload = _gate_refusal_payload("short refusal", "turn-1", True, request)
+    payload = gate_refusal_payload("short refusal", "turn-1", True, request)
     assert payload["turn_id"] == payload["session_id"] == "turn-1"
     assert payload["reply"] == "short refusal"
     assert payload["rag_used"] == {"status": False, "sources": []}

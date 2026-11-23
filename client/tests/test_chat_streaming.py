@@ -9,6 +9,7 @@ import pytest
 from client.tests.test_agent import v4_result
 from client_app.main import app
 from rag_core import chat_service as chat_module
+from rag_core.chat import input as chat_input
 from rag_core.core.runtime_config import RuntimeConfig
 from rag_core.rag.base import RAGVectorSearchError
 
@@ -458,7 +459,7 @@ def test_anonymization_progress_precedes_work_and_private_input_is_still_redacte
     monkeypatch.setattr(
         chat_module, "get_runtime_config", lambda: replace(runtime, enable_anonymization=True)
     )
-    original_anonymize = chat_module.anonymize
+    original_anonymize = chat_input.anonymize
 
     def tracked_anonymize(message):
         state["anonymized"] = True
@@ -470,7 +471,7 @@ def test_anonymization_progress_precedes_work_and_private_input_is_still_redacte
             assert "victim@example.com" not in str(kwargs["history"])
             return result()
 
-    monkeypatch.setattr(chat_module, "anonymize", tracked_anonymize)
+    monkeypatch.setattr(chat_input, "anonymize", tracked_anonymize)
     monkeypatch.setattr(chat_module, "get_agent", Agent)
     response = app.test_client().post(
         "/api/v1/chat/",
