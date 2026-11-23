@@ -1,6 +1,7 @@
 """Admin configuration and diagnostic job APIs, behind session middleware."""
 
 import asyncio
+import functools
 import hashlib
 import uuid
 from dataclasses import asdict
@@ -55,6 +56,35 @@ def _log_operation_failure(operation: str, error: Exception) -> None:
             "error_type": type(error).__name__,
         },
     )
+
+
+def _admin_operation(operation: str, failure: str):
+    """Map known admin failures to one error envelope and log anything unexpected.
+
+    Revision conflicts are 409, validation errors 422 (their messages are written by
+    this service for the administrator), and other failures 500 with the type only.
+    """
+
+    def decorate(view):
+        @functools.wraps(view)
+        def wrapper(*args, **kwargs):
+            try:
+                return view(*args, **kwargs)
+            except ConfigConflictError as exc:
+                return jsonify({"code": "config_conflict", "detail": str(exc)}), 409
+            except ScenarioRevisionConflict as exc:
+                return jsonify({"code": "skills_conflict", "detail": str(exc)}), 409
+            except ValueError as exc:
+                return jsonify({"code": "invalid_request", "detail": str(exc)}), 422
+            except Exception as exc:
+                _log_operation_failure(operation, exc)
+                return jsonify(
+                    {"code": "internal_error", "detail": f"{failure}: {type(exc).__name__}"}
+                ), 500
+
+        return wrapper
+
+    return decorate
 
 
 def _public_config(runtime_config=None, catalog_state=None):
@@ -185,7 +215,7 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
     except ValidationError as exc:
         return chat_api.request_validation_error(exc)
     except ValueError as exc:
-        return jsonify({"detail": str(exc)}), 422
+        return jsonify({"code": "invalid_request", "detail": str(exc)}), 422
     if data.chat_request.image_base64 and not chat_api.image_upload_enabled(config):
         return chat_api.image_upload_disabled_error()
     diagnostics = {"effective_config": config.public_dict()}
@@ -320,7 +350,7 @@ def submit_test_job():
             idempotency_key=request.headers.get("Idempotency-Key"),
         )
     except (ValueError, ValidationError) as exc:
-        return jsonify({"detail": str(exc)}), 422
+        return jsonify({"code": "invalid_request", "detail": str(exc)}), 422
     return jsonify({"job_id": job["job_id"], "status": job["status"]}), 202
 
 
@@ -386,6 +416,7 @@ register_handler("chat_test", execute_chat_test)
 
 
 @admin_bp.route("/config", methods=["PUT"])
+@_admin_operation("update_runtime_config", "Failed to update runtime config")
 def put_config():
     identity, error = _require_admin()
     if error:
@@ -394,65 +425,42 @@ def put_config():
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         return jsonify({"detail": "JSON body must be an object"}), 400
-    try:
-        update_runtime_config(payload, updated_by=identity or "admin", expected_revision=revision)
-    except ConfigConflictError as exc:
-        return jsonify({"code": "config_conflict", "detail": str(exc)}), 409
-    except ValueError as exc:
-        return jsonify({"detail": str(exc)}), 422
-    except Exception as exc:
-        _log_operation_failure("update_runtime_config", exc)
-        return jsonify({"detail": f"Failed to update runtime config: {type(exc).__name__}"}), 500
+    update_runtime_config(payload, updated_by=identity or "admin", expected_revision=revision)
     return _config_response()
 
 
 @admin_bp.route("/config/seed", methods=["POST"])
+@_admin_operation("seed_runtime_config", "Failed to seed runtime config")
 def seed_config():
     identity, error = _require_admin()
     if error:
         return error
     revision = _expected_revision()
-    try:
-        seed_runtime_config_if_missing(updated_by=identity or "admin", expected_revision=revision)
-    except ConfigConflictError as exc:
-        return jsonify({"code": "config_conflict", "detail": str(exc)}), 409
-    except Exception as exc:
-        _log_operation_failure("seed_runtime_config", exc)
-        return jsonify({"detail": f"Failed to seed runtime config: {type(exc).__name__}"}), 500
+    seed_runtime_config_if_missing(updated_by=identity or "admin", expected_revision=revision)
     return _config_response()
 
 
 @admin_bp.route("/config/reset", methods=["POST"])
+@_admin_operation("reset_runtime_config", "Failed to reset runtime config")
 def reset_config():
     identity, error = _require_admin()
     if error:
         return error
     revision = _expected_revision()
-    try:
-        reset_runtime_config(updated_by=identity or "admin", expected_revision=revision)
-    except ConfigConflictError as exc:
-        return jsonify({"code": "config_conflict", "detail": str(exc)}), 409
-    except Exception as exc:
-        _log_operation_failure("reset_runtime_config", exc)
-        return jsonify({"detail": f"Failed to reset runtime config: {type(exc).__name__}"}), 500
+    reset_runtime_config(updated_by=identity or "admin", expected_revision=revision)
     return _config_response()
 
 
 @admin_bp.route("/scenario-scripts/seed", methods=["POST"])
+@_admin_operation("seed_scenario_scripts", "Failed to seed scenario scripts")
 def seed_scenario_scripts():
     identity, error = _require_admin()
     if error:
         return error
     revision = _expected_revision(skills=True)
-    try:
-        scripts = seed_example_scenario_scripts(
-            updated_by=identity or "admin", expected_revision=revision
-        )
-    except ScenarioRevisionConflict as exc:
-        return jsonify({"code": "skills_conflict", "detail": str(exc)}), 409
-    except Exception as exc:
-        _log_operation_failure("seed_scenario_scripts", exc)
-        return jsonify({"detail": f"Failed to seed scenario scripts: {type(exc).__name__}"}), 500
+    scripts = seed_example_scenario_scripts(
+        updated_by=identity or "admin", expected_revision=revision
+    )
     return jsonify(
         {
             "script_ids": [script.script_id for script in scripts],
@@ -462,25 +470,21 @@ def seed_scenario_scripts():
 
 
 @admin_bp.route("/scenario-scripts", methods=["GET"])
+@_admin_operation("list_scenario_scripts", "Failed to load scenario scripts")
 def get_scenario_scripts():
     _, error = _require_admin()
     if error:
         return error
-    try:
-        scripts, revision = read_scenario_catalog()
-        response = jsonify(
-            {"skills": [script.public_dict() for script in scripts], "revision": revision}
-        )
-        response.set_etag(str(revision))
-        return response
-    except ScenarioRevisionConflict as exc:
-        return jsonify({"code": "skills_conflict", "detail": str(exc)}), 409
-    except Exception as exc:
-        _log_operation_failure("list_scenario_scripts", exc)
-        return jsonify({"detail": f"Failed to load scenario scripts: {type(exc).__name__}"}), 500
+    scripts, revision = read_scenario_catalog()
+    response = jsonify(
+        {"skills": [script.public_dict() for script in scripts], "revision": revision}
+    )
+    response.set_etag(str(revision))
+    return response
 
 
 @admin_bp.route("/scenario-scripts/<script_id>", methods=["PUT"])
+@_admin_operation("upsert_scenario_script", "Failed to save scenario script")
 def put_scenario_script(script_id: str):
     identity, error = _require_admin()
     if error:
@@ -489,34 +493,21 @@ def put_scenario_script(script_id: str):
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         return jsonify({"detail": "JSON body must be an object"}), 400
-    try:
-        response = jsonify(
-            upsert_scenario_script(
-                script_id, payload, identity or "admin", expected_revision=revision
-            ).public_dict()
-        )
-        response.headers["X-Skills-Revision"] = str(get_scenario_revision())
-        return response
-    except ScenarioRevisionConflict as exc:
-        return jsonify({"code": "skills_conflict", "detail": str(exc)}), 409
-    except ValueError as exc:
-        return jsonify({"detail": str(exc)}), 422
-    except Exception as exc:
-        _log_operation_failure("upsert_scenario_script", exc)
-        return jsonify({"detail": f"Failed to save scenario script: {type(exc).__name__}"}), 500
+    response = jsonify(
+        upsert_scenario_script(
+            script_id, payload, identity or "admin", expected_revision=revision
+        ).public_dict()
+    )
+    response.headers["X-Skills-Revision"] = str(get_scenario_revision())
+    return response
 
 
 @admin_bp.route("/scenario-scripts/<script_id>", methods=["DELETE"])
+@_admin_operation("delete_scenario_script", "Failed to delete scenario script")
 def remove_scenario_script(script_id: str):
     _, error = _require_admin()
     if error:
         return error
     revision = _expected_revision(skills=True)
-    try:
-        delete_scenario_script(script_id, expected_revision=revision)
-    except ScenarioRevisionConflict as exc:
-        return jsonify({"code": "skills_conflict", "detail": str(exc)}), 409
-    except Exception as exc:
-        _log_operation_failure("delete_scenario_script", exc)
-        return jsonify({"detail": f"Failed to delete scenario script: {type(exc).__name__}"}), 500
+    delete_scenario_script(script_id, expected_revision=revision)
     return "", 204

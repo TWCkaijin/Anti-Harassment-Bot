@@ -383,8 +383,9 @@ def chat():
         req_obj = ChatRequest(**req_data)
     except ValidationError as e:
         return request_validation_error(e)
-    except Exception as e:
-        return jsonify({"detail": str(e)}), 400
+    except Exception:
+        # Never echo parser or framework exception text to the public client.
+        return jsonify({"code": "invalid_json", "detail": "Invalid JSON"}), 400
 
     runtime_config = resolve_runtime_config(get_runtime_config())
     if runtime_config.source in UNAVAILABLE_CONFIG_SOURCES:

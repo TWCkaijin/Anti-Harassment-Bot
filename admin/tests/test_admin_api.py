@@ -244,7 +244,10 @@ def test_admin_operation_failure_logs_cause_without_changing_public_error(
         )
 
     assert response.status_code == 500
-    assert response.get_json() == {"detail": f"Failed to {public_detail}: RuntimeError"}
+    assert response.get_json() == {
+        "code": "internal_error",
+        "detail": f"Failed to {public_detail}: RuntimeError",
+    }
     failures = [
         record
         for record in caplog.records
