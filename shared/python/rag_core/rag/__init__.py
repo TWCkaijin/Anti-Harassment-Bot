@@ -7,7 +7,6 @@ from rag_core.rag.base import (
     RAGUnavailableError,
     RAGVectorSearchError,
 )
-from rag_core.rag.default_rag import DefaultRAG
 from rag_core.rag.firestore_vector import FirestoreVectorRAG
 
 __all__ = [
@@ -16,6 +15,5 @@ __all__ = [
     "RAGEmbeddingError",
     "RAGUnavailableError",
     "RAGVectorSearchError",
-    "DefaultRAG",
     "FirestoreVectorRAG",
 ]

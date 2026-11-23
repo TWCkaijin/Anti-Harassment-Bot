@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
@@ -26,7 +26,6 @@ from rag_core.rag.embeddings import EmbeddingClient
 
 settings = get_settings()
 
-DataKind = Literal["document", "judgment", "remedy"]
 DocumentBuilder = Callable[[Path], list["IngestDocument"]]
 
 
@@ -364,13 +363,6 @@ def build_remedy_documents(path: Path) -> list[IngestDocument]:
 def collect_markdown_documents(data_dir: Path, builder: DocumentBuilder) -> list[IngestDocument]:
     documents: list[IngestDocument] = []
     for path in sorted(data_dir.glob("*.md")):
-        documents.extend(builder(path))
-    return documents
-
-
-def collect_csv_documents(data_dir: Path, builder: DocumentBuilder) -> list[IngestDocument]:
-    documents: list[IngestDocument] = []
-    for path in sorted(data_dir.glob("*.csv")):
         documents.extend(builder(path))
     return documents
 

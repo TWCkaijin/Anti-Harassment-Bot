@@ -152,26 +152,3 @@ def anonymize(text: str, rules: list[PIIRule] | None = None) -> AnonymizationRes
         anonymized=result,
         detected_types=detected,
     )
-
-
-def anonymize_messages(
-    messages: list[dict[str, str]],
-) -> list[dict[str, str]]:
-    """
-    批次匿名化對話歷史中的所有使用者訊息。
-    僅處理 role='user' 的訊息，assistant 訊息保持原樣。
-
-    Args:
-        messages: 對話歷史，格式為 [{"role": "user"|"assistant", "content": "..."}]
-
-    Returns:
-        匿名化後的對話歷史（深度複製，不修改原始資料）
-    """
-    anonymized = []
-    for msg in messages:
-        if msg.get("role") == "user":
-            result = anonymize(msg.get("content", ""))
-            anonymized.append({**msg, "content": result.anonymized})
-        else:
-            anonymized.append(msg)
-    return anonymized

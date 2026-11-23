@@ -4,7 +4,7 @@
 
 import pytest
 
-from rag_core.core.anonymizer import anonymize, anonymize_messages
+from rag_core.core.anonymizer import anonymize
 
 
 def test_anonymize_mobile_phone():
@@ -32,20 +32,6 @@ def test_no_pii_unchanged():
     assert result.anonymized == text
     assert not result.was_modified
     assert result.detected_types == []
-
-
-def test_anonymize_messages_only_user():
-    messages = [
-        {"role": "user", "content": "我叫 victim@example.com"},
-        {"role": "assistant", "content": "我了解，請繼續說"},
-        {"role": "user", "content": "我的電話 0912345678"},
-    ]
-    result = anonymize_messages(messages)
-    assert result[0]["role"] == "user"
-    assert "[電子郵件]" in result[0]["content"]
-    # assistant 訊息不應被修改
-    assert result[1]["content"] == "我了解，請繼續說"
-    assert "[手機號碼]" in result[2]["content"]
 
 
 @pytest.mark.parametrize(
