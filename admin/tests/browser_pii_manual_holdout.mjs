@@ -1,5 +1,5 @@
-/** Browser WebGPU diagnostic on an independently written synthetic PII set.
- * Run only against local Vite. Raw inputs and generation rounds stay in local artifacts.
+/** Browser WASM diagnostic on an independently written synthetic PII set.
+ * Run only against local Vite. Raw inputs and character spans stay in local artifacts.
  * This set is agent-curated and requires human adjudication before it can be gold data.
  */
 import assert from 'node:assert/strict';
@@ -45,27 +45,27 @@ assert(cases.filter(item => [...item.text].length >= 200 && [...item.text].lengt
 await mkdir(output, { recursive: true });
 
 const sourceHashes = {};
-for (const filename of ['config.ts', 'runtime.ts', 'runtime.worker.ts', 'extraction.ts', 'pipeline.ts']) {
+for (const filename of ['config.ts', 'runtime.ts', 'runtime.worker.ts', 'extraction.ts', 'rules.ts', 'wordpiece.ts']) {
   sourceHashes[filename] = createHash('sha256').update(await readFile(path.join('admin/frontend/src/masking-lab', filename))).digest('hex');
 }
 const fixtureHash = createHash('sha256').update(fixtureBytes).digest('hex');
 const context = await chromium.launchPersistentContext(profile, {
   channel: process.env.BROWSER_CHANNEL || 'chrome',
   headless: process.env.BROWSER_HEADLESS !== 'false',
-  viewport: { width: 1440, height: 900 }, serviceWorkers: 'block',
+  args: ["--disable-webgpu"], viewport: { width: 1440, height: 900 }, serviceWorkers: 'block',
 });
 const requests = [], violations = [], pageErrors = [];
-const allowedRemote = ['huggingface.co', 'raw.githubusercontent.com', 'cdn-lfs.huggingface.co', 'cdn-lfs-us-1.hf.co', 'cas-bridge.xethub.hf.co', 'us.aws.cdn.hf.co'];
 await context.route('**/*', async route => {
   const req = route.request(), url = new URL(req.url());
   if (url.hostname === 'fonts.googleapis.com') return route.fulfill({ contentType: 'text/css', body: '' });
   if (url.pathname.endsWith('/auth/session')) return route.fulfill({ json: { authenticated: true, csrf_token: 'synthetic-csrf', expires_at: '2099-01-01T00:00:00Z', environment: 'preview' } });
   if (url.pathname.endsWith('/config')) return route.fulfill({ json: { openrouter_model: 'synthetic/not-used', agent_prompt_sections: {}, rag_collections: {}, environment_document_id: 'synthetic', source: 'local' } });
   if (url.pathname.endsWith('/scenario-scripts')) return route.fulfill({ json: { skills: [] } });
+  if (url.pathname.endsWith('/rerank-models')) return route.fulfill({ json: { data: [] } });
   const record = { host: url.hostname, path: url.pathname, method: req.method() };
   requests.push(record);
   const allowed = req.method() === 'GET' && !req.postData()
-    && ((['127.0.0.1', 'localhost'].includes(url.hostname) && !url.pathname.startsWith('/api/')) || allowedRemote.includes(url.hostname));
+    && url.origin === new URL(base).origin && !url.pathname.startsWith('/api/');
   if (!allowed) { violations.push(record); return route.abort(); }
   return route.continue();
 });
@@ -126,24 +126,20 @@ async function save() {
   return browserState;
 }
 try {
-  await page.goto(`${base}/masking-validation.html`);
+  await page.goto(base);
+  await page.getByRole('button', { name: '本機遮罩驗證', exact: true }).click();
   await page.getByRole('heading', { name: '瀏覽器自動遮罩驗證' }).waitFor();
-  const adapter = await page.evaluate(async () => navigator.gpu?.requestAdapter());
-  assert(adapter, 'No WebGPU adapter available');
   state = 'running';
   await page.evaluate(async fixtureCases => {
     const { BrowserMaskingRuntime } = await import('/src/masking-lab/runtime.ts');
     const config = await import('/src/masking-lab/config.ts');
-    const gpuAdapter = await navigator.gpu?.requestAdapter();
     const ua = navigator.userAgentData;
     const full = ua ? await ua.getHighEntropyValues(['fullVersionList']).catch(() => null) : null;
     const record = window.__manualPiiHoldout = {
       status: 'loading', results: [], load: [], warmup: null, error: null,
       userAgent: navigator.userAgent, fullVersionList: full?.fullVersionList ?? null,
-      adapterInfo: gpuAdapter ? { vendor: gpuAdapter.info.vendor, architecture: gpuAdapter.info.architecture,
-        device: gpuAdapter.info.device, description: gpuAdapter.info.description } : null,
-      model: { id: config.MODEL_ID, revision: config.MODEL_REVISION, libraryRevision: config.LIBRARY_REVISION,
-        runtimeVersion: config.RUNTIME_VERSION, promptVersion: config.PROMPT_VERSION },
+      adapterInfo: { executionProvider: "wasm" },
+      model: { id: config.TINY_MODEL, revision: config.TINY_REVISION, runtimeVersion: config.ORT_VERSION, rulesVersion: config.RULES_VERSION },
     };
     void (async () => {
       let runtime = new BrowserMaskingRuntime();
@@ -152,17 +148,17 @@ try {
         record.status = 'warmup';
         const warmupStart = performance.now();
         try { const warm = await runtime.detect('這是一則沒有身分資料的本機測試。');
-          record.warmup = { elapsedMs: performance.now() - warmupStart, entities: warm.entities, rounds: warm.rounds, error: null };
-        } catch (error) { record.warmup = { elapsedMs: performance.now() - warmupStart, entities: [], rounds: error.rounds ?? [], error: error.code ?? 'evaluation_failed' }; }
+          record.warmup = { elapsedMs: performance.now() - warmupStart, entities: warm.entities, spans: warm.spans, error: null };
+        } catch (error) { record.warmup = { elapsedMs: performance.now() - warmupStart, entities: [], spans: [], error: error.code ?? 'evaluation_failed' }; }
         for (const item of fixtureCases) {
           record.status = `case:${item.id}`;
           const start = performance.now();
-          let detected = [], rounds = [], error = null, modelElapsedMs = null, chunks = null;
+          let detected = [], spans = [], error = null, modelElapsedMs = null, chunks = null;
           try { const result = await runtime.detect(item.text);
-            detected = result.entities; rounds = result.rounds ?? []; modelElapsedMs = result.elapsedMs; chunks = result.chunks;
-          } catch (failure) { error = failure.code ?? 'evaluation_failed'; rounds = failure.rounds ?? []; }
+            detected = result.entities; spans = result.spans; modelElapsedMs = result.elapsedMs; chunks = result.chunks;
+          } catch (failure) { error = failure.code ?? 'evaluation_failed'; }
           record.results.push({ id: item.id, category: item.category, characters: [...item.text].length,
-            source: item.text, expected: item.expected, detected, rounds, error, chunks, modelElapsedMs,
+            source: item.text, expected: item.expected, detected, spans, error, chunks, modelElapsedMs,
             elapsedMs: performance.now() - start });
           if (['worker_failed', 'model_timeout', 'model_not_ready'].includes(error)) {
             runtime.dispose(); runtime = new BrowserMaskingRuntime();

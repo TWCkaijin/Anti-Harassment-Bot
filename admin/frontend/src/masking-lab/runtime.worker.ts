@@ -1,100 +1,111 @@
-import type { MLCEngine } from "@mlc-ai/web-llm";
-import { CONTEXT_WINDOW, LIBRARY_URL, MODEL_ID, MODEL_REVISION, modelUrl, isModelAssetUrl, type Entity } from "./config";
-import { MaskingError, splitText } from "./extraction";
-import { extractInStages, type ExtractionRound } from "./pipeline";
-import type { WorkerCommand, WorkerEvent } from "./types";
+import { env, InferenceSession, Tensor } from "onnxruntime-web/wasm";
+import wasmURL from "onnxruntime-web/ort-wasm-simd-threaded.wasm?url";
+import mjsURL from "onnxruntime-web/ort-wasm-simd-threaded.mjs?url";
+import { MaskingError } from "./extraction";
+import { TINY_ASSET_PATH, TINY_REVISION } from "./config";
+import { compactSpans, detectRuleSpans, prioritizeRules } from "./rules";
+import { TinyTokenizer } from "./wordpiece";
+import type { EntitySpan, WorkerCommand, WorkerEvent } from "./types";
 
-const send = (event: WorkerEvent) => self.postMessage(event);
-let engine: MLCEngine | null = null;
-let busy = false;
-let activeRevision = MODEL_REVISION;
-let forceDownload = false;
-let fetchedBytes = 0, fetches = 0, failedFetches = 0;
-const measurements: Promise<void>[] = [];
-const originalFetch = self.fetch.bind(self);
+const LABEL_COUNT = 73;
+const people = [14, 32, 50, 68];
+const organizations = [12, 30, 48, 66];
 
-// Model input never enters a network request. Measure response payload bytes only;
-// this deliberately excludes TLS/HTTP overhead and reports IndexedDB hits as 0.
-self.fetch = async (input, init) => {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  const method = init?.method ?? (input instanceof Request ? input.method : "GET");
-  if (method !== "GET" || init?.body || !isModelAssetUrl(url, activeRevision)) throw new MaskingError("network_request_blocked");
-  fetches += 1;
-  try {
-    const response = await originalFetch(input, { ...init, ...(forceDownload ? { cache: "reload" as const } : {}), credentials: "omit", referrerPolicy: "no-referrer" });
-    if (!response.ok) { failedFetches += 1; return response; }
-    measurements.push(response.clone().arrayBuffer().then(buffer => { fetchedBytes += buffer.byteLength; }).catch(() => { failedFetches += 1; }));
-    return response;
-  } catch (error) { failedFetches += 1; throw error; }
-};
+let model: { session: InferenceSession; tokenizer: TinyTokenizer } | undefined;
 
-async function execute(command: WorkerCommand) {
-  if (busy) { send({ id: command.id, kind: "error", code: "busy" }); return; }
-  busy = true;
-  const rounds: ExtractionRound[] = [];
-  try {
-    if (command.operation === "load") {
-      if (engine) { await engine.unload(); engine = null; }
-      activeRevision = command.revision ?? MODEL_REVISION;
-      const url = modelUrl(activeRevision);
-      forceDownload = command.forceDownload === true;
-      fetchedBytes = 0; fetches = 0; failedFetches = 0; measurements.length = 0;
-      const start = performance.now();
-      const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<{ info?: Record<string, string> } | null> } }).gpu;
-      if (!gpu) throw new MaskingError("webgpu_unavailable");
-      const adapter = await gpu.requestAdapter();
-      if (!adapter) throw new MaskingError("gpu_adapter_unavailable");
-      // Import only after installing the network guard: the runtime captures fetch.
-      const { MLCEngine, deleteModelAllInfoInCache } = await import("@mlc-ai/web-llm");
-      const appConfig = { cacheBackend: "indexeddb" as const, model_list: [{
-        model: url, model_id: MODEL_ID, model_lib: LIBRARY_URL,
-        overrides: { context_window_size: CONTEXT_WINDOW },
-      }] };
-      if (forceDownload) {
-        send({ id: command.id, kind: "progress", progress: 0, text: "正在清除目標版本快取並重新下載" });
-        await deleteModelAllInfoInCache(MODEL_ID, appConfig);
-      }
-      const candidate = new MLCEngine({
-        appConfig,
-        logLevel: "SILENT",
-        initProgressCallback: report => send({ id: command.id, kind: "progress", progress: report.progress, text: report.text }),
-      });
-      await candidate.reload(MODEL_ID);
-      await Promise.all(measurements);
-      engine = candidate;
-      const info = adapter.info;
-      send({ id: command.id, kind: "loaded", metrics: {
-        modelRevision: activeRevision, elapsedMs: performance.now() - start, fetchedBytes, fetches, failedFetches,
-        adapter: Object.fromEntries((["vendor", "architecture", "device", "description"] as const).map(key => [key, String(info?.[key] ?? "unavailable")])),
-      } });
-    } else {
-      if (!engine) throw new MaskingError("model_not_ready");
-      const start = performance.now();
-      const entities: Entity[] = [];
-      const chunks = splitText(command.text);
-      for (const [index, chunk] of chunks.entries()) {
-        const extracted = await extractInStages(chunk, async (messages, schema, maxTokens) => {
-          await engine!.resetChat();
-          const result = await engine!.chat.completions.create({
-            messages, temperature: 0, seed: 0, max_tokens: maxTokens,
-            extra_body: { enable_thinking: false },
-            response_format: { type: "json_object", schema },
-          });
-          if (result.choices[0]?.finish_reason !== "stop") {
-            const error = new MaskingError("incomplete_output");
-            error.generatedOutput = result.choices[0]?.message.content ?? "";
-            throw error;
-          }
-          return result.choices[0].message.content ?? "";
-        }, index);
-        rounds.push(...extracted.rounds);
-        for (const entity of extracted.entities) if (!entities.some(item => item.text === entity.text)) entities.push(entity);
-      }
-      send({ id: command.id, kind: "detected", detection: { entities, rounds, elapsedMs: performance.now() - start, chunks: chunks.length } });
-    }
-  } catch (error) {
-    // Never forward library exception messages. Stage outputs are local lab evidence.
-    send({ id: command.id, kind: "error", rounds: [...rounds, ...(error instanceof MaskingError ? error.rounds : [])], code: error instanceof MaskingError ? error.code : command.operation === "load" ? "model_load_failed" : "model_execution_failed" });
-  } finally { busy = false; }
+const reply = (event: WorkerEvent) => self.postMessage(event);
+const sameOrigin = (url: string) => new URL(url, self.location.origin).href;
+
+async function loadTiny() {
+  const base = sameOrigin(import.meta.env.BASE_URL + TINY_ASSET_PATH);
+  const response = await fetch(new URL("model.onnx", base), { mode: "same-origin", redirect: "error" });
+  if (!response.ok || response.headers.get("content-type")?.includes("text/html")) throw new MaskingError("tiny_assets_missing");
+  const fetchAsset = async (url: string) => {
+    const result = await fetch(url, { mode: "same-origin", redirect: "error" });
+    if (!result.ok || result.headers.get("content-type")?.includes("text/html")) throw new MaskingError("tiny_assets_missing");
+    return result.arrayBuffer();
+  };
+  const [weights, vocab, wasm] = await Promise.all([
+    response.arrayBuffer(),
+    fetchAsset(new URL("vocab.txt", base).href),
+    fetchAsset(sameOrigin(wasmURL)),
+  ]);
+  env.wasm.numThreads = 1;
+  env.wasm.proxy = false;
+  env.wasm.wasmPaths = { mjs: sameOrigin(mjsURL) };
+  env.wasm.wasmBinary = wasm;
+  const tokenizer = new TinyTokenizer(new TextDecoder().decode(vocab));
+  const session = await InferenceSession.create(weights, { executionProviders: ["wasm"] });
+  model = { session, tokenizer };
+  const loaderBytes = performance.getEntriesByName(sameOrigin(mjsURL), "resource")
+    .reduce((total, entry) => total + (entry as PerformanceResourceTiming).decodedBodySize, 0);
+  return weights.byteLength + vocab.byteLength + wasm.byteLength + loaderBytes;
 }
-self.onmessage = (event: MessageEvent<WorkerCommand>) => { void execute(event.data); };
+
+async function detectTiny(source: string, { tokenizer, session }: NonNullable<typeof model>) {
+  const spans: EntitySpan[] = [];
+  const windows = tokenizer.encode(source);
+  for (const tokens of windows) {
+    const dims = [1, tokens.length];
+    const ids = new Tensor("int64", BigInt64Array.from(tokens, token => BigInt(token.id)), dims);
+    const mask = new Tensor("int64", new BigInt64Array(tokens.length).fill(1n), dims);
+    const types = new Tensor("int64", new BigInt64Array(tokens.length), dims);
+    const { logits } = await session.run({ input_ids: ids, attention_mask: mask, token_type_ids: types });
+    try {
+      const data = logits.data;
+      if (!(data instanceof Float32Array) || data.length !== tokens.length * LABEL_COUNT) throw new MaskingError("tiny_invalid_output");
+      let current: EntitySpan | undefined;
+      const flush = () => { if (current) spans.push(current); current = undefined; };
+      for (const [index, token] of tokens.entries()) {
+        const offset = index * LABEL_COUNT;
+        let label = 0;
+        for (let next = 1; next < LABEL_COUNT; next++) {
+          if (data[offset + next] > data[offset + label]) label = next;
+        }
+        const person = people.indexOf(label), organization = organizations.indexOf(label);
+        const kind = token.end <= token.start ? null : person >= 0 ? "person" : organization >= 0 ? "organization" : null;
+        const tag = kind === "person" ? person : organization;
+        if (!kind || tag === 0 || tag === 3 || (current && (current.type !== kind || current.end !== token.start))) flush();
+        if (kind) {
+          current = { start: current?.start ?? token.start, end: token.end, type: kind };
+          if (tag === 2 || tag === 3) flush();
+        }
+      }
+      flush();
+    } finally {
+      logits.dispose();
+      ids.dispose(); mask.dispose(); types.dispose();
+    }
+  }
+  return { spans: compactSpans(spans), chunks: windows.length };
+}
+
+self.addEventListener("message", async ({ data }: MessageEvent<WorkerCommand>) => {
+  const { id, operation } = data;
+  const start = performance.now();
+  try {
+    if (operation === "load") {
+      reply({ id, kind: "progress", progress: 0, text: "正在載入 Tiny NER 與 CPU 執行環境" });
+      await model?.session.release();
+      model = undefined;
+      const bytes = await loadTiny();
+      reply({ id, kind: "loaded", metrics: {
+        elapsedMs: performance.now() - start, fetchedBytes: bytes, fetches: 4, failedFetches: 0,
+        adapter: { executionProvider: "wasm" },
+        modelRevision: TINY_REVISION,
+      } });
+      return;
+    }
+    if (!model) throw new MaskingError("model_not_ready");
+    const rules = detectRuleSpans(data.text);
+    const tiny = await detectTiny(data.text, model);
+    const spans = prioritizeRules(rules, tiny.spans);
+    const entities = [...new Map(spans.map(({ start, end, type }) => {
+      const text = data.text.slice(start, end);
+      return [JSON.stringify([type, text]), { text, type }] as const;
+    })).values()];
+    reply({ id, kind: "detected", detection: { spans, entities, chunks: tiny.chunks, elapsedMs: performance.now() - start } });
+  } catch (error) {
+    reply({ id, kind: "error", code: error instanceof MaskingError ? error.code : operation === "load" ? "tiny_initialization_failed" : "tiny_execution_failed" });
+  }
+});

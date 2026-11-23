@@ -1,6 +1,6 @@
-/** Real local WebGPU benchmark, using only the committed synthetic fixture set.
+/** Real local Tiny NER benchmark, using only the committed synthetic fixture set.
  * Start Vite on 127.0.0.1:5197. No chat/OpenRouter/Firestore requests are permitted.
- * MODEL assets are public downloads; report/profile are written outside the repo.
+ * Model and runtime assets are served by the local app; report/profile are written outside the repo.
  */
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -22,12 +22,10 @@ for (const filename of await readdir('admin/frontend/src/masking-lab')) {
 }
 const context = await chromium.launchPersistentContext(process.env.BROWSER_PROFILE_DIR || path.join(output, 'chrome-profile'), {
   channel: process.env.BROWSER_CHANNEL || 'chrome', headless: process.env.BROWSER_HEADLESS === 'true',
-  viewport: { width: 1440, height: 1050 }, serviceWorkers: 'block',
+  args: ["--disable-webgpu"], viewport: { width: 1440, height: 1050 }, serviceWorkers: 'block',
 });
 const requests = [], violations = [], pageErrors = [];
 let state = 'started';
-const localCacheOnly = process.env.BROWSER_LOCAL_CACHE_ONLY === 'true';
-const allowedRemote = ['huggingface.co', 'raw.githubusercontent.com', 'cdn-lfs.huggingface.co', 'cdn-lfs-us-1.hf.co', 'cas-bridge.xethub.hf.co', 'us.aws.cdn.hf.co'];
 await context.route('**/*', async route => {
   const req = route.request(), url = new URL(req.url());
   // Optional Admin font styles are irrelevant to the model and stay offline.
@@ -40,7 +38,7 @@ await context.route('**/*', async route => {
   const record = { host: url.hostname, path: url.pathname, method: req.method() };
   requests.push(record);
   const allowed = req.method() === 'GET' && !req.postData()
-    && (['127.0.0.1', 'localhost'].includes(url.hostname) && !url.pathname.startsWith('/api/') || !localCacheOnly && allowedRemote.includes(url.hostname));
+    && url.origin === new URL(base).origin && !url.pathname.startsWith('/api/');
   if (!allowed) { violations.push(record); return route.abort(); }
   return route.continue();
 });
@@ -51,7 +49,7 @@ page.on('console', message => {
 });
 async function save(name = 'report.json') {
   const report = await page.evaluate(() => window.maskingValidationReport ?? null).catch(() => null);
-  await writeFile(path.join(output, name), JSON.stringify({ state, localCacheOnly, sourceHashes, report, requests, violations, pageErrors }, null, 2));
+  await writeFile(path.join(output, name), JSON.stringify({ state, sourceHashes, report, requests, violations, pageErrors }, null, 2));
   return report;
 }
 async function waitWhileBusy(limitMs) {
@@ -59,7 +57,7 @@ async function waitWhileBusy(limitMs) {
   let last = '';
   while (await page.getByRole('button', { name: '停止', exact: true }).isEnabled()) {
     if (Date.now() - start > limitMs) throw new Error('browser_operation_timeout');
-    const status = await page.getByRole('status').innerText();
+    const status = await page.getByRole('region', { name: '執行控制' }).getByRole('status').innerText();
     if (status !== last) { console.log(status.slice(0, 240)); last = status; await save('progress.json'); }
     await page.waitForTimeout(1000);
   }
@@ -68,27 +66,24 @@ async function waitWhileBusy(limitMs) {
 try {
   await page.goto(`${base}/masking-validation.html`);
   await page.getByRole('heading', { name: '瀏覽器自動遮罩驗證' }).waitFor();
-  const capabilities = await page.evaluate(async () => {
-    const gpu = navigator.gpu;
-    const adapter = gpu ? await gpu.requestAdapter() : null;
-    return { userAgent: navigator.userAgent, webgpu: !!gpu, adapter: !!adapter,
-      adapterInfo: adapter ? { vendor: adapter.info.vendor, architecture: adapter.info.architecture, device: adapter.info.device, description: adapter.info.description } : null,
-      features: adapter ? [...adapter.features] : [],
-      memory: navigator.deviceMemory ?? null, hardwareConcurrency: navigator.hardwareConcurrency,
-    };
-  });
-  capabilities.host = { platform: os.platform(), architecture: os.arch(), release: os.release(), cpu: os.cpus()[0]?.model, memoryBytes: os.totalmem() };
+  const capabilities = await page.evaluate(() => ({
+    userAgent: navigator.userAgent, wasm: typeof WebAssembly === 'object',
+    memory: navigator.deviceMemory ?? null, hardwareConcurrency: navigator.hardwareConcurrency,
+  }));
+  capabilities.host = { platform: os.platform(), architecture: os.arch(), cpu: os.cpus()[0]?.model };
   await writeFile(path.join(output, 'capabilities.json'), JSON.stringify(capabilities, null, 2));
-  console.log('capabilities', JSON.stringify(capabilities));
-  assert(capabilities.adapter, 'No WebGPU adapter available in this browser');
+  assert(capabilities.wasm, 'WebAssembly must be available');
+  assert.equal(await page.getByRole('combobox', { name: '遮罩方法' }).count(), 0);
   state = 'cold_load';
-  await page.getByRole('button', { name: '載入本機模型', exact: true }).click();
+  await page.getByRole('button', { name: '載入 Tiny NER', exact: true }).click();
   await waitWhileBusy(660_000);
   const initial = await save('cold-load.json');
+  assert.equal(initial.method, 'rules-tiny');
+  assert.equal(initial.coldLoad.adapter.executionProvider, 'wasm');
   assert(initial.basicCheck?.passed, 'Basic extraction did not find any expected synthetic PII');
   await page.screenshot({ path: path.join(output, 'basic-check.png'), fullPage: false });
   state = 'cached_load';
-  await page.getByRole('button', { name: '重新載入並量測快取' }).click();
+  await page.getByRole('button', { name: '重新載入 Tiny NER' }).click();
   await waitWhileBusy(660_000);
   await save('cached-load.json');
   for (const [split, label, expected] of [['development', '執行開發集 80 則', 80], ['holdout', '執行保留驗證集 40 則', 40]]) {
@@ -103,6 +98,7 @@ try {
   console.log('scores', JSON.stringify(report.scores));
   console.log('gatePassed', report.gatePassed);
   // This is a minimum functional regression check, not the 95% quality gate.
+  assert.equal(report.scores.all.successfulChecks, 120);
   assert(report.scores.all.truePositive > 0, 'The model returned no correct spans');
   assert.equal(violations.length, 0, 'Unexpected outbound network request');
   assert.equal(pageErrors.length, 0, 'Browser page errors');

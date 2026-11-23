@@ -1,7 +1,7 @@
 import type { Entity } from "./config";
 import { MaskingError, previewMask } from "./extraction";
 import type { BrowserMaskingRuntime } from "./runtime";
-import type { ExtractionRound } from "./pipeline";
+import type { EntitySpan } from "./types";
 
 /** Synthetic controls, separate from both the demonstrations and scored fixtures. */
 export const BASIC_CHECKS: { id: string; source: string; expected: Entity[] }[] = [
@@ -12,7 +12,6 @@ export const BASIC_CHECKS: { id: string; source: string; expected: Entity[] }[] 
 export interface BasicCheckCase {
   id: string; source: string; expected: Entity[]; detected: Entity[];
   masked: string | null; error: string | null;
-  rounds?: ExtractionRound[];
 }
 export interface BasicCheckReport { cases: BasicCheckCase[]; matched: number; expected: number; unexpected: number; passed: boolean }
 
@@ -22,11 +21,11 @@ export async function runBasicChecks(runtime: BrowserMaskingRuntime, signal: Abo
   for (const check of BASIC_CHECKS) {
     if (signal.aborted) break;
     let detected: Entity[] = [], error: string | null = null;
-    let rounds: ExtractionRound[];
-    try { const result = await runtime.detect(check.source); detected = result.entities; rounds = result.rounds ?? []; }
-    catch (failure) { error = failure instanceof MaskingError ? failure.code : "model_execution_failed"; rounds = failure instanceof MaskingError ? failure.rounds : []; }
+    let spans: EntitySpan[] = [];
+    try { const result = await runtime.detect(check.source); detected = result.entities; spans = result.spans; }
+    catch (failure) { error = failure instanceof MaskingError ? failure.code : "model_execution_failed"; }
     if (signal.aborted) break;
-    cases.push({ ...check, detected, rounds, error, masked: error ? null : previewMask(check.source, detected) });
+    cases.push({ ...check, detected, error, masked: error ? null : previewMask(check.source, spans) });
     if (error) break;
   }
   const matched = cases.reduce((sum, item) => sum + item.expected.filter(entity => item.detected.some(found => found.text === entity.text)).length, 0);

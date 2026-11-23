@@ -167,7 +167,6 @@ export interface HealthResponse {
 }
 
 export interface RuntimeConfig {
-  pii_model_revision?: string;
   revision?: string;
   gate_enabled?: boolean;
   gate_model?: string;
@@ -220,7 +219,6 @@ export type RuntimeConfigUpdate = Partial<
     | "gate_post_prompt"
     | "gate_timeout_seconds"
     | "gate_jev_threshold"
-    | "pii_model_revision"
     | "openrouter_provider_sort"
     | "rag_rerank_enabled"
     | "rag_rerank_model"

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ENTITY_TYPES, MODEL_ID, MODEL_REVISION, PROMPT_VERSION } from "./config";
-import { latestModelRevision, rememberModelRevision, savedModelRevision } from "./modelVersion";
+import { ENTITY_TYPES, TINY_REVISION } from "./config";
 import { BrowserMaskingRuntime } from "./runtime";
 import { createReport, evaluateSplit, type CaseResult, type EvaluationReport, type Split } from "./benchmark";
 import type { LoadMetrics } from "./types";
@@ -13,12 +12,10 @@ const percent = (fraction: number) => `${(fraction * 100).toFixed(1)}%`;
 const typeNames = { person: "人物", organization: "單位", address: "地址", contact: "聯絡資訊", identifier: "識別號" } as const;
 
 // active follows session access, not navigation: hidden panels keep their worker.
-export default function ValidationPage({ active = true, configuredRevision, groupName }: { active?: boolean; configuredRevision?: string; groupName?: string }) {
-  const groupRevision = configuredRevision || MODEL_REVISION;
+export default function ValidationPage({ active = true }: { active?: boolean }) {
   const runtime = useRef<BrowserMaskingRuntime | null>(null);
   const controller = useRef<AbortController | null>(null);
   const generation = useRef(0);
-  const [revision, setRevision] = useState(() => groupName ? groupRevision : savedModelRevision(MODEL_REVISION));
   const [status, setStatus] = useState("尚未載入模型");
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -48,7 +45,7 @@ export default function ValidationPage({ active = true, configuredRevision, grou
   }, [active]);
   useEffect(() => () => { delete window.maskingValidationReport; }, []);
 
-  const load = async (update = false, useGroup = false) => {
+  const load = async () => {
     if (!active || busy) return;
     const current = ++generation.current;
     setBusy(true); setReady(false); setFailure(null); setBasicCheck(null); setStatus("正在載入本機模型");
@@ -58,19 +55,11 @@ export default function ValidationPage({ active = true, configuredRevision, grou
     runtime.current = instance;
     setProgress(0);
     try {
-      let target = useGroup ? groupRevision : revision;
-      if (useGroup && target !== revision) { setCases([]); setColdLoad(null); setCachedLoad(null); setRevision(target); }
-      if (update) {
-        setStatus("正在檢查 Hugging Face 最新版本");
-        target = await latestModelRevision(abortController.signal);
-        if (current !== generation.current) return;
-        setCases([]); setColdLoad(null); setCachedLoad(null); setRevision(target);
-        setStatus(`正在下載模型版本 ${target.slice(0, 12)}`);
-      }
-      const metrics = await instance.load((fraction, text) => { if (current === generation.current) { setProgress(fraction); setStatus(text); } }, { revision: target, forceDownload: update });
+      const metrics = await instance.load((fraction, text) => {
+        if (current === generation.current) { setProgress(fraction); setStatus(text); }
+      });
       if (current !== generation.current) return;
-      const measured = { ...metrics, modelRevision: target };
-      if (coldLoad && !update && target === revision) setCachedLoad(measured); else setColdLoad(measured);
+      if (coldLoad) setCachedLoad(metrics); else setColdLoad(metrics);
       setStatus("正在執行姓名、電話、信箱與無個資的基本辨識檢查");
       const check = await runBasicChecks(instance, abortController.signal);
       if (current !== generation.current) return;
@@ -80,7 +69,6 @@ export default function ValidationPage({ active = true, configuredRevision, grou
         setStatus("模型已載入，但基本辨識未通過；請查看下方實際輸出");
         return;
       }
-      if (!groupName) rememberModelRevision(target);
       setReady(true); setStatus(`基本辨識命中 ${check.matched} / ${check.expected} 個片段；可執行完整驗證`);
     } catch (error) {
       if (current !== generation.current) return;
@@ -113,30 +101,32 @@ export default function ValidationPage({ active = true, configuredRevision, grou
   const download = () => {
     const link = document.createElement("a");
     const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
-    link.href = url; link.download = "browser-masking-validation.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    link.href = url; link.download = "browser-masking-validation-rules-tiny.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return <section aria-label="本機遮罩驗證" className="mx-auto max-w-5xl space-y-6 text-on-surface">
     <header className="space-y-3">
-      <p className="text-sm font-semibold text-primary">本機模型 · 管理員驗證</p>
       <h3 className="text-xl font-bold">瀏覽器自動遮罩驗證</h3>
       <p className="max-w-3xl leading-relaxed">只處理 120 則內建合成案例，不連接聊天 API。先驗證辨識品質與速度，通過後才整合正式對話。原始文字與辨識結果留在此裝置。</p>
-      <p className="text-sm text-on-surface/65">模型：{MODEL_ID}；提示版本：{PROMPT_VERSION}。<br />模型版本：<code className="break-all">{revision}</code></p>
-      {groupName && <p className="text-sm break-all">設定群組：{groupName} · 指定版本：{groupRevision}。下載最新版僅供本頁測試。</p>}
     </header>
     <section className="space-y-4 rounded-2xl border border-outline/20 p-5" aria-label="執行控制">
+      <div className="space-y-2">
+        <p className="text-sm font-semibold">規則 + Tiny NER（CPU）</p>
+        <p className="text-sm text-on-surface/75">規則先找地址、聯絡資訊與識別號，Tiny NER 再補人名及單位。</p>
+        <p className="text-xs text-on-surface/65">模型版本 <code className="break-all">{TINY_REVISION}</code></p>
+      </div>
       <div className="flex flex-wrap gap-3">
-        <button className="rounded-xl bg-primary px-4 py-3 text-white disabled:opacity-40" disabled={!active || busy} onClick={() => void load()}>{coldLoad ? "重新載入並量測快取" : "載入本機模型"}</button>
-        <button className="rounded-xl border border-primary/40 px-4 py-3 disabled:opacity-40" disabled={!active || busy} onClick={() => void load(true)}>下載新版模型</button>
-        {groupName && <button className="rounded-xl border border-outline/30 px-4 py-3 disabled:opacity-40" disabled={!active || busy} onClick={() => void load(false, true)}>載入群組指定版本</button>}
+        <button className="rounded-xl bg-primary px-4 py-3 text-white disabled:opacity-40" disabled={!active || busy} onClick={() => void load()}>{coldLoad ? "重新載入 Tiny NER" : "載入 Tiny NER"}</button>
+
+
         <button className="rounded-xl border border-primary/40 px-4 py-3 disabled:opacity-40" disabled={!active || busy || !ready} onClick={() => void run("development")}>執行開發集 80 則</button>
         <button className="rounded-xl border border-primary/40 px-4 py-3 disabled:opacity-40" disabled={!active || busy || !ready || report.scores.development.cases !== 80} onClick={() => void run("holdout")}>執行保留驗證集 40 則</button>
         <button className="rounded-xl border border-outline/30 px-4 py-3 disabled:opacity-40" disabled={!busy} onClick={cancel}>停止</button>
         <button className="rounded-xl border border-outline/30 px-4 py-3" onClick={download}>下載驗證報告</button>
       </div>
-      <p className="text-xs text-on-surface/65">「下載新版模型」會檢查 Hugging Face 最新 commit，清除該版本快取並重新下載；可能需要數百 MB。更新會清空本頁舊驗證結果，請先下載報告。一般重新載入會沿用目前版本快取。</p>
+
       <p role="status" className="break-words text-sm">{status}</p>
       {busy && !ready && <progress aria-label="模型載入進度" max={1} value={progress} className="w-full" />}
-      {failure && <p role="alert" className="text-error">驗證未完成：{failure}。{failure === "basic_extraction_failed" ? "模型沒有命中基本案例中的任何個資，不能視為辨識就緒。" : "請查看基本辨識輸出與錯誤；若模型載入失敗，請檢查 WebGPU 與網路後重試。"}</p>}
+      {failure && <p role="alert" className="text-error">驗證未完成：{failure}。{failure === "tiny_assets_missing" ? "此環境尚未準備 Tiny NER 模型檔。" : failure === "basic_extraction_failed" ? "基本案例中沒有命中任何預期片段。" : "請查看基本辨識輸出，或重新載入後再試。"}</p>}
     </section>
     {basicCheck && <section aria-label="基本辨識檢查" className="space-y-3 rounded-2xl border border-outline/20 p-5">
       <h2 className="text-lg font-bold">基本辨識檢查</h2>
@@ -145,9 +135,9 @@ export default function ValidationPage({ active = true, configuredRevision, grou
       {basicCheck.cases.map(item => <div key={item.id} className="space-y-1 border-t border-outline/15 pt-3 text-sm">
         <p className="break-words">原文：{item.source}</p>
         <p>預期：{item.expected.map(entity => entity.text).join("、") || "無個資"}</p>
-        <p className="break-words">模型辨識：{item.detected.map(entity => `${entity.text}（${entity.type}）`).join("、") || "空集合"}</p>
+        <p className="break-words">辨識結果：{item.detected.map(entity => `${entity.text}（${entity.type}）`).join("、") || "空集合"}</p>
         <p className="break-words">遮罩結果：{item.masked ?? `檢查失敗：${item.error}`}</p>
-        {!!item.rounds?.length && <details><summary>查看各輪原始輸出</summary>{item.rounds.map((round, index) => <p key={index} className="mt-2 break-words">{round.stage === "locate" ? "找出片段" : `分類「${round.candidate}」`}：{round.raw}</p>)}</details>}
+
       </div>)}
     </section>}
     <section className="grid gap-3 sm:grid-cols-3" aria-label="模型載入量測">
@@ -181,7 +171,7 @@ export default function ValidationPage({ active = true, configuredRevision, grou
         <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">{item.source}</p>
         <p className="mt-3 text-sm">預期：{item.expected.map(entity => entity.text).join("、") || "無"}</p>
         <p className="mt-3 text-sm">實際：{item.detected.map(entity => entity.text).join("、") || "無"}</p>
-        {!!item.rounds?.length && <details className="mt-3 text-sm"><summary>查看各輪辨識（{item.rounds.length} 次）</summary>{item.rounds.map((round, index) => <p key={index} className="mt-2 break-words">{round.stage === "locate" ? "找出片段" : `分類「${round.candidate}」`}：{round.raw}</p>)}</details>}
+
         <p className="mt-3 whitespace-pre-wrap rounded-lg bg-surface-container-low p-3 text-sm leading-relaxed">{item.masked ?? "檢查失敗；不產生可送出的內容。"}</p>
       </details>)}
     </section>

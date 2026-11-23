@@ -15,20 +15,6 @@ beforeEach(() => { FakeWorker.instances = []; vi.stubGlobal("Worker", FakeWorker
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("browser runtime failure boundary", () => {
-  it("preserves failed-stage evidence", async () => {
-    const runtime = new BrowserMaskingRuntime();
-    const loaded = runtime.load();
-    const worker = FakeWorker.instances[0];
-    expect(worker.postMessage).toHaveBeenLastCalledWith({ id: 1, operation: "load" });
-    worker.emit({ id: 1, kind: "loaded", metrics: { elapsedMs: 1, fetchedBytes: 1, fetches: 1, failedFetches: 0, adapter: {} } });
-    await loaded;
-    const pending = runtime.detect("synthetic-only");
-    const rounds = [{ stage: "locate" as const, chunk: 0, raw: '{"spans":["not-in-source"]}' }];
-    const assertion = expect(pending).rejects.toMatchObject({ code: "invalid_entity_span", rounds });
-    worker.emit({ id: 2, kind: "error", code: "invalid_entity_span", rounds });
-    await assertion;
-    expect(fetch).not.toHaveBeenCalled(); runtime.dispose();
-  });
   it("keeps extraction text on the worker channel and forwards progress", async () => {
     const runtime = new BrowserMaskingRuntime();
     const progress = vi.fn();
@@ -40,7 +26,7 @@ describe("browser runtime failure boundary", () => {
     await pending;
     const detection = runtime.detect("synthetic-private-sentinel");
     expect(worker.postMessage).toHaveBeenLastCalledWith({ id: 2, operation: "extract", text: "synthetic-private-sentinel" });
-    worker.emit({ id: 2, kind: "detected", detection: { entities: [], chunks: 1, elapsedMs: 10 } });
+    worker.emit({ id: 2, kind: "detected", detection: { entities: [], spans: [], chunks: 1, elapsedMs: 10 } });
     await detection;
     expect(fetch).not.toHaveBeenCalled();
     runtime.dispose();
@@ -48,8 +34,8 @@ describe("browser runtime failure boundary", () => {
   it("rejects failed checks without network fallback", async () => {
     const runtime = new BrowserMaskingRuntime();
     const result = runtime.detect("synthetic-only");
-    const assertion = expect(result).rejects.toMatchObject({ code: "model_execution_failed" });
-    FakeWorker.instances[0].emit({ id: 1, kind: "error", code: "model_execution_failed" });
+    const assertion = expect(result).rejects.toMatchObject({ code: "tiny_execution_failed" });
+    FakeWorker.instances[0].emit({ id: 1, kind: "error", code: "tiny_execution_failed" });
     await assertion;
     expect(fetch).not.toHaveBeenCalled(); runtime.dispose();
   });
@@ -60,7 +46,7 @@ describe("browser runtime failure boundary", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     await assertion;
     expect(FakeWorker.instances[0].terminate).toHaveBeenCalledOnce();
-    FakeWorker.instances[0].emit({ id: 1, kind: "detected", detection: { entities: [], elapsedMs: 1, chunks: 1 } });
+    FakeWorker.instances[0].emit({ id: 1, kind: "detected", detection: { entities: [], spans: [], elapsedMs: 1, chunks: 1 } });
     expect(fetch).not.toHaveBeenCalled();
   });
   it("cancels loading immediately and rejects overlapping work", async () => {

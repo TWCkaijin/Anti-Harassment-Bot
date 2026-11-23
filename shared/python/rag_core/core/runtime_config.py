@@ -55,7 +55,6 @@ WRITABLE_FIELDS = {
     "gate_post_prompt",
     "gate_timeout_seconds",
     "gate_jev_threshold",
-    "pii_model_revision",
     *RERANK_FIELDS,
     "openrouter_model",
     "temperature",
@@ -92,7 +91,6 @@ class RuntimeConfig:
     gate_post_prompt: str = DEFAULT_GATE_POST_PROMPT
     gate_timeout_seconds: float = 10.0
     gate_jev_threshold: float = DEFAULT_GATE_JEV_THRESHOLD
-    pii_model_revision: str = ""
     openrouter_provider_sort: str = "auto"
     rag_rerank_enabled: bool = False
     rag_rerank_model: str = "cohere/rerank-4-fast"
@@ -299,7 +297,6 @@ def _build_config(doc_data: dict[str, Any] | None, source: str) -> RuntimeConfig
         gate_post_prompt=validated.get("gate_post_prompt", DEFAULT_GATE_POST_PROMPT),
         gate_timeout_seconds=validated.get("gate_timeout_seconds", 10.0),
         gate_jev_threshold=validated.get("gate_jev_threshold", DEFAULT_GATE_JEV_THRESHOLD),
-        pii_model_revision=validated.get("pii_model_revision", ""),
         **{key: validated.get(key, getattr(settings, key)) for key in RERANK_FIELDS},
         openrouter_model=validated.get("openrouter_model", settings.openrouter_model),
         rag_retrieval_top_k=validated.get("rag_retrieval_top_k", settings.rag_retrieval_top_k),
@@ -444,14 +441,6 @@ def validate_runtime_config_update(payload: dict[str, Any]) -> dict[str, Any]:
             ):
                 raise ValueError("rag_rerank_timeout_seconds must be between 0.1 and 10")
             cleaned[key] = float(value)
-        elif key == "pii_model_revision":
-            if not isinstance(value, str) or (
-                value and (len(value) != 40 or any(c not in "0123456789abcdef" for c in value))
-            ):
-                raise ValueError(
-                    "pii_model_revision must be empty or a 40-character lowercase commit SHA"
-                )
-            cleaned[key] = value
         elif key in {
             "openrouter_model",
             "rag_rerank_model",
@@ -586,7 +575,6 @@ def _default_runtime_document() -> dict[str, Any]:
         "gate_post_prompt": DEFAULT_GATE_POST_PROMPT,
         "gate_timeout_seconds": 10.0,
         "gate_jev_threshold": DEFAULT_GATE_JEV_THRESHOLD,
-        "pii_model_revision": "",
         **{key: getattr(settings, key) for key in RERANK_FIELDS},
         "openrouter_model": settings.openrouter_model,
         "temperature": settings.openrouter_temperature,

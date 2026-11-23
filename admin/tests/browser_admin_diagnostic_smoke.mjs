@@ -32,7 +32,7 @@ try {
             if (this.stopped) return;
             const data = command.operation === 'load'
               ? { id: command.id, kind: 'loaded', metrics: { elapsedMs: 5, fetchedBytes: 0, fetches: 0, failedFetches: 0, adapter: {} } }
-              : { id: command.id, kind: 'detected', detection: { entities: command.text === '我叫許映辰，電話是0910-246-802。' ? [{ text: '許映辰', type: 'person' }, { text: '0910-246-802', type: 'contact' }] : command.text === '我的電子郵件是masking.check@example.com。' ? [{ text: 'masking.check@example.com', type: 'contact' }] : [], elapsedMs: 1, chunks: 1 } };
+              : { id: command.id, kind: 'detected', detection: { entities: command.text === '我叫許映辰，電話是0910-246-802。' ? [{ text: '許映辰', type: 'person' }, { text: '0910-246-802', type: 'contact' }] : command.text === '我的電子郵件是masking.check@example.com。' ? [{ text: 'masking.check@example.com', type: 'contact' }] : [], spans: [], elapsedMs: 1, chunks: 1 } };
             if (command.operation === 'extract') window.__maskingWorkerStats.detections++;
             this.onmessage?.({ data });
           }, 60);
@@ -135,7 +135,7 @@ try {
       await timeline.evaluate(element => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }));
       await page.screenshot({ path: path.join(output, `${width}-chat.png`), fullPage: true, animations: 'disabled' });
       await page.getByRole('button', { name: '本機遮罩驗證', exact: true }).click();
-      await page.getByRole('button', { name: '載入本機模型', exact: true }).click();
+      await page.getByRole('button', { name: '載入 Tiny NER', exact: true }).click();
       await page.getByRole('button', { name: '執行開發集 80 則', exact: true }).click();
       await page.waitForFunction(() => window.maskingValidationReport?.cases.length >= 1);
       await page.getByRole('button', { name: '本次診斷測試', exact: true }).click();

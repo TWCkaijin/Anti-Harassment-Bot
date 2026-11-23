@@ -500,7 +500,7 @@ export default function AdminPanel({ session, onLogout, unlocked = true }: Admin
             {MaskingValidation && maskingVisited && (
               <div hidden={activeTab !== "masking"}>
                 <Suspense fallback={<p role="status">正在載入遮罩驗證…</p>}>
-                  <MaskingValidation key={`${lastLoadedConfig?.environment_document_id}:${lastLoadedConfig?.pii_model_revision}`} active={unlocked && !!lastLoadedConfig} configuredRevision={lastLoadedConfig?.pii_model_revision} groupName={lastLoadedConfig?.environment_document_id ?? session.environment} />
+                  <MaskingValidation key={lastLoadedConfig?.environment_document_id} active={unlocked && !!lastLoadedConfig} />
                 </Suspense>
               </div>
             )}
@@ -638,7 +638,7 @@ function SystemSettings({
               onChange={(event) => set({ max_tokens: Number(event.target.value) })}
               className="input"
             />
-            <span className="mt-1 block text-[11px] text-on-surface/50">0 表示不設定上限</span>
+            <span className="mt-1 block text-[0.6875rem] text-on-surface/50">0 表示不設定上限</span>
           </Field>
           <Field label="思考等級">
             <select
@@ -656,7 +656,7 @@ function SystemSettings({
               <option value="xhigh">很高</option>
               <option value="max">最大</option>
             </select>
-            <span className="mt-1 block text-[11px] text-on-surface/50">
+            <span className="mt-1 block text-[0.6875rem] text-on-surface/50">
               需使用支援 reasoning 的模型
             </span>
           </Field>
@@ -708,14 +708,6 @@ function SystemSettings({
           編輯內容審查提示詞
         </button>
       </section>
-
-      {maskingLabEnabled && <section aria-label="PII 模型版本" className="space-y-3 border-t border-outline/10 pt-6">
-        <h4 className="text-sm font-bold">PII 模型版本 · {config.environment_document_id ?? "目前設定群組"}</h4>
-        <Field label="群組指定 PII 模型 commit SHA">
-          <input className="input" value={config.pii_model_revision ?? ""} placeholder="留空使用網站內建版本" onChange={event => set({ pii_model_revision: event.target.value.trim() })} />
-        </Field>
-        <p className="text-xs text-on-surface/65">填入 Hugging Face 模型的完整 40 位 commit SHA，按「儲存變更」後，此設定群組的本機遮罩驗證會預設載入指定版本。Admin 仍可在驗證頁下載最新版試驗，不會改寫群組設定。儲存版本變更會重設該頁驗證結果，請先下載報告。</p>
-      </section>}
 
       <section aria-label="處理流程" className="border-t border-outline/10 pt-6">
         <PipelineSettingsEditor
@@ -793,7 +785,7 @@ function SystemSettings({
             className="input"
             placeholder="停用"
           />
-          <span className="mt-1 block text-[11px] text-on-surface/50">
+          <span className="mt-1 block text-[0.6875rem] text-on-surface/50">
             0–2；留空表示停用，數值越小代表越相似
           </span>
         </Field>
@@ -970,7 +962,7 @@ function SkillsSettings({
               }`}
             >
               <span className="block truncate font-semibold">{skill.name}</span>
-              <span className="text-[11px] opacity-65">
+              <span className="text-[0.6875rem] opacity-65">
                 {skill.enabled ? "啟用" : "停用"} · {skill.priority}
               </span>
             </button>

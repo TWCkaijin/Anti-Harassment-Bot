@@ -26,7 +26,7 @@ pnpm --filter @rag/admin build
 
 結果 Excel 是原活頁簿的副本，在最右側輸入欄後集中插入各測次、各輪的結果區，原有右側欄位向右移。來源列號、其他工作表及儲存格樣式保留；執行前若發現公式、名稱範圍、合併、表格、繪圖或其他不支援結構，要求另存純值測資。無原活頁簿的內建案例或 JSON 紀錄，另匯出逐輪紀錄報告。法規正確率以每案測次的最後一輪計算。
 
-「本機遮罩驗證」只在開發及 Preview Admin build 顯示，使用目前的 Admin 登入狀態；正式 Admin build 不含驗證頁與模型 Worker。元件延遲載入，模型須手動載入；切換管理功能仍繼續計算；登入到期時停止並保留報告，登出釋放模型。載入後以 3 則獨立合成控制案例執行基本辨識檢查，顯示實際片段與遮罩結果；至少命中一個預期片段且沒有執行錯誤才啟用完整驗證，基本檢查不計入品質分數。Preview build 的舊網址 `/masking-validation.html` 會導向 `/#masking`，使用同一個 Admin 登入狀態。
+「本機遮罩驗證」只在開發及 Preview Admin build 顯示，使用目前的 Admin 登入狀態；正式 Admin build 不含驗證頁與模型 Worker。驗證使用規則 + Tiny NER（CPU），模型須手動載入；切換管理功能仍繼續計算；登入到期時停止並保留報告，登出釋放模型。載入後以 3 則獨立合成控制案例執行基本辨識檢查，顯示實際片段與遮罩結果；至少命中一個預期片段且沒有執行錯誤才啟用完整驗證，基本檢查不計入品質分數。Preview build 的舊網址 `/masking-validation.html` 會導向 `/#masking`，使用同一個 Admin 登入狀態。模型檔準備方式見[本機遮罩驗證](../../docs/browser-masking/README.md)。
 
 本機執行器提供 8 個 worker。`scripts/configure_admin_workers.py` 已準備 Cloud Tasks 的 8 並行上限，仍維持每秒 2 次派送；必須另外套用雲端設定才會改變已部署環境容量。
 

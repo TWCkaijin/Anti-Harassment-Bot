@@ -12,10 +12,10 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@mlc-ai/web-llm": "0.2.85",
     "fflate": "0.8.3",
     "firebase": "^12.19.0",
     "lucide-react": "^1.17.0",
+    "onnxruntime-web": "1.31.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-markdown": "^10.1.0",

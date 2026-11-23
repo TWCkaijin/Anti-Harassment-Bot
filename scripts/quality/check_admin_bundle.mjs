@@ -20,20 +20,24 @@ function assetNames(directory) {
 
 const productionAssets = assetNames(production);
 const validationAsset = /^(?:ValidationPage|masking-validation|runtime\.worker)-.*\.js$/;
-const modelMarkers = ["Qwen3-0.6B-PII-v1", "maskingValidationReport", "mlc-chat-config.json"];
+const modelMarkers = ["maskingValidationReport", "masking-tiny/", "albert-tiny-chinese-ner"];
 const leakedAssets = productionAssets.filter(name => {
   if (!name.endsWith(".js")) return false;
   const source = readFileSync(resolve(production, "assets", name), "utf8");
   return modelMarkers.some(marker => source.includes(marker));
 });
 
-if (existsSync(resolve(production, "masking-validation.html")) || productionAssets.some(name => validationAsset.test(name)) || leakedAssets.length) {
+if (existsSync(resolve(production, "masking-validation.html")) || existsSync(resolve(production, "masking-tiny")) || productionAssets.some(name => /^ort-wasm-/.test(name)) || productionAssets.some(name => validationAsset.test(name)) || leakedAssets.length) {
   throw new Error("Production Admin bundle includes the masking validation page or worker");
 }
 if (!productionOnly) {
   const previewAssets = assetNames(preview);
-  if (!existsSync(resolve(preview, "masking-validation.html")) || !previewAssets.some(name => /^runtime\.worker-.*\.js$/.test(name))) {
+  if (!existsSync(resolve(preview, "masking-validation.html")) || !previewAssets.some(name => /^runtime\.worker-.*\.js$/.test(name)) || !previewAssets.some(name => /^ort-wasm-.*\.wasm$/.test(name))) {
     throw new Error("Preview Admin bundle is missing the masking validation page or worker");
+  }
+  // The GPL-3.0 Tiny NER weights may only be hosted when bundling was requested explicitly.
+  if (process.env.MASKING_TINY_BUNDLE !== "1" && existsSync(resolve(preview, "masking-tiny"))) {
+    throw new Error("Preview Admin bundle includes Tiny NER weights without MASKING_TINY_BUNDLE=1");
   }
 }
 

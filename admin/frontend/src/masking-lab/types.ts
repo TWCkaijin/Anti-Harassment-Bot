@@ -1,5 +1,4 @@
-import type { Entity } from "./config";
-import type { ExtractionRound } from "./pipeline";
+import type { Entity, EntityType } from "./config";
 export interface LoadMetrics {
   modelRevision?: string;
   elapsedMs: number;
@@ -8,10 +7,11 @@ export interface LoadMetrics {
   failedFetches: number;
   adapter: Record<string, string>;
 }
-export interface Detection { entities: Entity[]; elapsedMs: number; chunks: number; rounds?: ExtractionRound[] }
-export type WorkerCommand = { id: number; operation: "load"; revision?: string; forceDownload?: boolean } | { id: number; operation: "extract"; text: string };
+export interface EntitySpan { start: number; end: number; type: EntityType }
+export interface Detection { entities: Entity[]; spans: EntitySpan[]; elapsedMs: number; chunks: number }
+export type WorkerCommand = { id: number; operation: "load" } | { id: number; operation: "extract"; text: string };
 export type WorkerEvent =
   | { id: number; kind: "progress"; progress: number; text: string }
   | { id: number; kind: "loaded"; metrics: LoadMetrics }
   | { id: number; kind: "detected"; detection: Detection }
-  | { id: number; kind: "error"; code: string; rounds?: ExtractionRound[] };
+  | { id: number; kind: "error"; code: string };

@@ -471,20 +471,15 @@ def test_client_privacy_review_round_trips_through_config_save_without_cloud(mon
     assert document.set.call_args.kwargs == {"merge": True}
 
 
-def test_pii_model_revision_is_pinned_and_survives_runtime_build():
-    from rag_core.core.runtime_config import _build_config, validate_runtime_config_update
+def test_old_masking_model_revision_is_ignored_in_existing_runtime_documents():
+    stored = {"pii_model_revision": "a" * 40, "openrouter_model": "existing/chat"}
+    visible = runtime_config_module._build_config(stored, "firestore").public_dict()
 
-    revision = "a" * 40
-    assert validate_runtime_config_update({"pii_model_revision": revision}) == {
-        "pii_model_revision": revision
+    assert visible["openrouter_model"] == "existing/chat"
+    assert "pii_model_revision" not in visible
+    assert runtime_config_module.validate_runtime_config_update(stored) == {
+        "openrouter_model": "existing/chat"
     }
-    assert (
-        _build_config({"pii_model_revision": revision}, "firestore").pii_model_revision == revision
-    )
-    assert _build_config({}, "defaults").pii_model_revision == ""
-    for value in ("main", "latest", "../other", "A" * 40, None, 123):
-        with pytest.raises(ValueError):
-            validate_runtime_config_update({"pii_model_revision": value})
 
 
 def test_existing_gate_documents_keep_pre_policy_and_get_a_distinct_post_default():

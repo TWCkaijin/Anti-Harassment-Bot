@@ -54,7 +54,10 @@ const runtimeConfig: RuntimeConfig = {
 
 beforeEach(() => {
   masking.load.mockReset().mockResolvedValue({ elapsedMs: 5, fetchedBytes: 0 });
-  masking.detect.mockReset().mockImplementation(async (source: string) => ({ entities: BASIC_CHECKS.find(item => item.source === source)?.expected ?? [] }));
+  masking.detect.mockReset().mockImplementation(async (source: string) => {
+    const entities = BASIC_CHECKS.find(item => item.source === source)?.expected ?? [];
+    return { entities, spans: entities.map(({ text, type }) => ({ start: source.indexOf(text), end: source.indexOf(text) + text.length, type })) };
+  });
   masking.dispose.mockReset();
   vi.mocked(evaluateSplit).mockReset();
   window.localStorage.clear();
@@ -326,7 +329,7 @@ describe("AdminPanel runtime config", () => {
     });
     await openSystemSettings();
     fireEvent.click(screen.getByRole("button", { name: /本機遮罩驗證/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "載入本機模型" }));
+    fireEvent.click(await screen.findByRole("button", { name: "載入 Tiny NER" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "執行開發集 80 則" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "執行開發集 80 則" }));
     fireEvent.click(screen.getByRole("button", { name: /本次診斷測試/ }));

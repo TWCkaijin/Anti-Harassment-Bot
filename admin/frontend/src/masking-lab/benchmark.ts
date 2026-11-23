@@ -1,10 +1,9 @@
 import fixtureData from "./fixtures.json";
-import { ENTITY_TYPES, LIBRARY_REVISION, MODEL_ID, MODEL_REVISION, PROMPT_VERSION, RUNTIME_VERSION, type Entity, type EntityType } from "./config";
+import { ENTITY_TYPES, ORT_VERSION, RULES_VERSION, TINY_MODEL, TINY_REVISION, type Entity, type EntityType } from "./config";
 import { MaskingError, previewMask } from "./extraction";
 import type { BrowserMaskingRuntime } from "./runtime";
-import type { LoadMetrics } from "./types";
+import type { EntitySpan, LoadMetrics } from "./types";
 import type { BasicCheckReport } from "./selfCheck";
-import type { ExtractionRound } from "./pipeline";
 
 export type Split = "development" | "holdout";
 export interface Fixture { id: string; split: Split; category: string; text: string; expected: Entity[] }
@@ -13,7 +12,6 @@ export interface CaseResult {
   id: string; split: Split; category: string; characters: number; source: string;
   expected: Entity[]; detected: Entity[]; masked: string | null;
   missing: string[]; unexpected: string[]; elapsedMs: number; error: string | null;
-  rounds?: ExtractionRound[];
 }
 export interface Scores {
   cases: number; successfulChecks: number; truePositive: number; falsePositive: number; falseNegative: number;
@@ -26,7 +24,8 @@ export interface EntityTypeScores {
 export type PerTypeScores = Record<EntityType, EntityTypeScores>;
 export interface EvaluationReport {
   schemaVersion: 2; createdAt: string; userAgent: string;
-  model: string; modelRevision: string; libraryRevision: string; runtimeVersion: string; promptVersion: string;
+  method: "rules-tiny";
+  model: string; modelRevision: string; libraryRevision: string | null; runtimeVersion: string | null; promptVersion: string | null; rulesVersion: string | null;
   coldLoad: LoadMetrics | null; cachedLoad: LoadMetrics | null;
   basicCheck: BasicCheckReport | null;
   scores: { all: Scores; development: Scores; holdout: Scores };
@@ -98,8 +97,8 @@ export function createReport(cases: CaseResult[], coldLoad: LoadMetrics | null, 
   };
   return {
     schemaVersion: 2, createdAt: new Date().toISOString(), userAgent: navigator.userAgent,
-    model: MODEL_ID, modelRevision: coldLoad?.modelRevision ?? MODEL_REVISION, libraryRevision: LIBRARY_REVISION,
-    runtimeVersion: RUNTIME_VERSION, promptVersion: PROMPT_VERSION,
+    method: "rules-tiny", model: TINY_MODEL, modelRevision: TINY_REVISION, libraryRevision: ORT_VERSION,
+    runtimeVersion: ORT_VERSION, promptVersion: null, rulesVersion: RULES_VERSION,
     coldLoad, cachedLoad, basicCheck, scores: { all, development, holdout }, perType,
     gatePassed: development.cases === 80 && holdout.cases === 40 && all.passed && development.passed && holdout.passed
       && meetsPerTypeThreshold(perType.development) && meetsPerTypeThreshold(perType.holdout),
@@ -109,7 +108,7 @@ export function createReport(cases: CaseResult[], coldLoad: LoadMetrics | null, 
       "40 則保留驗證案例仍出自同一套合成資料設計，尚缺獨立蒐集且經人工標注的真實情境保留集。",
       "gatePassed 只代表固定合成案例達到門檻；啟用正式聊天仍需獨立人工標注保留集驗證。",
       "精確率與召回率以每案例不重複的完整敏感片段比對；部分匹配同時計為誤遮及漏遮，類型差異另保留於原始結果。",
-      "下載量為 fetch 回應的解壓後內容位元組，不含 TLS/HTTP 開銷；IndexedDB 命中不產生 fetch。",
+      "下載量為讀取的資源內容位元組，不含 TLS/HTTP 開銷；瀏覽器 HTTP 快取仍可能回傳完整內容。",
       "結果只適用於記錄的裝置與瀏覽器；正式聊天尚未接入此驗證頁。",
     ],
   };
@@ -121,14 +120,14 @@ export async function evaluateSplit(runtime: BrowserMaskingRuntime, split: Split
     if (signal.aborted) break;
     const start = performance.now();
     let detected: Entity[] = [], error: string | null = null;
-    let rounds: ExtractionRound[];
-    try { const detection = await runtime.detect(fixture.text); detected = detection.entities; rounds = detection.rounds ?? []; }
-    catch (failure) { error = failure instanceof MaskingError ? failure.code : "evaluation_failed"; rounds = failure instanceof MaskingError ? failure.rounds : []; }
+    let spans: EntitySpan[] = [];
+    try { const detection = await runtime.detect(fixture.text); detected = detection.entities; spans = detection.spans; }
+    catch (failure) { error = failure instanceof MaskingError ? failure.code : "evaluation_failed"; }
     if (signal.aborted) break;
     const result: CaseResult = {
       id: fixture.id, split, category: fixture.category, characters: Array.from(fixture.text).length, source: fixture.text,
-      expected: fixture.expected, detected, rounds, error, elapsedMs: performance.now() - start,
-      masked: error ? null : previewMask(fixture.text, detected),
+      expected: fixture.expected, detected, error, elapsedMs: performance.now() - start,
+      masked: error ? null : previewMask(fixture.text, spans),
       missing: fixture.expected.filter(expected => !detected.some(item => item.text === expected.text)).map(item => item.text),
       unexpected: detected.filter(item => !fixture.expected.some(expected => item.text === expected.text)).map(item => item.text),
     };
