@@ -16,27 +16,45 @@ beforeEach(() => { localStorage.clear(); vi.mocked(checkHealth).mockReset().mock
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("manual conversation privacy review", () => {
-  it.each([undefined, true, false])("requires review for the first and subsequent messages regardless of legacy setting: %s", async enabled => {
+  it.each([undefined, true, false])("masks the first and subsequent sends without a dialog by default: %s", async enabled => {
     const settings = { contract_version: 4 as const, enable_image_upload: true, enable_client_privacy_review: enabled, pipeline: DEFAULT_PIPELINE };
     vi.mocked(checkHealth).mockResolvedValue({ ...health, client_settings: settings });
     const { result } = renderHook(() => useConversation("automatic"));
     await act(async () => { await Promise.resolve(); });
     for (const text of ["first@example.test", "second@example.test"]) {
-      let pending!: ReturnType<typeof result.current.sendMessage>;
-      act(() => { pending = result.current.sendMessage(text); });
-      expect(sendChat).not.toHaveBeenCalledTimes(text === "first@example.test" ? 1 : 2);
-      expect(result.current.privacyReview?.request.message).toBe("[電子郵件]");
-      await act(async () => { result.current.confirmPrivacyReview(result.current.privacyReview!); expect(await pending).not.toBe(false); });
+      await act(async () => { expect(await result.current.sendMessage(text)).not.toBe(false); });
+      expect(result.current.privacyReview).toBeNull();
     }
     expect(sendChat).toHaveBeenCalledTimes(2);
-    for (const [request] of vi.mocked(sendChat).mock.calls) expect(reviewedRequestBody(request)).not.toMatch(/first@|second@/);
+    const [first, second] = vi.mocked(sendChat).mock.calls.map(([request]) => JSON.parse(reviewedRequestBody(request)));
+    expect(first.message).toBe("[電子郵件]");
+    expect(second.message).toBe("[電子郵件]");
+    expect(second.history[0].content).toBe("[電子郵件]");
+    expect(localStorage.getItem(STORAGE_KEY)).not.toMatch(/first@|second@/);
+  });
+
+  it("uses the current opt-in for future sends and waits for confirmation when enabled", async () => {
+    const { result, rerender } = renderHook(({ enabled }) => useConversation("manual", enabled), { initialProps: { enabled: false } });
+    await act(async () => { await Promise.resolve(); });
+    rerender({ enabled: true });
+    let pending!: ReturnType<typeof result.current.sendMessage>;
+    act(() => { pending = result.current.sendMessage("manual@example.test"); });
+    expect(sendChat).not.toHaveBeenCalled();
+    const draft = result.current.privacyReview!;
+    expect(draft.request.message).toBe("[電子郵件]");
+    await act(async () => { result.current.confirmPrivacyReview(draft); await pending; });
+    expect(sendChat).toHaveBeenCalledOnce();
+    rerender({ enabled: false });
+    await act(async () => { await result.current.sendMessage("second@example.test"); });
+    expect(sendChat).toHaveBeenCalledTimes(2);
+    expect(result.current.privacyReview).toBeNull();
   });
 
   it("refuses image data even if legacy settings claim uploads are enabled", async () => {
     const image = "data:image/png;base64,iVBORw0KGgo=";
     const settings = { contract_version: 4 as const, enable_image_upload: true, enable_client_privacy_review: true, pipeline: DEFAULT_PIPELINE };
     vi.mocked(checkHealth).mockResolvedValue({ ...health, client_settings: settings });
-    const { result } = renderHook(() => useConversation("image-review"));
+    const { result } = renderHook(() => useConversation("image-review", true));
     await act(async () => { await Promise.resolve(); });
     await act(async () => { expect(await result.current.sendMessage("請說明圖片", image, image)).toBe(false); });
     expect(sendChat).not.toHaveBeenCalled();
@@ -45,7 +63,7 @@ describe("manual conversation privacy review", () => {
   });
 
   it("stores no new raw messages, titles or metrics before preparation, and cancellation leaves the conversation unchanged", async () => {
-    const { result } = renderHook(() => useConversation("private"));
+    const { result } = renderHook(() => useConversation("private", true));
     await act(async () => { await Promise.resolve(); });
     const stored = localStorage.getItem(STORAGE_KEY);
     let pending!: ReturnType<typeof result.current.sendMessage>;
@@ -65,7 +83,7 @@ describe("manual conversation privacy review", () => {
   it("sends the exact approved full snapshot and persists only approved new content and summary", async () => {
     const old = { id: "old-u", role: "user", content: "舊信箱 history@example.com", timestamp: 1 };
     localStorage.setItem(STORAGE_KEY, JSON.stringify([{ id: "history", createdAt: 1, schemaVersion: 4, caseFacts: { ...emptySummaryContext(), summary: "合成甲公司 summary@example.com" }, messages: [old] }]));
-    const { result } = renderHook(() => useConversation("history"));
+    const { result } = renderHook(() => useConversation("history", true));
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("合成甲公司 new@example.com", undefined, undefined, { answers: [{ question: "原始題目", answer: "不应额外存入 extra@example.com" }] }); });
@@ -85,7 +103,7 @@ describe("manual conversation privacy review", () => {
 
   it.each(["switch", "delete", "clear", "clear-all", "summary", "new", "unmount"] as const)("invalidates a pending preparation when its owning conversation changes: %s", async change => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([{ id: "owner", createdAt: 1, schemaVersion: 4, caseFacts: emptySummaryContext(), messages: [] }, { id: "other", createdAt: 2, messages: [{ id: "other-u", role: "user", content: "別的問題", timestamp: 2 }] }]));
-    const { result, unmount } = renderHook(() => useConversation("owner"));
+    const { result, unmount } = renderHook(() => useConversation("owner", true));
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("尚未確認的問題"); });
@@ -104,7 +122,7 @@ describe("manual conversation privacy review", () => {
   });
 
   it("does not send a snapshot after negotiation changes during review", async () => {
-    const { result } = renderHook(() => useConversation("connection"));
+    const { result } = renderHook(() => useConversation("connection", true));
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("待確認問題"); });
@@ -120,7 +138,7 @@ describe("manual conversation privacy review", () => {
   it("reuses the exact manually approved object for automatic retries", async () => {
     vi.useFakeTimers();
     vi.mocked(sendChat).mockRejectedValueOnce(new ApiError(503, "合成暫時錯誤", undefined, true)).mockResolvedValueOnce(response());
-    const { result } = renderHook(() => useConversation("retry"));
+    const { result } = renderHook(() => useConversation("retry", true));
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("test@example.com"); });
@@ -134,7 +152,7 @@ describe("manual conversation privacy review", () => {
 
   it("keeps new clarification draft text in memory without adding it to saved records", async () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify([{ id: "draft", createdAt: 1, schemaVersion: 4, caseFacts: emptySummaryContext(), messages: [{ id: "question", role: "assistant", content: "合成問題", timestamp: 1 }] }]));
-    const { result } = renderHook(() => useConversation("draft"));
+    const { result } = renderHook(() => useConversation("draft", true));
     await act(async () => { await Promise.resolve(); });
     act(() => { result.current.saveClarificationDraft("question", { selectedValues: [], other: "draft@example.com", includeOther: true, special: null }); });
     expect(result.current.messages[0].clarificationDraft?.other).toBe("draft@example.com");
@@ -151,7 +169,7 @@ describe("manual conversation privacy review", () => {
       delta = onDelta!; guidance = onGuidance!; analysis = onAnalysis!; retract = onRetract!;
       return new Promise<ChatResponse>(resolve => { finish = resolve; });
     });
-    const { result } = renderHook(() => useConversation("retract"));
+    const { result } = renderHook(() => useConversation("retract", true));
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("合成問題"); });
@@ -178,7 +196,7 @@ describe("manual conversation privacy review", () => {
       delta = onDelta!; retract = onRetract!;
       return new Promise<ChatResponse>((_resolve, reject) => { fail = reject; });
     });
-    const { result } = renderHook(() => useConversation(`interrupted-${outcome}`));
+    const { result } = renderHook(() => useConversation(`interrupted-${outcome}`, true));
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("合成問題"); });
@@ -198,7 +216,7 @@ describe("manual conversation privacy review", () => {
   });
 
   it("cancels review when another tab changes storage and does not overwrite that tab", async () => {
-    const { result } = renderHook(() => useConversation("cross-tab"));
+    const { result } = renderHook(() => useConversation("cross-tab", true));
     await act(async () => { await Promise.resolve(); });
     let pending!: ReturnType<typeof result.current.sendMessage>;
     act(() => { pending = result.current.sendMessage("待確認內容"); });
@@ -220,7 +238,7 @@ describe("manual conversation privacy review", () => {
   });
 
   it("checks the saved snapshot before writing even when a storage event was missed", async () => {
-    const { result } = renderHook(() => useConversation("missed-event"));
+    const { result } = renderHook(() => useConversation("missed-event", true));
     await act(async () => { await Promise.resolve(); });
     const newer = JSON.stringify([{ id: "other-tab", createdAt: 1, messages: [] }]);
     localStorage.setItem(STORAGE_KEY, newer);

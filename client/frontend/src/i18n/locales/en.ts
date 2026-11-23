@@ -134,6 +134,8 @@ const en = {
   confirm: "Confirm",
   showEmotionLabels: "Show emotion labels",
   emotionLabelsNote: "AI-generated labels are not a psychological assessment. Turning them off hides labels without deleting messages.",
+  confirmPrivacyBeforeSending: "Review redactions before sending",
+  privacyConfirmationNote: "Turn on to check or add redactions. When off, messages are sent after automatic redaction.",
   preferenceSaveFailed: "This preference could not be saved and only applies to this visit.",
   caseSummary: "Current summary",
   caseSummaryOpen: "View current summary",

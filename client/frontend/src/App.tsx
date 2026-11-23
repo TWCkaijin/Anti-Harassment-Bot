@@ -13,6 +13,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import PrivacyReviewDialog from "./components/PrivacyReviewDialog";
 import { useEmotionPreference } from "./hooks/useEmotionPreference";
 import { useTextSizePreference } from "./hooks/useTextSizePreference";
+import { usePrivacyReviewPreference } from "./hooks/usePrivacyReviewPreference";
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -40,6 +41,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { showEmotions, updateShowEmotions, preferenceSaveFailed } = useEmotionPreference();
   const { textSize, updateTextSize, textSizeSaveFailed } = useTextSizePreference();
+  const { confirmPrivacyBeforeSending, updateConfirmPrivacy, privacyReviewSaveFailed } = usePrivacyReviewPreference();
 
   const {
     sessions,
@@ -55,7 +57,7 @@ export default function App() {
     renameSession,
     clearAllSessions,
     caseFacts, pendingFacts, saveCaseFacts, contractV2, contractVersion, clientSettings, saveClarificationDraft, isBackendConnected, reconnectBackend, storageIssue, incompatibleSummary, summaryRequiresConnection, canRegenerate, privacyReview, confirmPrivacyReview, cancelPrivacyReview,
-  } = useConversation();
+  } = useConversation(undefined, confirmPrivacyBeforeSending);
 
   const closeSidebar = useCallback(() => {
     window.clearTimeout(peekTimer.current);
@@ -183,6 +185,9 @@ export default function App() {
         showEmotions={showEmotions}
         onShowEmotionsChange={updateShowEmotions}
         preferenceSaveFailed={preferenceSaveFailed}
+        confirmPrivacyBeforeSending={confirmPrivacyBeforeSending}
+        onConfirmPrivacyChange={updateConfirmPrivacy}
+        privacyReviewSaveFailed={privacyReviewSaveFailed}
       />
 
       {privacyReview && <PrivacyReviewDialog initialDraft={privacyReview} onConfirm={confirmPrivacyReview} onCancel={cancelPrivacyReview} />}

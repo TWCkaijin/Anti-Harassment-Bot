@@ -133,6 +133,8 @@ const zhTW = {
   confirm: "確認",
   showEmotionLabels: "顯示情緒標籤",
   emotionLabelsNote: "標籤由 AI 推測，並非心理評估。關閉只隱藏標籤，不刪除對話。",
+  confirmPrivacyBeforeSending: "送出前遮罩確認",
+  privacyConfirmationNote: "開啟後可檢查並補充遮罩。關閉時會自動套用遮罩後送出。",
   preferenceSaveFailed: "此設定暫時只在本次使用有效，無法寫入裝置。",
   caseSummary: "目前摘要",
   caseSummaryOpen: "查看目前摘要",

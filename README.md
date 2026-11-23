@@ -2,7 +2,7 @@
 
 React／Vite、Flask、Firebase Functions／Firestore 與 OpenRouter 組成的諮詢系統。Client 提供聊天、摘要、瀏覽器遮罩與 RAG；獨立 Admin 提供設定、Prompt／Skills、診斷、批次測試與檢索資料管理。
 
-目前本機程式會先以瀏覽器規則遮罩 Client 聊天請求，顯示送出內容供使用者檢查及確認。圖片附件在 Client 與 Admin 診斷端點均停用。兩階段 Gate 可由 Admin 設定，但既有環境不會因程式更新而自動開啟；實際模型效果仍須另外驗證。這些敘述不代表雲端版本已更新。
+Client 聊天請求會先在瀏覽器依規則遮罩，再送出。可在聊天設定開啟「送出前遮罩確認」，檢查或補充遮罩後再送出。圖片附件在 Client 與 Admin 診斷端點均停用。兩階段 Gate 可由 Admin 設定，但既有環境不會因程式更新而自動開啟；實際模型效果仍須另外驗證。這些敘述不代表雲端版本已更新。
 
 | 文件 | 用途 |
 | --- | --- |
@@ -11,7 +11,7 @@ React／Vite、Flask、Firebase Functions／Firestore 與 OpenRouter 組成的�
 | [資料工具](admin/backend/admin_app/scripts/README.md) | 舊資料移轉、來源 manifest 與匯入 CLI |
 | [CI 權限審查](infrastructure/iam/CI_DEPLOYMENT_REVIEW.md) | WIF 信任條件及各項部署權限 |
 | [技術文件與閱讀版手冊](docs/technical-report/README.md) | 新架構技術資料與 2026-10-09 閱讀版快照；最新隱私流程見 [隱私說明](docs/technical-report/PRIVACY.md) |
-| [資料說明](data/README.md) | 原始來源與知識庫資料 |
+| [本機遮罩驗證](docs/browser-masking/README.md) | 管理端規則與 Tiny NER 的模型準備、測試及評分 |
 
 ## 目錄與資料庫
 
@@ -25,6 +25,8 @@ docs/         # 遷移報告與操作手冊
 data/         # 保留的知識庫來源
 resource/     # 保留的原始工作簿與研究資料
 ```
+
+準備好本機來源資料後，可在 `data/README.md` 查看原始來源說明。部署封裝 `build/` 與前端 `dist/`、`dist-preview/` 會在建置時產生。
 
 | 環境 | Client／Admin 共用業務庫 | Admin 私有庫 | Functions |
 | --- | --- | --- | --- |

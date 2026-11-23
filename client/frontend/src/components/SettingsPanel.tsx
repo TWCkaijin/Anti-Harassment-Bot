@@ -22,6 +22,9 @@ interface SettingsPanelProps {
   showEmotions?: boolean;
   onShowEmotionsChange?: (value: boolean) => void;
   preferenceSaveFailed?: boolean;
+  confirmPrivacyBeforeSending?: boolean;
+  onConfirmPrivacyChange?: (enabled: boolean) => void;
+  privacyReviewSaveFailed?: boolean;
 }
 
 export default function SettingsPanel({
@@ -32,6 +35,7 @@ export default function SettingsPanel({
   storageChanged = false,
   textSize = "medium", onTextSizeChange, textSizeSaveFailed = false,
   showEmotions = false, onShowEmotionsChange, preferenceSaveFailed = false,
+  confirmPrivacyBeforeSending = false, onConfirmPrivacyChange, privacyReviewSaveFailed = false,
 }: SettingsPanelProps) {
   const { t, locale, setLocale } = useI18n();
   const [analyticsEnabled, setAnalyticsEnabled] = useState(hasAnalyticsConsent);
@@ -174,6 +178,21 @@ export default function SettingsPanel({
             </label>
             <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">{t.emotionLabelsNote}</p>
             {preferenceSaveFailed && <p role="alert" className="mt-2 text-xs text-error">{t.preferenceSaveFailed}</p>}
+          </section>}
+
+          {onConfirmPrivacyChange && <section>
+            <label className="flex min-h-[44px] cursor-pointer items-center gap-3 text-sm font-semibold text-on-surface">
+              <input
+                type="checkbox"
+                checked={confirmPrivacyBeforeSending}
+                onChange={event => onConfirmPrivacyChange(event.target.checked)}
+                aria-describedby="privacy-confirmation-note"
+                className="size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              />
+              {t.confirmPrivacyBeforeSending}
+            </label>
+            <p id="privacy-confirmation-note" className="text-xs leading-relaxed text-on-surface-variant">{t.privacyConfirmationNote}</p>
+            {privacyReviewSaveFailed && <p role="alert" className="mt-2 text-xs text-error">{t.preferenceSaveFailed}</p>}
           </section>}
 
           {isAnalyticsConfigured() && <section>

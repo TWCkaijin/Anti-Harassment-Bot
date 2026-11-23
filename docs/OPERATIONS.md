@@ -89,7 +89,7 @@ CLI 隱藏輸入且要求重複確認。改密碼加 `--reset`，停用登入加
 
 ### 聊天隱私與內容審查
 
-Client 瀏覽器先以規則遮罩當次訊息及選入的歷史、摘要、個案欄位與追問資料，再顯示整份待送出內容供使用者檢查及確認；取消時不呼叫聊天 API。此流程不能保證任意自由文字已完全去識別，請在確認視窗中自行刪除仍可識別的人名、單位或事件細節。Admin 診斷及批次工具另有本機遮罩與批次預覽流程，不會逐筆顯示 Client 確認視窗。後端遮罩開關獨立於瀏覽器確認。
+Client 瀏覽器先以規則遮罩當次訊息及選入的歷史、摘要、個案欄位與追問資料，預設自動送出。可在聊天設定開啟「送出前遮罩確認」，逐次檢視與編輯遮罩內容。取消確認時不呼叫聊天 API。規則可能漏掉自由文字中的人名、單位或事件細節。Admin 診斷及批次工具另有本機遮罩與批次預覽流程，不會逐筆顯示 Client 確認視窗。後端遮罩開關獨立於瀏覽器確認。
 
 Admin Preview／開發環境的瀏覽器 PII 小模型仍僅供手動驗證；固定 120 則與另寫的 16 則合成診斷集均未通過品質門檻，尚未接入 Client 聊天。16 則標註仍待獨立人工審定；實測數字見[遷移報告](MIGRATION_REPORT.md)。
 
@@ -181,7 +181,7 @@ uv run --frozen python scripts/configure_admin_workers.py --environment preview 
 | 1. Admin 後端 | 健康檢查、登入／登出、設定 revision、診斷工作與 worker OIDC；若 Function URI 改變，重新核對 worker target | 先前已驗證的 `admin_api` 或 `admin_api_preview` 程式版本與設定快照；確認佇列及 receipt 後再恢復工作 |
 | 2. Admin 前端 | 對應 Admin site 的登入、設定讀寫與診斷頁 | 該 site／channel 的上一個已知可用 Hosting release，不更動 Client site |
 | 3. Client 後端 | 健康檢查、App Check 開關與 token、v1–v4 聊天及 SSE 撤回、資料庫隔離 | 先前已驗證的 `api` 或 `api_preview` 程式版本與設定快照；資料修復依備份及來源 receipt |
-| 4. Client 前端 | 對應 Client site 的人工送出確認、文字串流撤回、圖片封鎖及 App Check | 該 site／channel 的上一個已知可用 Hosting release，不更動 Admin site |
+| 4. Client 前端 | 對應 Client site 的本機遮罩、確認開關、文字串流撤回、圖片封鎖及 App Check | 該 site／channel 的上一個已知可用 Hosting release，不更動 Admin site |
 
 正式環境只在 Preview 的四步瀏覽器與 API 驗收、Runtime IAM 檢查、資料備份及回復演練完成後切換。`main-preview` 仍是獨立的 Client Hosting-only 預覽，不屬於這四步，也不建立新後端。
 

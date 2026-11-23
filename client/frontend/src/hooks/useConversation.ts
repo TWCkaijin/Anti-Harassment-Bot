@@ -144,7 +144,7 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 
 // ── Hook ─────────────────────────────────────────────────────────────────
 
-export function useConversation(sessionId?: string) {
+export function useConversation(sessionId?: string, confirmPrivacyBeforeSending = false) {
   const [initialState] = useState(() => {
     const storage = loadConversationStorage();
     const loaded = storage.sessions;
@@ -230,14 +230,17 @@ export function useConversation(sessionId?: string) {
     setPrivacyReview(null);
     pending.resolve(draft);
   }, []);
-  const reviewPrivacyDraft = useCallback((draft: PrivacyDraft, signal?: AbortSignal) => new Promise<PrivacyDraft | null>(resolve => {
-    if (signal?.aborted) { resolve(null); return; }
-    if (pendingPrivacyReviewRef.current) finishPrivacyReview(null);
-    const onAbort = () => finishPrivacyReview(null);
-    pendingPrivacyReviewRef.current = { resolve, signal, onAbort };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    setPrivacyReview(draft);
-  }), [finishPrivacyReview]);
+  const reviewPrivacyDraft = useCallback(async (draft: PrivacyDraft, signal?: AbortSignal) => {
+    if (signal?.aborted) return null;
+    if (!confirmPrivacyBeforeSending) return draft;
+    return new Promise<PrivacyDraft | null>(resolve => {
+      if (pendingPrivacyReviewRef.current) finishPrivacyReview(null);
+      const onAbort = () => finishPrivacyReview(null);
+      pendingPrivacyReviewRef.current = { resolve, signal, onAbort };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      setPrivacyReview(draft);
+    });
+  }, [confirmPrivacyBeforeSending, finishPrivacyReview]);
   const markStorageChanged = useCallback(() => {
     if (storageChangedRef.current) return;
     storageChangedRef.current = true;
