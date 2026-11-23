@@ -219,15 +219,12 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
                 )
 
             response = asyncio.run(
-                chat_api.run_gated_chat(
-                    chat_api.get_agent(),
-                    chat_api.get_gate(),
-                    chat_api.get_refusal_agent(),
+                chat_api.run_chat_turn(
+                    data.chat_request,
+                    config,
+                    session_id=session_id,
+                    was_anonymized=was_anonymized,
                     run_kwargs=arguments,
-                    runtime_config=config,
-                    build_payload=lambda result: chat_api._validated_payload(
-                        result, session_id, was_anonymized, config, data.chat_request
-                    ),
                     build_refusal_payload=refusal_payload,
                     review_trace=diagnostics.get("gate_reviews"),
                 )

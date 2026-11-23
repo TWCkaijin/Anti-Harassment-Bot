@@ -706,6 +706,40 @@ def _validated_payload(result, session_id, was_anonymized, runtime_config, req_o
     return payload
 
 
+async def run_chat_turn(
+    req_obj: ChatRequest,
+    runtime_config,
+    *,
+    session_id: str,
+    was_anonymized: bool,
+    run_kwargs: dict,
+    **options,
+) -> dict:
+    """Run one Gate-reviewed agent turn with the standard payload builders.
+
+    Callers may override build_payload/build_refusal_payload or pass Gate options
+    such as callbacks, on_retract or review_trace.
+    """
+    options.setdefault(
+        "build_payload",
+        lambda result: _validated_payload(
+            result, session_id, was_anonymized, runtime_config, req_obj
+        ),
+    )
+    options.setdefault(
+        "build_refusal_payload",
+        lambda reply: _gate_refusal_payload(reply, session_id, was_anonymized, req_obj),
+    )
+    return await run_gated_chat(
+        get_agent(),
+        get_gate(),
+        get_refusal_agent(),
+        run_kwargs=run_kwargs,
+        runtime_config=runtime_config,
+        **options,
+    )
+
+
 def _sse_event(event: str, payload: dict) -> str:
     # JSON escaping keeps newlines in reply text inside one SSE data line.
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -996,16 +1030,13 @@ def _stream_response(
                             "on_reasoning": emit_reasoning,
                         }
                     )
-                    payload = await run_gated_chat(
-                        get_agent(),
-                        get_gate(),
-                        get_refusal_agent(),
+                    payload = await run_chat_turn(
+                        req_obj,
+                        runtime_config,
+                        session_id=session_id,
+                        was_anonymized=was_anonymized,
                         run_kwargs=run_kwargs,
-                        runtime_config=runtime_config,
                         build_payload=build_payload,
-                        build_refusal_payload=lambda reply: _gate_refusal_payload(
-                            reply, session_id, was_anonymized, req_obj
-                        ),
                         callbacks=callbacks,
                         on_retract=emit_retract,
                     )
@@ -1123,18 +1154,12 @@ def chat():
     try:
         run_kwargs, was_anonymized = _prepare_agent_input(req_obj, runtime_config)
         payload = asyncio.run(
-            run_gated_chat(
-                get_agent(),
-                get_gate(),
-                get_refusal_agent(),
+            run_chat_turn(
+                req_obj,
+                runtime_config,
+                session_id=session_id,
+                was_anonymized=was_anonymized,
                 run_kwargs=run_kwargs,
-                runtime_config=runtime_config,
-                build_payload=lambda result: _validated_payload(
-                    result, session_id, was_anonymized, runtime_config, req_obj
-                ),
-                build_refusal_payload=lambda reply: _gate_refusal_payload(
-                    reply, session_id, was_anonymized, req_obj
-                ),
             )
         )
     except Exception as exc:

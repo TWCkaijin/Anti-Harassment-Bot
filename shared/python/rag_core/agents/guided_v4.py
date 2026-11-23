@@ -639,6 +639,27 @@ def _prediction_json_object(text):
     return value
 
 
+def model_request_options(
+    config, messages: list, response_format: dict, *, hide_reasoning: bool
+) -> dict:
+    """Build one chat-completions request from the runtime model settings."""
+    options = {
+        "model": config.openrouter_model,
+        "messages": messages,
+        "temperature": config.temperature,
+        "top_p": config.top_p,
+        "response_format": provider_response_format(config.openrouter_model, response_format),
+    }
+    if config.max_tokens > 0:
+        options["max_tokens"] = config.max_tokens
+    if config.reasoning_effort != "none":
+        options["extra_body"] = {
+            "reasoning": {"effort": config.reasoning_effort, "exclude": hide_reasoning}
+        }
+    apply_provider_sort(options, config)
+    return options
+
+
 async def _run_applicable_laws_v4(
     rag,
     client,
@@ -749,24 +770,13 @@ async def _run_applicable_laws_v4(
 
     async def complete(request_messages, *, first):
         await progress("waiting_model")
-        options = {
-            "model": config.openrouter_model,
-            "messages": request_messages,
-            "temperature": config.temperature,
-            "top_p": config.top_p,
-            "response_format": V4_PREDICTION_PLAN_FORMAT if first else V4_PREDICTION_FINAL_FORMAT,
-            "stream": False,
-        }
-        if config.max_tokens > 0:
-            options["max_tokens"] = config.max_tokens
-        if config.reasoning_effort != "none":
-            options["extra_body"] = {
-                "reasoning": {"effort": config.reasoning_effort, "exclude": True}
-            }
-        options["response_format"] = provider_response_format(
-            options["model"], options["response_format"]
+        options = model_request_options(
+            config,
+            request_messages,
+            V4_PREDICTION_PLAN_FORMAT if first else V4_PREDICTION_FINAL_FORMAT,
+            hide_reasoning=True,
         )
-        apply_provider_sort(options, config)
+        options["stream"] = False
         metrics["model_calls"] += 1
         started = monotonic()
         try:
@@ -1056,31 +1066,16 @@ async def run_guided_v4(
             # Keep this stage instruction above the untrusted evidence handoff,
             # without changing the original request or inventing another turn.
             request_messages.insert(-1, {"role": "system", "content": V4_FINAL_STAGE_INSTRUCTION})
-        options = {
-            "model": config.openrouter_model,
-            "messages": request_messages,
-            "temperature": config.temperature,
-            "top_p": config.top_p,
-            "response_format": V4_PLAN_FORMAT if first else _final_response_format(sources),
-        }
+        response_format = V4_PLAN_FORMAT if first else _final_response_format(sources)
         if first and not pipeline.get("auto_clarify", True):
-            options["response_format"] = deepcopy(V4_PLAN_FORMAT)
-            branches = options["response_format"]["json_schema"]["schema"]["properties"]["plan"][
-                "anyOf"
-            ]
+            response_format = deepcopy(V4_PLAN_FORMAT)
+            branches = response_format["json_schema"]["schema"]["properties"]["plan"]["anyOf"]
             branches[:] = [
                 branch for branch in branches if branch["$ref"] != "#/$defs/ClarificationPlan"
             ]
-        if config.max_tokens > 0:
-            options["max_tokens"] = config.max_tokens
-        if config.reasoning_effort != "none":
-            options["extra_body"] = {
-                "reasoning": {"effort": config.reasoning_effort, "exclude": not reasoning_enabled}
-            }
-        options["response_format"] = provider_response_format(
-            options["model"], options["response_format"]
+        options = model_request_options(
+            config, request_messages, response_format, hide_reasoning=not reasoning_enabled
         )
-        apply_provider_sort(options, config)
         metrics["model_calls"] += 1
         started = monotonic()
         decoder = AnswerUnitJSONDecoder(wrapper_key="plan" if first else None)
