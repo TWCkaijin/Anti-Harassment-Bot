@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from rag_core.agents.guided_chat import check_answer_units
+from rag_core.core.answer_validation import check_answer_units
 
 
 def checked(text, *, source_ids=None):

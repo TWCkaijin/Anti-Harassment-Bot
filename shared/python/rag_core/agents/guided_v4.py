@@ -18,14 +18,6 @@ from zoneinfo import ZoneInfo
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 
-from rag_core.agents.guided_chat import (
-    QuestionOption,
-    _source,
-    _strict_schema,
-    check_answer_units,
-    contextless_prior_legal_source_request,
-    verified_law_url,
-)
 from rag_core.agents.provider_schema import provider_response_format
 from rag_core.core.agent_errors import (
     ApplicableLawsContractMismatchError,
@@ -33,6 +25,14 @@ from rag_core.core.agent_errors import (
     ModelOutputLimitError,
 )
 from rag_core.core.agent_prompts import assemble_service_instruction
+from rag_core.core.answer_validation import (
+    QuestionOption,
+    build_source,
+    check_answer_units,
+    contextless_prior_legal_source_request,
+    strict_schema,
+    verified_law_url,
+)
 from rag_core.core.case_context import CaseContext, StrictModel, is_urgent
 from rag_core.core.chat_response import (
     ASSISTANT_REPLY_MAX_LENGTH,
@@ -265,7 +265,7 @@ def _format(model, name):
         "json_schema": {
             "name": name,
             "strict": True,
-            "schema": _strict_schema(model.model_json_schema()),
+            "schema": strict_schema(model.model_json_schema()),
         },
     }
 
@@ -537,7 +537,7 @@ async def _retrieve_v4(
                 ),
                 types[0],
             )
-            source = _source(doc, kind)
+            source = build_source(doc, kind)
             if kind == "law":
                 source["source_url"] = verified_law_url(source)
             if source["doc_id"] not in {item["doc_id"] for item in sources}:

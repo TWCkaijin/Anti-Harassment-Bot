@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rag_core.agents.guided_chat import _duration_values, check_answer_units
+from rag_core.core.answer_validation import _duration_values, check_answer_units
 
 
 def source(identifier="fixture/1", law="測試法", article="1", checked=True):
