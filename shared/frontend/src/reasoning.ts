@@ -1,7 +1,7 @@
 import { isRecord } from "./caseFacts";
 
 export interface ReasoningEntry { text: string; kind: "text" | "summary"; stage: "understanding" | "answer" }
-export const MAX_REASONING_CHARACTERS = 128_000;
+const MAX_REASONING_CHARACTERS = 128_000;
 export function isReasoningEntry(value: unknown): value is ReasoningEntry {
   return isRecord(value) && Object.keys(value).every(key => ["text", "kind", "stage"].includes(key))
     && typeof value.text === "string" && value.text.length > 0 && value.text.length <= 32_000

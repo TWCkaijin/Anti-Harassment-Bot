@@ -38,7 +38,7 @@ export function getSafeResourceActions(actions: unknown): Array<TelActionButton 
 }
 
 // Stored conversations can predate the current schema; validate before rendering.
-export function isValidOptionsAction(action: unknown): action is OptionsActionButton {
+function isValidOptionsAction(action: unknown): action is OptionsActionButton {
   return isRecord(action) && action.action === "options" && boundedText(action.label, 80)
     && typeof action.id === "string" && /^[a-z][a-z0-9_-]{1,63}$/.test(action.id)
     && boundedText(action.title, 160) && Array.isArray(action.options)

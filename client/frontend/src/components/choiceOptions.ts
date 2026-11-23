@@ -1,7 +1,7 @@
 import type { ActionOption } from "../services/api";
 
 // Typed questions always reserve room for unknown, declined, and free text.
-export const MAX_TYPED_CHOICES = 6;
+const MAX_TYPED_CHOICES = 6;
 export const MAX_TYPED_PREDEFINED_OPTIONS = MAX_TYPED_CHOICES - 3;
 export const MAX_LEGACY_PREDEFINED_OPTIONS = 4;
 

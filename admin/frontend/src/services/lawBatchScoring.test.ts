@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { prepareLawBatch, type BatchRow, type BatchStatus } from "./applicableLawBatch";
+import type { BatchRow, BatchStatus } from "./applicableLawBatch";
+import { createPrivacyDraft } from "./clientPrivacy";
 import { evaluateLawRow, formatBatchRate, parseReferenceAnswer, scoreLawBatch } from "./lawBatchScoring";
-import { batchConfig } from "../test/scenarioFixture";
 
 const row = (status: BatchStatus, laws: string[] = [], reference?: string): BatchRow => ({
-  ...prepareLawBatch([{ row: 2, text: "合成情境", reference }], batchConfig, []).rows[0], status, laws,
+  row: 2,
+  reference: parseReferenceAnswer(reference),
+  draft: createPrivacyDraft({ message: "合成情境", history: [], use_rag: true, contract_version: 4 }, []),
+  status,
+  laws,
+  elapsedMs: null,
 });
 describe("local reference evaluation", () => {
   it("accepts full names, old education alias and supported separators, without guessing prose", () => {

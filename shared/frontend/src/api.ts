@@ -245,7 +245,7 @@ export type RuntimeConfigUpdate = Partial<
 
 export interface AdminChatTestResult { response: ChatResponse; diagnostics: Record<string, unknown> }
 
-export const APPLICABLE_LAW_NAMES = ["性騷法", "性工法", "性平法"] as const;
+const APPLICABLE_LAW_NAMES = ["性騷法", "性工法", "性平法"] as const;
 export type ApplicableLawName = typeof APPLICABLE_LAW_NAMES[number];
 export interface ApplicableLawPrediction {
   predicted_laws: ApplicableLawName[];
@@ -372,7 +372,7 @@ async function apiFetch<T>(
   return response.json() as Promise<T>;
 }
 
-export async function throwResponseError(response: Response): Promise<never> {
+async function throwResponseError(response: Response): Promise<never> {
   let detail: string | undefined;
   let retryable = false;
   let debugMessage: string | undefined;

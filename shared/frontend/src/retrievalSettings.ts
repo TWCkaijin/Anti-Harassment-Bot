@@ -1,6 +1,6 @@
 import type { RuntimeConfig } from "./api";
 
-export const RETRIEVAL_DEFAULTS = {
+const RETRIEVAL_DEFAULTS = {
   openrouter_provider_sort: "auto" as const,
   rag_rerank_enabled: false,
   rag_rerank_model: "cohere/rerank-4-fast",
