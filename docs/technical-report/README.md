@@ -1,13 +1,15 @@
 # 正式技術文件
 
-閱讀版快照日期：2026-10-10。技術說明與三份 Markdown／HTML／PDF 手冊記錄當時的 Client／Admin 拆分版本；其中自動送出與圖片上傳等隱私敘述不適用於目前工作目錄。現行隱私流程見 [隱私邊界](PRIVACY.md)，完整操作步驟以 [操作手冊](../OPERATIONS.md) 為準，實際雲端完成狀態以 [遷移報告](../MIGRATION_REPORT.md) 為準。
+閱讀版快照日期：2026-10-10。技術說明與三份手冊記錄當時的 Client／Admin 拆分版本；其中自動送出與圖片上傳等隱私敘述不適用於目前工作目錄。現行隱私流程見 [隱私邊界](PRIVACY.md)，完整操作步驟以 [操作手冊](../OPERATIONS.md) 為準，實際雲端完成狀態以 [遷移報告](../MIGRATION_REPORT.md) 為準。
 
-| 文件 | 可編輯來源 | 離線閱讀 | 列印 |
-| --- | --- | --- | --- |
-| 技術報告 | [Markdown](技術報告.md) | [HTML](技術報告.html) | [PDF](技術報告.pdf) |
-| 使用者手冊 | [Markdown](manuals/使用者手冊.md) | [HTML](manuals/使用者手冊.html) | [PDF](manuals/使用者手冊.pdf) |
-| 管理者手冊 | [Markdown](manuals/管理者手冊.md) | [HTML](manuals/管理者手冊.html) | [PDF](manuals/管理者手冊.pdf) |
-| 開發維運手冊 | [Markdown](manuals/開發維運手冊.md) | [HTML](manuals/開發維運手冊.html) | [PDF](manuals/開發維運手冊.pdf) |
+| 文件 | 來源 |
+| --- | --- |
+| 技術報告 | [技術報告.md](技術報告.md) |
+| 使用者手冊 | [manuals/使用者手冊.md](manuals/使用者手冊.md) |
+| 管理者手冊 | [manuals/管理者手冊.md](manuals/管理者手冊.md) |
+| 開發維運手冊 | [manuals/開發維運手冊.md](manuals/開發維運手冊.md) |
+
+HTML 與 PDF 不納入 Git，由 [scripts/build.sh](scripts/README.md) 從上述 Markdown 產生，並附在 GitHub Release 發布。
 
 詳細參考：[聊天契約](CHAT_CONTRACT.md)、[隱私邊界](PRIVACY.md)、[API 與設定](API_REFERENCE.md)、[批次預測](BATCH_PREDICTION.md)、[重排與統計](RERANKING.md)、[行為測試](BEHAVIOR_TESTS.md)。
 

@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 if (!process.argv[2]) {
-  console.error("Usage: node scripts/quality/render_adaptive_review.mjs <results-directory>");
+  console.error("Usage: node scripts/archive/quality/render_adaptive_review.mjs <results-directory>");
   process.exit(2);
 }
 const require = createRequire(fileURLToPath(new URL("../../client/frontend/package.json", import.meta.url)));

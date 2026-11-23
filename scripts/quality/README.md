@@ -1,11 +1,6 @@
-# 可重用品質工具
+# 品質工具
 
-此目錄保留提示／回答比較、評讀報告及人工分數整理工具。既有實驗輸入與結果已外部封存，交付不依賴該封存位置。
-
-- main_alignment.py 需要明確的 --engine、--data、--env-file 與 --variant；實際模型執行還需 --allow-live，可能計費。
-- report_main_alignment.py 與 report_adaptive_response.py 接收結果資料夾，離線生成報告。
-- score_main_alignment.py 接收 answer key 及人工評分，不自行產生專家結論。
-- render_adaptive_review.mjs 必須明確傳入結果資料夾；缺少參數會顯示用法，不再讀取已封存的歷史路徑。
+此目錄保留仍在使用的品質工具。過去的提示／回答比較與評讀報告工具已移到 [scripts/archive/quality](../archive/quality/README.md)。
 
 新測試以 admin/tests/reliability 與管理端行為測試為入口；不要將歷史評讀數字當成最新版本驗收。
 

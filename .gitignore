@@ -49,6 +49,9 @@ docs/technical-report/.*-build/
 docs/technical-report/.build/
 docs/technical-report/.chart-data-*/
 docs/technical-report/evidence/
+# 由 scripts/build.sh 產生，隨 GitHub Release 發布
+docs/technical-report/**/*.html
+docs/technical-report/**/*.pdf
 
 # ===== 編輯器與 Finder =====
 .idea/
