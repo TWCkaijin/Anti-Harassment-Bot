@@ -478,7 +478,7 @@ function DiagnosticResult({ run }: { run: TestRun }) {
       {DIAGNOSTIC_SECTIONS.map(([key, label]) => (
         <details key={key} className="rounded-lg border border-outline/15 p-2">
           <summary className="cursor-pointer text-xs font-medium">{label}</summary>
-          <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-[11px]">
+          <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-[0.6875rem]">
             {JSON.stringify(run.result.diagnostics[key] ?? "未提供", null, 2)}
           </pre>
         </details>

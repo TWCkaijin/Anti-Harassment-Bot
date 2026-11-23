@@ -1,4 +1,16 @@
+# ===== 本機來源資料 =====
+data
 resource/
+
+# ===== 憑證與本機設定 =====
+.env
+.env.local
+.env.*.local
+firebase_admin.json
+.admin-local/
+*.pem
+*.key
+gha-creds-*.json
 
 # ===== Python =====
 __pycache__/
@@ -12,65 +24,40 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-*.pyo
-*.pyc
 
-# ===== Environment & Secrets =====
-.env
-.env.local
-.env.*.local
-firebase_admin.json
-.admin-local/
-*.pem
-*.key
-data
-
-# ===== Node / Frontend =====
+# ===== 前端建置與依賴 =====
 node_modules/
 .pnpm-store/
-client/frontend/dist/
-admin/frontend/dist/
 admin/frontend/dist-preview/
+admin/frontend/.masking-tiny/
 **/.vite/
 **/coverage/
 *.tsbuildinfo
 
-# ===== Firebase =====
+# ===== Firebase 與本機記錄 =====
 .firebase/
-firebase-debug.log
-firestore-debug.log
+*.log
 firepit-log.txt
-ui-debug.log
+functions_error.json
+.code-review-graph/
 
-# ===== IDE =====
+# ===== 本機測試與報告產物 =====
+admin/tests/reliability/results/
+admin/tests/reliability/candidates/
+client/frontend/design/previews/
+docs/technical-report/.*-build/
+docs/technical-report/.build/
+docs/technical-report/.chart-data-*/
+docs/technical-report/evidence/
+
+# ===== 編輯器與 Finder =====
 .idea/
 .vscode/
 *.swp
 *.swo
 .DS_Store
 
-# ===== Logs & Temporary Files =====
-functions_error.json
-.code-review-graph/
-admin/tests/reliability/results/applicable-laws*/
-admin/tests/reliability/results/chatgpt-scene-*/
-
-# Delivery: formal docs are versionable; private evidence and outputs are not.
-docs/technical-report/.*-build/
-docs/technical-report/.build/
-docs/technical-report/.chart-data-*/
-docs/technical-report/evidence/
-admin/tests/reliability/results/
-admin/tests/reliability/candidates/
-client/frontend/design/previews/
-resource/*.predicted.xlsx
-resource/behavior-tests-*.json
-*.log
-
-# Workload Identity Federation credential files
-gha-creds-*.json
-
-# Local Apple design guidance
+# ===== 本機 Apple 設計指南 =====
 /AGENTS.md
 /DESIGN.md
 /.agents/skills/apple-hig/
