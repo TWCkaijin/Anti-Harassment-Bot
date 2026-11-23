@@ -180,7 +180,7 @@ uv run --frozen python scripts/configure_admin_workers.py --environment preview 
 | --- | --- | --- |
 | 1. Admin 後端 | 健康檢查、登入／登出、設定 revision、診斷工作與 worker OIDC；若 Function URI 改變，重新核對 worker target | 先前已驗證的 `admin_api` 或 `admin_api_preview` 程式版本與設定快照；確認佇列及 receipt 後再恢復工作 |
 | 2. Admin 前端 | 對應 Admin site 的登入、設定讀寫與診斷頁 | 該 site／channel 的上一個已知可用 Hosting release，不更動 Client site |
-| 3. Client 後端 | 健康檢查、App Check 開關與 token、v1–v4 聊天及 SSE 撤回、資料庫隔離 | 先前已驗證的 `api` 或 `api_preview` 程式版本與設定快照；資料修復依備份及來源 receipt |
+| 3. Client 後端 | 健康檢查、App Check 開關與 token、v4 聊天及 SSE 撤回、資料庫隔離 | 先前已驗證的 `api` 或 `api_preview` 程式版本與設定快照；資料修復依備份及來源 receipt |
 | 4. Client 前端 | 對應 Client site 的本機遮罩、確認開關、文字串流撤回、圖片封鎖及 App Check | 該 site／channel 的上一個已知可用 Hosting release，不更動 Admin site |
 
 正式環境只在 Preview 的四步瀏覽器與 API 驗收、Runtime IAM 檢查、資料備份及回復演練完成後切換。`main-preview` 仍是獨立的 Client Hosting-only 預覽，不屬於這四步，也不建立新後端。
