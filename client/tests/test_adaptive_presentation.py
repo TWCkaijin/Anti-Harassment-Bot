@@ -18,9 +18,7 @@ from client.tests.test_guided_v4 import (
 from rag_core.agents.openrouter_agent import AgentContractError
 from rag_core.core.agent_prompts import (
     ADAPTIVE_PRESENTATION_INSTRUCTION,
-    assemble_legacy_instruction,
     assemble_service_instruction,
-    get_default_prompt_sections,
 )
 
 
@@ -47,17 +45,6 @@ def test_presentation_rule_follows_admin_templates_without_removing_domain_overr
     assert "僅回覆呈現方式以本節為準" in merged
     assert "法律、安全、資料界線與各版本JSON輸出契約仍依原規則" in merged
     assert overrides == before
-
-
-def test_legacy_keeps_its_json_contract_and_default_domain_guidance():
-    defaults = get_default_prompt_sections()
-    merged = assemble_legacy_instruction()
-
-    assert defaults["analysis_rules"] in merged
-    assert defaults["important_resources"] in merged
-    assert defaults["output_format"] in merged
-    assert merged.count(ADAPTIVE_PRESENTATION_INSTRUCTION) == 1
-    assert "answer_units" not in merged
 
 
 @pytest.mark.asyncio

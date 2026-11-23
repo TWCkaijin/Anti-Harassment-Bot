@@ -481,16 +481,22 @@ async def test_nonstream_parser_requires_completed_provider_response(finish, err
 @pytest.mark.parametrize(
     "changes",
     [
-        {"contract_version": 3},
         {"on_reply_delta": Mock()},
         {"on_guidance": Mock()},
         {"on_reasoning": Mock()},
     ],
 )
-async def test_internal_prediction_rejects_legacy_or_stream_callbacks(changes):
+async def test_internal_prediction_rejects_stream_callbacks(changes):
     agent = agent_for([])
     with pytest.raises(AgentContractError, match="non-streaming v4"):
         await run(agent, **changes)
+    assert not agent.client.chat.completions.calls
+
+
+async def test_internal_prediction_rejects_retired_contracts():
+    agent = agent_for([])
+    with pytest.raises(AgentContractError, match="version 4"):
+        await run(agent, contract_version=3)
     assert not agent.client.chat.completions.calls
 
 

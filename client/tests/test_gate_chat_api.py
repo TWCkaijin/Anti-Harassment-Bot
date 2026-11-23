@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from client.tests.test_agent import v4_result
 from client_app.main import app
 from rag_core import chat_service
 from rag_core.agents.gate_agent import GateDecision
-from rag_core.agents.openrouter_agent import AgentResult
 from rag_core.core.runtime_config import RuntimeConfig, _build_config
 
 CONFIG = RuntimeConfig(
@@ -42,7 +42,7 @@ def test_post_gate_stream_contract(monkeypatch, post):
 
     async def main(**kwargs):
         await kwargs["on_reply_delta"]("provisional answer")
-        return AgentResult(
+        return v4_result(
             reply=json.dumps(
                 {
                     "reply": "provisional answer",
@@ -112,7 +112,7 @@ def test_pre_gate_failure_never_streams_business_body(monkeypatch):
 
     async def main(**kwargs):
         await kwargs["on_reply_delta"]("hidden candidate")
-        return AgentResult(reply="{}")
+        return v4_result(reply="{}")
 
     async def gate(**kwargs):
         raise TimeoutError("private material")

@@ -11,10 +11,10 @@ from pydantic import ValidationError
 
 from admin.tests.service_helpers import run_diagnostic
 from admin_app import api as admin
+from client.tests.test_agent import v4_result
 from client_app.api import health
 from client_app.main import app
 from rag_core import chat_service as chat
-from rag_core.agents.openrouter_agent import AgentResult
 from rag_core.core.case_context import CaseContext, SummaryUpdate
 from rag_core.core.clarification_tokens import sign_clarification, validate_clarification_answer
 from rag_core.core.runtime_config import RuntimeConfig
@@ -53,7 +53,7 @@ def request_payload(**changes):
 
 
 def result(**guidance):
-    return AgentResult(
+    return v4_result(
         reply=json.dumps(
             {
                 "reply": "先整理現在需要的協助。",
@@ -198,7 +198,7 @@ def test_context_rejects_ambiguous_version_or_summary(snapshot):
         CaseContext.model_validate(snapshot)
 
 
-@pytest.mark.parametrize("version,schema", [(2, 1), (3, 2), (4, 3)])
+@pytest.mark.parametrize("version,schema", [(4, 3)])
 def test_request_versions_use_only_their_matching_context_schema(version, schema):
     req = chat.ChatRequest(message="合成問題", contract_version=version)
     arguments, _ = chat._prepare_agent_input(req, runtime_config())
@@ -635,7 +635,7 @@ def test_v4_provider_errors_do_not_log_or_return_case_data_in_development(monkey
 
 def test_health_negotiates_v4_without_exposing_admin_configuration():
     response = app.test_client().get("/api/v1/health/")
-    assert response.json["capabilities"]["chat_contract_versions"] == [1, 2, 3, 4]
+    assert response.json["capabilities"]["chat_contract_versions"] == [4]
     assert response.json["client_settings"]["contract_version"] == 4
     assert "agent_prompt_sections" not in response.json["client_settings"]
 

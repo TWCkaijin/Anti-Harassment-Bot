@@ -8,11 +8,6 @@ import pytest
 from pydantic import ValidationError
 
 from client.tests.test_agent import FakeMessage, FakeResponse, fake_runtime_config
-from client.tests.test_agent_streaming import FakeStream, chunk
-from client.tests.test_agent_streaming import response as legacy_answer
-from client.tests.test_guided_chat import agent_for as guided_agent
-from client.tests.test_guided_chat import answer, model_answer
-from client.tests.test_guided_v3 import v3_answer
 from client.tests.test_guided_v4 import (
     agent_for,
     clarification_plan,
@@ -24,12 +19,10 @@ from client.tests.test_guided_v4 import (
     streamed,
     understanding,
 )
-from rag_core.agents import guided_chat, openrouter_agent
 from rag_core.agents import guided_v4 as v4
 from rag_core.agents.openrouter_agent import AgentContractError
 from rag_core.agents.provider_schema import provider_response_format
 from rag_core.core.agent_prompts import assemble_service_instruction
-from rag_core.core.chat_response import OPENROUTER_RESPONSE_FORMAT
 
 GEMINI = "google/gemini-2.5-pro"
 OTHER = "test/model"
@@ -37,7 +30,7 @@ OTHER = "test/model"
 
 @pytest.fixture(autouse=True)
 def no_external_services(monkeypatch):
-    for module in (guided_chat, v4, openrouter_agent):
+    for module in (v4,):
         monkeypatch.setattr(module, "get_matching_scenario_scripts", lambda *args, **kwargs: ())
         monkeypatch.setattr(module, "get_runtime_config", fake_runtime_config)
     monkeypatch.setattr(v4, "get_scenario_scripts", lambda **kwargs: ())
@@ -64,9 +57,6 @@ def assert_gemini_format(response_format):
 @pytest.mark.parametrize(
     "original",
     [
-        OPENROUTER_RESPONSE_FORMAT,
-        guided_chat.GUIDED_RESPONSE_FORMAT,
-        guided_chat.GUIDED_V3_RESPONSE_FORMAT,
         v4.V4_PLAN_FORMAT,
         v4.V4_FINAL_FORMAT,
         v4.V4_PREDICTION_PLAN_FORMAT,
@@ -118,57 +108,6 @@ def test_schema_keyword_names_inside_properties_and_literal_values_are_preserved
 @pytest.mark.parametrize("model", [OTHER, "google/other-model", "gemini-2.5-pro"])
 def test_non_gemini_formats_are_unchanged(model):
     assert provider_response_format(model, v4.V4_PLAN_FORMAT) is v4.V4_PLAN_FORMAT
-
-
-@pytest.mark.parametrize("streaming", [False, True])
-async def test_legacy_actual_request_uses_gemini_copy(streaming):
-    raw = json.dumps(legacy_answer(), ensure_ascii=False)
-    result = (
-        FakeStream([chunk(raw), chunk(finish="stop")])
-        if streaming
-        else FakeResponse(FakeMessage(raw))
-    )
-    agent = agent_for([result])
-
-    async def delta(_text):
-        pass
-
-    await agent.run(
-        "我想先談談感受",
-        use_rag=False,
-        runtime_config=fake_runtime_config(openrouter_model=GEMINI),
-        on_reply_delta=delta if streaming else None,
-    )
-    call = agent.client.chat.completions.calls[0]
-    assert_gemini_format(call["response_format"])
-    assert call["response_format"] == provider_response_format(GEMINI, OPENROUTER_RESPONSE_FORMAT)
-
-
-@pytest.mark.parametrize("version", [2, 3])
-@pytest.mark.parametrize("model", [GEMINI, OTHER])
-async def test_v2_v3_actual_requests_apply_model_specific_schema(version, model):
-    value = answer() if version == 2 else v3_answer(understanding=understanding())
-    if version == 3:
-        value["understanding"].pop("immediate_safety")
-    agent = guided_agent([model_answer(value)])
-    config = fake_runtime_config(openrouter_model=model)
-    await agent.run(
-        "我想先談談感受",
-        use_rag=False,
-        contract_version=version,
-        case_context={"schema_version": version - 1},
-        runtime_config=config,
-    )
-    call = agent.client.chat.completions.calls[0]
-    original = (
-        guided_chat.GUIDED_RESPONSE_FORMAT
-        if version == 2
-        else guided_chat.GUIDED_V3_RESPONSE_FORMAT
-    )
-    assert call["response_format"] == provider_response_format(model, original)
-    if model == GEMINI:
-        assert_gemini_format(call["response_format"])
-    assert call["max_tokens"] == config.max_tokens
 
 
 @pytest.mark.parametrize("streaming", [False, True])

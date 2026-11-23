@@ -6,9 +6,9 @@ from dataclasses import replace
 
 import pytest
 
+from client.tests.test_agent import v4_result
 from client_app.main import app
 from rag_core import chat_service as chat_module
-from rag_core.agents import AgentResult
 from rag_core.core.runtime_config import RuntimeConfig
 from rag_core.rag.base import RAGVectorSearchError
 
@@ -24,7 +24,7 @@ def result(**changes):
         "action_buttons": [],
     }
     payload.update(changes)
-    return AgentResult(reply=json.dumps(payload, ensure_ascii=False))
+    return v4_result(reply=json.dumps(payload, ensure_ascii=False))
 
 
 @pytest.fixture(autouse=True)
@@ -164,9 +164,9 @@ def test_stream_failures_send_terminal_event_and_log_error(
     assert "debug_message" not in payload
     failure = next(r for r in caplog.records if getattr(r, "event", None) == "chat_request_failed")
     assert failure.levelname == "ERROR"
-    assert failure.error_message == str(error)
+    assert failure.error_message == type(error).__name__
     assert failure.http_status == status
-    assert failure.exc_info is not None
+    assert not failure.exc_info
     response.close()
 
 
@@ -190,7 +190,7 @@ def test_invalid_final_metadata_never_emits_done_or_sensitive_schema_inputs(monk
     class Agent:
         async def run(self, on_reply_delta, **kwargs):
             await on_reply_delta("部分回覆")
-            return AgentResult(reply='{"reply":"private model content"}')
+            return v4_result(reply='{"reply":"private model content"}')
 
     monkeypatch.setattr(chat_module, "get_agent", Agent)
     with caplog.at_level("ERROR"):
@@ -211,7 +211,7 @@ def test_done_resolves_only_trusted_skill_actions(monkeypatch):
                     {"action": "url", "url": "https://unapproved.example.com"},
                 ]
             )
-            return AgentResult(
+            return v4_result(
                 reply=answer.reply,
                 available_actions=[
                     {
@@ -410,39 +410,6 @@ def test_stream_timing_records_ready_and_yield_without_message_content(monkeypat
     )
     assert "private-generated-text" not in caplog.text
     assert "private-option" not in caplog.text
-
-
-def test_openrouter_first_content_reaches_http_before_next_ready_sdk_chunk(monkeypatch):
-    import rag_core.agents.openrouter_agent as agent_module
-    from client.tests.test_agent import FakeCompletions, make_agent
-    from client.tests.test_agent_streaming import FakeStream, chunk
-
-    state = []
-
-    async def before_chunk(index):
-        state.append(index)
-
-    raw = result(reply="你好，慢慢說。").reply
-    boundary = raw.index("好")
-    stream = FakeStream(
-        [chunk(raw[:boundary]), chunk(raw[boundary:]), chunk(finish="stop")],
-        before_chunk=before_chunk,
-    )
-    completions = FakeCompletions([stream])
-    monkeypatch.setattr(chat_module, "get_agent", lambda: make_agent(completions))
-    monkeypatch.setattr(agent_module, "get_runtime_config", chat_module.get_runtime_config)
-    monkeypatch.setattr(agent_module, "get_matching_scenario_scripts", lambda *args, **kwargs: ())
-    response = post_stream()
-    iterator = iter(response.response)
-    next(iterator)
-    try:
-        assert events(next_content_frame(iterator)) == [("delta", {"text": "你"})]
-        assert state == [0]
-        assert completions.calls[0]["stream"] is True
-        assert not stream.completed
-    finally:
-        response.close()
-    assert stream.closed
 
 
 def test_progress_reports_measured_time_and_only_actual_operations(monkeypatch):

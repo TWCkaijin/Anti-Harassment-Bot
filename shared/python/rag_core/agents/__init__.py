@@ -1,5 +1,5 @@
-"""backend/app/agents/__init__.py"""
+"""Chat agents."""
 
-from rag_core.agents.openrouter_agent import AgentResult, OpenRouterAgent, RAGSource
+from rag_core.agents.openrouter_agent import AgentResult, OpenRouterAgent
 
-__all__ = ["AgentResult", "OpenRouterAgent", "RAGSource"]
+__all__ = ["AgentResult", "OpenRouterAgent"]

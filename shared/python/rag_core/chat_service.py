@@ -33,6 +33,7 @@ from rag_core.core.anonymizer import anonymize
 from rag_core.core.case_context import (
     MAX_CONTEXT_REVISION,
     SUMMARY_MAX_LENGTH,
+    V4_CASE_SCHEMA_VERSION,
     CaseContext,
     ClarificationAnswer,
     SummaryUpdate,
@@ -240,44 +241,13 @@ def _service_error(
     status_code: int,
     error_id: str | None = None,
 ):
-    """Keep operational diagnostics server-side unless development mode is enabled."""
-    error_message = (
-        json.dumps(
-            exc.errors(include_input=False, include_context=False, include_url=False),
-            ensure_ascii=False,
-        )
-        if isinstance(exc, ValidationError)
-        else str(exc)
-    )
-    # Pydantic's default traceback renders input_value (the model's response).
-    # Keep the original frames but replace its final exception text for logging.
-    log_exception = (
-        ValueError(f"{type(exc).__name__}: {error_message}")
-        if isinstance(exc, ValidationError)
-        else exc
-    )
-    # Guided requests and admin tests can contain private facts in provider errors.
-    # Record a category only, including in development, never an upstream body.
-    request_payload = request.get_json(silent=True) if request.is_json else None
-    private_case_request = (
-        runtime_config.gate_enabled
-        or getattr(g, "admin_diagnostic", False)
-        or (
-            isinstance(request_payload, dict)
-            and request_payload.get("contract_version") in (2, 3, 4)
-        )
-    )
-    if private_case_request:
-        error_message = type(exc).__name__
-        log_exception = RuntimeError(error_message)
+    """Log a category only: chat requests carry private case text, even in development."""
+    error_message = type(exc).__name__
     logger.error(
         "Chat request failed [%s]: %s: %s",
         code,
         type(exc).__name__,
         error_message,
-        exc_info=None
-        if private_case_request
-        else (type(log_exception), log_exception, exc.__traceback__),
         extra={
             "event": "chat_request_failed",
             "error_code": code,
@@ -292,8 +262,6 @@ def _service_error(
     payload = {"code": code, "detail": detail, "retryable": retryable}
     if error_id:
         payload["error_id"] = error_id
-    if runtime_config.development_mode and not private_case_request:
-        payload["debug_message"] = f"{type(exc).__name__}: {str(exc)[:2000]}"
     return jsonify(payload), status_code
 
 
@@ -373,7 +341,7 @@ class ChatRequest(BaseModel):
     use_rag: bool = Field(default=True, description="是否啟用 RAG 檢索增強")
     stream: bool = Field(default=False, description="以 SSE 串流回覆文字，完成後傳回完整資料")
     image_base64: str | None = Field(default=None, description="使用者上傳的圖片 (base64 data URL)")
-    contract_version: Literal[1, 2, 3, 4] = 1
+    contract_version: Literal[4] = 4
     regenerate_from_summary: bool = False
     case_context: CaseContext | None = None
     clarification_answer: ClarificationAnswer | None = None
@@ -385,34 +353,20 @@ class ChatRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_chat_input(self):
-        if self.regenerate_from_summary and self.contract_version != 4:
-            raise ValueError("Regeneration from a text summary requires chat contract version 4")
         if self.regenerate_from_summary and self.clarification_answer is not None:
             raise ValueError("Summary regeneration cannot submit a new clarification answer")
-        if self.contract_version == 1 and (
-            self.case_context is not None or self.clarification_answer is not None
-        ):
-            raise ValueError("Case context requires contract version 2, 3 or 4")
-        expected_schema = {2: 1, 3: 2, 4: 3}.get(self.contract_version, 1)
-        if self.case_context and self.case_context.schema_version != expected_schema:
+        if self.case_context and self.case_context.schema_version != V4_CASE_SCHEMA_VERSION:
             raise ValueError("Case context schema does not match the chat contract")
         if self.clarification_answer:
-            if self.contract_version == 4:
-                if "fact_key" in self.clarification_answer.model_fields_set:
-                    raise ValueError("V4 clarification answers must not contain a fact key")
-                revision = self.case_context.revision if self.case_context else 0
-                if self.clarification_answer.context_revision != revision:
-                    raise ValueError("Clarification answer does not match the context revision")
-            elif self.clarification_answer.fact_key is None:
-                raise ValueError("Legacy clarification answers require a fact key")
-            elif "context_revision" in self.clarification_answer.model_fields_set:
-                raise ValueError("Clarification context revision requires chat contract version 4")
-            if self.contract_version == 2 and isinstance(self.clarification_answer.value, list):
-                raise ValueError("Multiple answers require chat contract version 3")
+            if "fact_key" in self.clarification_answer.model_fields_set:
+                raise ValueError("V4 clarification answers must not contain a fact key")
+            revision = self.case_context.revision if self.case_context else 0
+            if self.clarification_answer.context_revision != revision:
+                raise ValueError("Clarification answer does not match the context revision")
             validate_clarification_answer(
                 self.clarification_answer.model_dump(exclude_none=True),
-                require_token=self.contract_version >= 3,
-                contract_version=4 if self.contract_version == 4 else 3,
+                require_token=True,
+                contract_version=4,
             )
         if not self.message.strip() and not self.image_base64:
             raise ValueError("message or image_base64 is required")
@@ -614,7 +568,7 @@ def _response_payload(
         "interaction_mode": structured_response.interaction_mode,
         "clarifying_questions": structured_response.clarifying_questions,
     }
-    if req_obj is not None and req_obj.contract_version == 4:
+    if req_obj is not None:
         guidance = result.guidance or {}
         if guidance.get("contract_version") != 4:
             raise AgentContractError("Invalid v4 response contract")
@@ -666,7 +620,7 @@ def _response_payload(
             payload["rag_used"]["retrieval"] = guidance["retrieval"]
     elif result.guidance:
         payload.update(result.guidance)
-    if payload.get("contract_version") in (3, 4):
+    if payload.get("contract_version") == 4:
         entries = payload.get("analysis", []) if runtime_config.pipeline["enable_analysis"] else []
         if not isinstance(entries, list) or len(entries) > 4:
             raise ValueError("Invalid analysis summary")
@@ -706,26 +660,14 @@ def _gate_refusal_payload(
         "clarifying_questions": [],
     }
     revision = req_obj.case_context.revision if req_obj.case_context else 0
-    if req_obj.contract_version in (2, 3):
-        payload.update(
-            contract_version=req_obj.contract_version,
-            facts_revision=revision,
-            fact_updates=[],
-            clarification=None,
-            answer_sections=[],
-            execution={"route": "gate_refusal", "model_calls": 1},
-        )
-        if req_obj.contract_version == 3:
-            payload["analysis"] = []
-    elif req_obj.contract_version == 4:
-        payload.update(
-            contract_version=4,
-            context_revision=revision,
-            summary_update=None,
-            clarification=None,
-            analysis=[],
-            execution={"route": "gate_refusal", "model_calls": 1},
-        )
+    payload.update(
+        contract_version=4,
+        context_revision=revision,
+        summary_update=None,
+        clarification=None,
+        analysis=[],
+        execution={"route": "gate_refusal", "model_calls": 1},
+    )
     return payload
 
 
@@ -835,44 +777,41 @@ def _prepare_agent_input(
         "use_rag": req_obj.use_rag and runtime_config.pipeline["enable_rag"],
         "runtime_config": runtime_config,
     }
-    if req_obj.contract_version in (2, 3, 4):
-        arguments.update(
-            contract_version=req_obj.contract_version,
-            case_context=clean_text(
-                (
-                    req_obj.case_context
-                    or CaseContext(schema_version={2: 1, 3: 2, 4: 3}[req_obj.contract_version])
-                ).model_dump(exclude_none=True),
-                "case_context",
+    arguments.update(
+        contract_version=4,
+        case_context=clean_text(
+            (req_obj.case_context or CaseContext(schema_version=V4_CASE_SCHEMA_VERSION)).model_dump(
+                exclude_none=True
             ),
-            clarification_answer=clean_text(
-                req_obj.clarification_answer.model_dump(exclude_none=True), "case_context"
-            )
-            if req_obj.clarification_answer
-            else None,
+            "case_context",
+        ),
+        clarification_answer=clean_text(
+            req_obj.clarification_answer.model_dump(exclude_none=True), "case_context"
         )
-        if req_obj.contract_version == 4:
-            arguments["regenerate_from_summary"] = req_obj.regenerate_from_summary
-        if req_obj.contract_version >= 3 and req_obj.clarification_answer:
-            issued = validate_clarification_answer(
-                req_obj.clarification_answer.model_dump(exclude_none=True),
-                contract_version=req_obj.contract_version,
+        if req_obj.clarification_answer
+        else None,
+        regenerate_from_summary=req_obj.regenerate_from_summary,
+    )
+    if req_obj.clarification_answer:
+        issued = validate_clarification_answer(
+            req_obj.clarification_answer.model_dump(exclude_none=True),
+            contract_version=4,
+        )
+        # A typed answer is verified before masking. The internal bounds
+        # prevent rechecking masked values against the original token's
+        # choices; the public request schema never accepts this argument.
+        arguments["clarification_constraints"] = {
+            key: issued[key]
+            for key in (
+                "question_id",
+                "fact_key",
+                "selection_mode",
+                "max_selections",
+                "context_scope",
+                "context_revision",
             )
-            # A typed answer is verified before masking. The internal bounds
-            # prevent rechecking masked values against the original token's
-            # choices; the public request schema never accepts this argument.
-            arguments["clarification_constraints"] = {
-                key: issued[key]
-                for key in (
-                    "question_id",
-                    "fact_key",
-                    "selection_mode",
-                    "max_selections",
-                    "context_scope",
-                    "context_revision",
-                )
-                if key in issued
-            }
+            if key in issued
+        }
     if diagnostics is not None:
         diagnostics["history"] = history_counts
         diagnostics["pii"] = {
@@ -986,10 +925,7 @@ def _stream_response(
 
             async def emit_analysis(snapshot: dict):
                 nonlocal sent_output
-                if (
-                    req_obj.contract_version not in (3, 4)
-                    or not runtime_config.pipeline["enable_analysis"]
-                ):
+                if not runtime_config.pipeline["enable_analysis"]:
                     return
                 entry = AnalysisEntry.model_validate(snapshot).model_dump()
                 if len(analysis_entries) >= 4 or any(
@@ -1003,8 +939,7 @@ def _stream_response(
             async def emit_reasoning(snapshot: dict):
                 nonlocal sent_output, reasoning_characters
                 if (
-                    req_obj.contract_version != 4
-                    or not runtime_config.pipeline["enable_analysis"]
+                    not runtime_config.pipeline["enable_analysis"]
                     or not runtime_config.enable_reasoning_display
                     or len(reasoning_entries) >= MAX_REASONING_ENTRIES
                 ):
@@ -1035,7 +970,7 @@ def _stream_response(
                             )
                             if is_local_privacy_reply(payload):
                                 return payload
-                            if req_obj.contract_version in (3, 4) and analysis_entries:
+                            if analysis_entries:
                                 if (
                                     payload.get("analysis")
                                     and payload["analysis"] != analysis_entries
@@ -1044,7 +979,7 @@ def _stream_response(
                                         "Analysis summary changed after publication"
                                     )
                                 payload["analysis"] = analysis_entries
-                            if req_obj.contract_version == 4 and reasoning_entries:
+                            if reasoning_entries:
                                 payload["reasoning"] = reasoning_entries
                             return payload
                         except Exception:
@@ -1058,11 +993,7 @@ def _stream_response(
                             "on_guidance": emit_guidance,
                             "on_progress": emit_progress,
                             "on_analysis": emit_analysis,
-                            **(
-                                {"on_reasoning": emit_reasoning}
-                                if req_obj.contract_version == 4
-                                else {}
-                            ),
+                            "on_reasoning": emit_reasoning,
                         }
                     )
                     payload = await run_gated_chat(

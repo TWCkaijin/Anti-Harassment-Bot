@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 from admin.tests.service_helpers import run_diagnostic
 from admin_app import api
+from client.tests.test_agent import v4_result
 from rag_core import chat_service
 from rag_core.agents.gate_agent import GateDecision
-from rag_core.agents.openrouter_agent import AgentResult
 from rag_core.core.privacy_claims import THIRD_PARTY_REPLY
 from rag_core.core.runtime_config import RuntimeConfig
 
@@ -31,7 +31,7 @@ def test_diagnostic_returns_local_correction_without_rejected_answer(monkeypatch
 
     async def main(**kwargs):
         kwargs["diagnostics"]["final_answer"] = FALSE_CLAIM
-        return AgentResult(
+        return v4_result(
             reply=json.dumps(
                 {
                     "reply": FALSE_CLAIM,

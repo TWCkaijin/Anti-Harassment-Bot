@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from client.tests.test_agent import v4_result
 from client_app.main import app
 from rag_core import chat_service
 from rag_core.agents.gate_agent import GateDecision
-from rag_core.agents.openrouter_agent import AgentResult
 from rag_core.chat_service import ChatRequest
 from rag_core.core.privacy_claims import (
     GENERAL_REPLY,
@@ -34,7 +34,7 @@ CONFIG = RuntimeConfig(
 )
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [4])
 def test_false_claim_replaced_with_inert_contract_for_every_version(monkeypatch, version):
     monkeypatch.setattr(
         chat_service,
@@ -100,7 +100,7 @@ def test_private_request_streams_only_truthful_local_replacement(monkeypatch, ga
     async def main(**kwargs):
         if callback := kwargs.get("on_reply_delta"):
             await callback(FALSE_CLAIM)
-        return AgentResult(
+        return v4_result(
             reply=json.dumps(
                 {
                     "reply": FALSE_CLAIM,
@@ -139,7 +139,7 @@ def test_local_correction_closes_if_post_review_disagrees_or_fails(monkeypatch, 
     monkeypatch.setattr(app.extensions["chat_request_security"], "rate_limit_enabled", False)
 
     async def main(**kwargs):
-        return AgentResult(
+        return v4_result(
             reply=json.dumps(
                 {
                     "reply": FALSE_CLAIM,

@@ -169,18 +169,12 @@ def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
         data = ChatTestRequest.model_validate(payload)
         if data.chat_request.stream:
             return jsonify({"detail": "Admin chat tests return JSON; stream must be false"}), 422
-        if data.output_contract == "applicable_laws_v1" and data.chat_request.contract_version != 4:
-            return jsonify(
-                {"detail": "Applicable-law prediction requires chat contract version 4"}
-            ), 422
         if (
             data.expected_applicable_laws_contract_sha256 is not None
             and data.output_contract != "applicable_laws_v1"
         ):
             return jsonify({"detail": "Applicable-law fingerprint requires prediction mode"}), 422
-        if data.expected_chat_test_contract_sha256 is not None and (
-            data.output_contract != "chat" or data.chat_request.contract_version != 4
-        ):
+        if data.expected_chat_test_contract_sha256 is not None and data.output_contract != "chat":
             return jsonify({"detail": "Chat-test fingerprint requires v4 chat"}), 422
         base_config = snapshot_config or get_runtime_config()
         if base_config.source in chat_api._UNAVAILABLE_CONFIG_SOURCES:

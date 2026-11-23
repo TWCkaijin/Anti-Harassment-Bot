@@ -22,7 +22,7 @@ def health_check():
             "timestamp": datetime.now(tz=UTC).isoformat(),
             "version": os.getenv("APP_VERSION", "0.1.0"),
             "environment": os.getenv("ENVIRONMENT", "development"),
-            "capabilities": {"chat_contract_versions": [1, 2, 3, 4]},
+            "capabilities": {"chat_contract_versions": [4]},
             "client_settings": client_settings(get_runtime_config()),
         }
     )

@@ -7,10 +7,10 @@ import pytest
 
 from admin.tests.service_helpers import run_diagnostic
 from admin_app import api as admin
+from client.tests.test_agent import v4_result
 from client_app.api import health
 from client_app.main import app
 from rag_core import chat_service as chat
-from rag_core.agents.openrouter_agent import AgentResult
 from rag_core.core import runtime_config as runtime_config_module
 from rag_core.core.clarification_tokens import sign_clarification
 from rag_core.core.runtime_config import RuntimeConfig
@@ -28,7 +28,7 @@ def config(**changes):
     )
 
 
-def result(*, version=1, analysis=None):
+def result(*, analysis=None):
     response = {
         "reply": "合成測試回答。",
         "emotion": "未知",
@@ -38,28 +38,15 @@ def result(*, version=1, analysis=None):
         "interaction_mode": "answer",
         "clarifying_questions": [],
     }
-    if version == 1:
-        guidance = {}
-    elif version == 4:
-        guidance = {
-            "contract_version": 4,
-            "context_revision": 0,
-            "summary_update": None,
-            "clarification": None,
-            "execution": {"route": "offline", "model_calls": 0},
-            "analysis": analysis or [],
-        }
-    else:
-        guidance = {
-            "contract_version": version,
-            "facts_revision": 0,
-            "fact_updates": [],
-            "clarification": None,
-            "answer_sections": [],
-            "execution": {"route": "offline", "model_calls": 0},
-            "analysis": analysis or [],
-        }
-    return AgentResult(reply=json.dumps(response, ensure_ascii=False), guidance=guidance)
+    guidance = {
+        "contract_version": 4,
+        "context_revision": 0,
+        "summary_update": None,
+        "clarification": None,
+        "execution": {"route": "offline", "model_calls": 0},
+        "analysis": analysis or [],
+    }
+    return v4_result(reply=json.dumps(response, ensure_ascii=False), guidance=guidance)
 
 
 @pytest.fixture(autouse=True)
@@ -85,7 +72,7 @@ def test_admin_test_requires_auth_before_settings_or_model(monkeypatch, app):
     load.assert_not_called()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [4])
 def test_admin_can_enable_images_for_one_request_without_changing_environment(monkeypatch, version):
     # Exercise request-local override mechanics while the rollout switch is off in production.
     monkeypatch.setattr(runtime_config_module, "IMAGE_UPLOAD_ROLLOUT_ENABLED", True)
@@ -95,7 +82,7 @@ def test_admin_can_enable_images_for_one_request_without_changing_environment(mo
     class Agent:
         async def run(self, **kwargs):
             calls.append(kwargs)
-            return result(version=version)
+            return result()
 
     monkeypatch.setattr(admin, "get_runtime_config", lambda **kwargs: base)
     monkeypatch.setattr(chat, "get_agent", Agent)
@@ -128,7 +115,7 @@ def test_admin_can_enable_images_for_one_request_without_changing_environment(mo
     write.assert_not_called()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [4])
 @pytest.mark.parametrize("override", [False, True])
 def test_admin_disabled_image_policy_rejects_before_agent(monkeypatch, version, override):
     monkeypatch.setattr(
@@ -304,123 +291,6 @@ def test_history_budget_retains_complete_recent_turn_and_only_counts_diagnostics
     assert "old user" not in json.dumps(diagnostics)
 
 
-def test_v3_masks_array_values_and_reports_pii_types_without_values():
-    request = chat.ChatRequest(
-        message="mail test@example.com",
-        contract_version=3,
-        case_context={
-            "schema_version": 2,
-            "facts": {
-                "behavior": {
-                    "status": "provided",
-                    "value": ["電話 0912345678", "訊息 test@example.com"],
-                }
-            },
-        },
-    )
-    diagnostics = {}
-    arguments, changed = chat._prepare_agent_input(request, config(), diagnostics)
-    assert changed
-    assert "0912345678" not in json.dumps(arguments["case_context"])
-    assert "test@example.com" not in json.dumps(arguments["case_context"])
-    assert diagnostics["pii"]["case_context"]["kinds"] == ["email", "taiwan_mobile"]
-    assert "test@example.com" not in json.dumps(diagnostics)
-
-
-def test_signed_choices_are_checked_before_redaction_and_remain_distinct():
-    from rag_core.core.case_context import CaseFact
-
-    original_values = ["a@example.com", "b@example.com"]
-    issued = {
-        "question_id": "case.desired_help.0",
-        "fact_key": "desired_help",
-        "selection_mode": "multiple",
-        "max_selections": 2,
-        "context_scope": "scenario",
-        "options": [{"value": value} for value in original_values],
-    }
-    request = chat.ChatRequest(
-        message="合成選項",
-        contract_version=3,
-        clarification_answer={
-            "question_id": issued["question_id"],
-            "fact_key": issued["fact_key"],
-            "status": "provided",
-            "value": original_values,
-            "context_scope": "scenario",
-            "validation_token": sign_clarification(issued),
-        },
-    )
-    arguments, changed = chat._prepare_agent_input(request, config())
-    selected = arguments["clarification_answer"]
-    assert changed
-    assert selected["value"] == ["[電子郵件]", "[電子郵件]（另一已遮罩值2）"]
-    assert all(len(value) <= 300 for value in selected["value"])
-    assert CaseFact(status="provided", value=selected["value"])
-    assert arguments["clarification_constraints"] == {
-        "question_id": issued["question_id"],
-        "fact_key": issued["fact_key"],
-        "selection_mode": "multiple",
-        "max_selections": 2,
-        "context_scope": "scenario",
-    }
-    assert "@example.com" not in json.dumps(arguments["clarification_constraints"])
-
-
-def test_case_array_redaction_deduplication_respects_value_length():
-    values = ["x" * 288 + "a@example.co", "x" * 288 + "b@example.co"]
-    request = chat.ChatRequest(
-        message="合成資料",
-        contract_version=3,
-        case_context={
-            "schema_version": 2,
-            "facts": {"desired_help": {"status": "provided", "value": values}},
-        },
-    )
-    arguments, _ = chat._prepare_agent_input(request, config())
-    cleaned = arguments["case_context"]["facts"]["desired_help"]["value"]
-    assert len(set(cleaned)) == 2
-    assert all(len(value) <= 300 for value in cleaned)
-    assert "@example.co" not in json.dumps(cleaned)
-
-
-def test_masked_signed_answer_reaches_guided_agent_without_second_token_failure(monkeypatch):
-    from client.tests.test_guided_chat import agent_for, model_answer
-    from client.tests.test_guided_v3 import v3_answer
-    from rag_core.agents import guided_chat
-
-    issued = {
-        "question_id": "case.desired_help.0",
-        "fact_key": "desired_help",
-        "selection_mode": "multiple",
-        "max_selections": 2,
-        "context_scope": "personal",
-        "options": [{"value": "a@example.com"}, {"value": "b@example.com"}],
-    }
-    agent = agent_for([model_answer(v3_answer())])
-    monkeypatch.setattr(chat, "get_agent", lambda: agent)
-    monkeypatch.setattr(guided_chat, "get_matching_scenario_scripts", lambda *args, **kwargs: ())
-    response = app.test_client().post(
-        "/api/v1/chat/",
-        json={
-            "message": "合成選項",
-            "contract_version": 3,
-            "clarification_answer": {
-                "question_id": issued["question_id"],
-                "fact_key": issued["fact_key"],
-                "status": "provided",
-                "value": ["a@example.com", "b@example.com"],
-                "context_scope": "personal",
-                "validation_token": sign_clarification(issued),
-            },
-        },
-    )
-    assert response.status_code == 200
-    assert len(agent.client.chat.completions.calls) == 1
-    prompt = json.dumps(agent.client.chat.completions.calls[0]["messages"])
-    assert "@example.com" not in prompt
-
-
 def test_v3_requires_matching_schema_and_signed_selection():
     request = {
         "message": "合成選擇",
@@ -456,7 +326,7 @@ def test_v3_requires_matching_schema_and_signed_selection():
     )
 
 
-def test_v3_analysis_stream_and_done_match_one_snapshot(monkeypatch):
+def test_analysis_stream_and_done_match_one_snapshot(monkeypatch):
     entry = {
         "stage": "understanding",
         "summary": "使用者希望了解處理方式。",
@@ -471,11 +341,11 @@ def test_v3_analysis_stream_and_done_match_one_snapshot(monkeypatch):
         async def run(self, on_analysis, **kwargs):
             assert kwargs["runtime_config"].pipeline["enable_analysis"]
             await on_analysis(entry)
-            return result(version=3, analysis=[entry])
+            return result(analysis=[entry])
 
     monkeypatch.setattr(chat, "get_agent", Agent)
     response = app.test_client().post(
-        "/api/v1/chat/", json={"message": "合成問題", "contract_version": 3, "stream": True}
+        "/api/v1/chat/", json={"message": "合成問題", "contract_version": 4, "stream": True}
     )
     body = response.get_data(as_text=True)
     frames = [frame for frame in body.split("\n\n") if frame.startswith("event:")]
@@ -506,49 +376,3 @@ def test_admin_provider_errors_never_log_or_return_submitted_content(monkeypatch
     assert response.status_code == 500
     assert "PRIVATE_ADMIN_TEST_CANARY" not in caplog.text
     assert "PRIVATE_ADMIN_TEST_CANARY" not in response.get_data(as_text=True)
-
-
-@pytest.mark.parametrize("version", [2, 3])
-@pytest.mark.parametrize("mode", ["json", "stream", "admin"])
-def test_provider_output_limit_is_not_retried_and_never_exposes_partial_reply(
-    monkeypatch, caplog, version, mode
-):
-    from client.tests.test_agent import FakeMessage, FakeResponse
-    from client.tests.test_guided_chat import agent_for
-    from rag_core.agents import guided_chat
-
-    provider_response = FakeResponse(FakeMessage('{"PRIVATE_TRUNCATED_REPLY_CANARY":'))
-    provider_response.choices[0].finish_reason = "length"
-    agent = agent_for([provider_response])
-    monkeypatch.setattr(chat, "get_agent", lambda: agent)
-    monkeypatch.setattr(guided_chat, "get_matching_scenario_scripts", lambda *args, **kwargs: ())
-    payload = {"message": "合成問題", "contract_version": version, "use_rag": False}
-    url = "/api/v1/chat/"
-    if mode == "admin":
-        payload = {"request": payload, "overrides": {"development_mode": True}}
-    elif mode == "stream":
-        payload["stream"] = True
-    response = (
-        run_diagnostic(payload) if mode == "admin" else app.test_client().post(url, json=payload)
-    )
-    body = response.get_data(as_text=True)
-    if mode == "stream":
-        assert response.status_code == 200
-        frames = [frame for frame in body.split("\n\n") if frame.startswith("event:")]
-        errors = [frame for frame in frames if frame.startswith("event: error\n")]
-        assert len(errors) == 1
-        error = json.loads(errors[0].split("\ndata: ")[1])
-        assert error["status"] == 502
-        assert not any(frame.startswith("event: done\n") for frame in frames)
-    else:
-        assert response.status_code == 502
-        error = response.json
-    assert error["code"] == "model_output_limit"
-    assert error["retryable"] is False
-    if mode == "admin":
-        assert "提高輸出預算" in error["detail"]
-    assert "PRIVATE_TRUNCATED_REPLY_CANARY" not in body
-    assert "PRIVATE_TRUNCATED_REPLY_CANARY" not in caplog.text
-    calls = agent.client.chat.completions.calls
-    assert len(calls) == 1
-    assert calls[0]["max_tokens"] == 1000

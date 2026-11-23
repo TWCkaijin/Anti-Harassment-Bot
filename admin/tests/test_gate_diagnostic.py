@@ -7,9 +7,9 @@ from types import SimpleNamespace
 
 from admin.tests.service_helpers import run_diagnostic
 from admin_app import api
+from client.tests.test_agent import v4_result
 from rag_core import chat_service
 from rag_core.agents.gate_agent import GateDecision
-from rag_core.agents.openrouter_agent import AgentResult
 from rag_core.core.runtime_config import RuntimeConfig
 
 
@@ -30,7 +30,7 @@ def test_chat_diagnostic_retracts_rejected_business_diagnostics(monkeypatch):
 
     async def main(**kwargs):
         kwargs["diagnostics"]["final_answer"] = "REJECTED BUSINESS OUTPUT"
-        return AgentResult(
+        return v4_result(
             reply=json.dumps(
                 {
                     "reply": "REJECTED BUSINESS OUTPUT",

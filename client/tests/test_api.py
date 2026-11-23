@@ -8,9 +8,9 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
+from client.tests.test_agent import v4_result
 from client_app.main import app
 from rag_core import chat_service as chat_module
-from rag_core.agents import AgentResult
 from rag_core.core import runtime_config as runtime_config_module
 from rag_core.core.runtime_config import RuntimeConfig
 from rag_core.rag.base import RAGVectorSearchError
@@ -69,7 +69,7 @@ def test_root():
 def test_chat_response_shape(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
-            return AgentResult(
+            return v4_result(
                 reply='{"emotion":"冷靜","emotion_color":"green","reply":"我會陪你整理下一步。","suggested_replies":["我想先了解申訴流程","我需要緊急協助"]}',
                 rag_used=True,
                 sources=[
@@ -113,7 +113,7 @@ def test_chat_response_shape(monkeypatch):
 def test_chat_returns_tool_call_diagnostics_in_development_mode(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
-            return AgentResult(
+            return v4_result(
                 reply=(
                     '{"emotion":"冷靜","emotion_color":"green","reply":"我已完成查詢。",'
                     '"suggested_replies":["我想看更多資料","我想知道下一步"]}'
@@ -153,7 +153,7 @@ def test_chat_passes_use_rag_false(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
             captured.update(kwargs)
-            return AgentResult(
+            return v4_result(
                 reply='{"emotion":"未知","emotion_color":"gray","reply":"好的。","suggested_replies":["我想多說一些","我想了解下一步"]}',
                 rag_used=False,
                 sources=[],
@@ -176,7 +176,7 @@ def test_chat_passes_use_rag_false(monkeypatch):
 def test_chat_returns_only_scenario_approved_phone_actions(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
-            return AgentResult(
+            return v4_result(
                 reply=(
                     '{"emotion":"焦慮","emotion_color":"yellow","reply":"可以撥打 113。",'
                     '"suggested_replies":["我想撥打 113","我想先了解流程"],'
@@ -228,7 +228,7 @@ def test_chat_resolves_generic_action_selectors_from_skill_definitions(monkeypat
 
     class FakeAgent:
         async def run(self, **kwargs):
-            return AgentResult(
+            return v4_result(
                 reply=json.dumps(
                     {
                         "emotion": "冷靜",
@@ -271,7 +271,7 @@ def test_chat_resolves_generic_action_selectors_from_skill_definitions(monkeypat
 def test_chat_omits_unapproved_and_duplicate_actions(monkeypatch, selectors, expected):
     class FakeAgent:
         async def run(self, **kwargs):
-            return AgentResult(
+            return v4_result(
                 reply=json.dumps(
                     {
                         "emotion": "冷靜",
@@ -298,7 +298,7 @@ def test_chat_omits_unapproved_and_duplicate_actions(monkeypatch, selectors, exp
 def test_chat_repairs_bare_newlines_inside_json_string(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
-            return AgentResult(
+            return v4_result(
                 reply='{"emotion":"冷靜","emotion_color":"green","reply":"第一段\n\n第二段","suggested_replies":["我想補充細節","我想了解可用資源"]}',
                 rag_used=False,
                 sources=[],
@@ -323,7 +323,7 @@ def test_chat_repairs_bare_newlines_inside_json_string(monkeypatch):
 def test_chat_renders_literal_escape_sequences_before_markdown_response(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
-            return AgentResult(
+            return v4_result(
                 reply=(
                     '{"emotion":"冷靜","emotion_color":"green",'
                     '"reply":"第一段\\\\n\\\\n## 下一步\\\\n- 保留訊息紀錄",'
@@ -346,7 +346,7 @@ def test_chat_renders_literal_escape_sequences_before_markdown_response(monkeypa
 def test_chat_returns_clarification_questions(monkeypatch):
     class FakeAgent:
         async def run(self, **kwargs):
-            return AgentResult(
+            return v4_result(
                 reply=(
                     '{"emotion":"焦慮","emotion_color":"yellow","reply":"我想先了解情況。",'
                     '"suggested_replies":["我可以補充關係","我可以補充發生地點"],'
@@ -384,7 +384,7 @@ def test_chat_returns_retryable_error_for_invalid_model_schema(monkeypatch, capl
 
     class FakeAgent:
         async def run(self, **kwargs):
-            return AgentResult(reply='{"reply":"缺少必要欄位"}')
+            return v4_result(reply='{"reply":"缺少必要欄位"}')
 
     monkeypatch.setattr(chat_module, "get_agent", lambda: FakeAgent())
     monkeypatch.setattr(
@@ -399,7 +399,7 @@ def test_chat_returns_retryable_error_for_invalid_model_schema(monkeypatch, capl
     assert response.status_code == 502
     assert response.get_json()["detail"] == "伺服器回傳錯誤，正在重試中"
     assert response.get_json()["retryable"] is True
-    assert "ValidationError" in response.get_json()["debug_message"]
+    assert "debug_message" not in response.get_json()
     failure = next(
         record
         for record in caplog.records
@@ -407,7 +407,7 @@ def test_chat_returns_retryable_error_for_invalid_model_schema(monkeypatch, capl
     )
     assert failure.levelname == "ERROR"
     assert failure.error_type == "ValidationError"
-    assert failure.exc_info is not None
+    assert not failure.exc_info
     assert "缺少必要欄位" not in caplog.text
     assert "input_value" not in caplog.text
 
@@ -459,10 +459,10 @@ def test_chat_returns_retryable_error_for_transient_upstream_failure(monkeypatch
         for record in caplog.records
         if getattr(record, "event", None) == "chat_request_failed"
     )
-    assert failure.error_message == "upstream timed out"
+    assert failure.error_message == "TimeoutError"
     assert failure.error_type == "TimeoutError"
     assert failure.http_status == 502
-    assert failure.exc_info is not None
+    assert not failure.exc_info
 
 
 def test_chat_returns_retryable_503_for_typed_rag_failure(monkeypatch):
@@ -487,7 +487,7 @@ def test_chat_returns_retryable_503_for_typed_rag_failure(monkeypatch):
 
 
 @pytest.mark.parametrize("path", ["/api/v1/chat/", "/v1/chat/"])
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [4])
 @pytest.mark.parametrize("stream", [False, True])
 def test_chat_passes_enabled_images_to_agent_for_every_contract(monkeypatch, path, version, stream):
     # Exercise the dormant image path without enabling it in this rollout.
@@ -513,7 +513,7 @@ def test_chat_passes_enabled_images_to_agent_for_every_contract(monkeypatch, pat
                     "clarification": None,
                     "answer_sections": [],
                 }
-            return AgentResult(
+            return v4_result(
                 reply='{"emotion":"未知","emotion_color":"gray","reply":"已收到測試圖片。","suggested_replies":["整理圖片內容","了解下一步"]}',
                 guidance=guidance,
             )
@@ -595,7 +595,7 @@ def test_chat_schema_accepts_optional_image_string_and_forbids_extra_history_fie
     assert schema["$defs"]["MessageItem"]["additionalProperties"] is False
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [4])
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("client_privacy_review", [False, True])
 def test_chat_rejects_disabled_images_independently_of_review_and_text_masking(
@@ -673,7 +673,7 @@ def test_request_body_limit_accepts_five_mib_image_with_maximum_text_message(mon
     class FakeAgent:
         async def run(self, **kwargs):
             captured.append(kwargs)
-            return AgentResult(
+            return v4_result(
                 reply='{"emotion":"未知","emotion_color":"gray","reply":"已收到測試圖片。","suggested_replies":["整理圖片內容","了解下一步"]}'
             )
 
@@ -703,7 +703,7 @@ def test_rollout_rejects_images_even_when_stored_config_enables_them(monkeypatch
     assert response.get_json()["code"] == "image_upload_disabled"
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [4])
 @pytest.mark.parametrize("image_field", [{}, {"image_base64": None}])
 def test_text_only_versions_keep_omitted_or_null_image_compatibility(version, image_field):
     request_model = chat_module.ChatRequest(

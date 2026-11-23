@@ -279,3 +279,46 @@ def test_embedding_client_can_be_reused_across_request_event_loops(monkeypatch):
     assert asyncio.run(client.embed("相關案例", mode="query")) == [0.1, 0.2, 0.3]
     assert len(clients) == 2
     assert all(client.closed for client in clients)
+
+
+@pytest.mark.asyncio
+async def test_mixed_retrieval_uses_one_embedding_and_no_unrequested_collection(monkeypatch):
+    rag = object.__new__(FirestoreVectorRAG)
+    rag.db = FakeDB()
+    embeddings = []
+    monkeypatch.setattr(
+        FakeFirestoreDoc,
+        "to_dict",
+        lambda self: {
+            "content": "合成公共資訊。",
+            "metadata": {"source": "合成來源"},
+            "vector_distance": 0.125,
+        },
+    )
+
+    async def embed(query):
+        embeddings.append(query)
+        return [0.1, 0.2]
+
+    monkeypatch.setattr(rag, "_get_embedding", embed)
+    results = await rag.retrieve(
+        "query", top_k=1, selected_data_types=["law", "remedy"], preserve_data_types=True
+    )
+    assert len(embeddings) == 1
+    assert len(results) == 2
+    assert set(rag.db.collections) == {"rag_documents", "rag_remedies"}
+
+
+def test_vector_provider_error_body_is_not_logged(caplog):
+    from rag_core.rag.base import RAGVectorSearchError
+
+    class FailingDB:
+        def collection(self, name):
+            raise RuntimeError("PRIVATE_VECTOR_CANARY_925")
+
+    rag = object.__new__(FirestoreVectorRAG)
+    rag.db = FailingDB()
+    with pytest.raises(RAGVectorSearchError):
+        rag._retrieve_from_collection("rag_documents", [0.1], 3)
+    assert "PRIVATE_VECTOR_CANARY_925" not in caplog.text
+    assert "error_type=RuntimeError" in caplog.text

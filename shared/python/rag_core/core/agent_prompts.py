@@ -191,15 +191,6 @@ def assemble_service_instruction(overrides: dict[str, str] | None = None) -> str
     return "\n\n".join(sections).strip()
 
 
-def assemble_legacy_instruction(overrides: dict[str, str] | None = None) -> str:
-    """Append the v1 output contract without leaking it into guided routes."""
-    key, title, default_body = next(
-        section for section in DEFAULT_SYSTEM_SECTIONS if section[0] == "output_format"
-    )
-    body = (overrides or {}).get(key, default_body).strip()
-    return assemble_service_instruction(overrides) + f"\n\n## {title}\n{body}"
-
-
 def get_default_prompt_sections() -> dict[str, str]:
     """Return an independent copy of the built-in sections for admin editing."""
     return {key: body for key, _, body in DEFAULT_SYSTEM_SECTIONS}

@@ -321,7 +321,7 @@ async def test_review_trace_hashes_the_actual_pre_and_post_prompts(pre_decision)
     ]
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [4])
 def test_refusal_payload_keeps_each_client_contract_inert(version):
     request = ChatRequest(message="hello", contract_version=version)
     payload = _gate_refusal_payload("short refusal", "turn-1", True, request)
