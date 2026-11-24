@@ -14,6 +14,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+try:
+    from scripts.project_config import project_id
+except ModuleNotFoundError:  # pragma: no cover
+    from project_config import project_id
+
 ROOT = Path(__file__).resolve().parents[1]
 REGION = "asia-east1"
 
@@ -256,9 +261,7 @@ class Provisioner:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--project", default=json.loads((ROOT / ".firebaserc").read_text())["projects"]["default"]
-    )
+    parser.add_argument("--project", default=project_id())
     parser.add_argument(
         "--phase",
         choices=["databases", "identities", "storage", "tasks", "secrets", "all"],

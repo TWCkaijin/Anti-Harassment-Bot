@@ -6,13 +6,15 @@ from urllib.parse import urlsplit
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from rag_core.core.project import admin_site, project_id
+
 
 class AdminSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore", case_sensitive=False)
 
     environment: str = "development"
     google_cloud_project: str = Field(
-        default="anti-harassment-bot",
+        default_factory=project_id,
         validation_alias=AliasChoices(
             "FIREBASE_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "google_cloud_project"
         ),
@@ -21,7 +23,7 @@ class AdminSettings(BaseSettings):
     admin_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5174", "http://127.0.0.1:5174"]
     )
-    admin_hosting_site: str = "anti-harassment-bot-admin"
+    admin_hosting_site: str = Field(default_factory=lambda: admin_site(project_id()))
     admin_session_seconds: int = Field(default=28800, ge=300, le=86400)
     admin_idle_seconds: int = Field(default=1800, ge=60, le=28800)
     admin_cookie_secure: bool = True

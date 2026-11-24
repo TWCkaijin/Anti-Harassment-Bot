@@ -44,6 +44,8 @@ def build(service: str) -> Path:
         shutil.rmtree(target)
     target.mkdir(parents=True)
     shutil.copy2(ROOT / service / "backend" / "main.py", target / "main.py")
+    # Non-secret project ID; rag_core.core.project falls back to it during deploy analysis.
+    shutil.copy2(ROOT / "project.env", target / "project.env")
     copy_package(ROOT / service / "backend" / f"{service}_app", target / f"{service}_app")
     copy_package(ROOT / "shared" / "python" / "rag_core", target / "rag_core")
     # Operational ingestion CLIs never need to ship in the serving application.

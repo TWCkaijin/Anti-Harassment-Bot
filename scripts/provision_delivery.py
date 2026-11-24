@@ -13,6 +13,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from provision_firebase import Provisioner
 
+try:
+    from scripts.project_config import project_id
+except ModuleNotFoundError:  # pragma: no cover
+    from project_config import project_id
+
 POLICY_PATH = Path(__file__).resolve().parents[1] / "infrastructure/iam/ci-deployment-policy.json"
 REGION = "asia-east1"
 
@@ -228,7 +233,7 @@ def federation(p, repository, *, allow_project_hosting_admin=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", default="anti-harassment-bot")
+    parser.add_argument("--project", default=project_id())
     parser.add_argument("--repository", default="TWCkaijin/Anti-Harassment-Bot")
     parser.add_argument("--phase", choices=["hosting", "federation"], required=True)
     parser.add_argument("--apply", action="store_true")

@@ -19,7 +19,12 @@ from urllib.parse import quote
 
 import httpx
 
-PROJECT = "anti-harassment-bot"
+try:
+    from scripts.project_config import project_id
+except ModuleNotFoundError:  # pragma: no cover
+    from project_config import project_id
+
+PROJECT = project_id()
 DATABASES = ("(default)", "app-dev", "admin-private", "admin-private-dev")
 PROBE_PATH = "migration_permission_probe/not-present"
 GCLOUD = "/opt/homebrew/bin/gcloud"

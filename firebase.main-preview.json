@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "anti-harassment-bot",
+    "target": "client",
     "public": "client/frontend/dist",
     "ignore": ["firebase*.json", "**/.*", "**/node_modules/**"],
     "rewrites": [

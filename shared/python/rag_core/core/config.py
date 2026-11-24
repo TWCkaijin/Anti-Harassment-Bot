@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from rag_core.core.project import client_site, hosting_origins, preview_origin_regex, project_id
+
 # Resolve local configuration explicitly; deployed packages never search parents
 # for a developer's .env or credentials.
 ROOT_DIR = next(
@@ -23,15 +25,15 @@ ROOT_DIR = next(
 if not os.environ.get("K_SERVICE"):
     load_dotenv(os.environ.get("RAG_ENV_FILE", str(ROOT_DIR / ".env")))
 
+# Production Client origins and its dev-preview channel follow the project ID
+# (project.env, overridable with FIREBASE_PROJECT_ID).
+_CLIENT_SITE = client_site(project_id())
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://anti-harassment-bot.web.app",
-    "https://anti-harassment-bot.firebaseapp.com",
+    *hosting_origins(_CLIENT_SITE),
 )
-DEFAULT_CORS_PREVIEW_ORIGIN_REGEXES = (
-    r"\Ahttps://anti-harassment-bot--dev-preview-[a-z0-9-]+\.web\.app\Z",
-)
+DEFAULT_CORS_PREVIEW_ORIGIN_REGEXES = (preview_origin_regex(_CLIENT_SITE),)
 
 # Only allow an anchored Firebase Hosting preview-host shape. This intentionally
 # rejects arbitrary administrator-supplied regex features such as ``.*`` or

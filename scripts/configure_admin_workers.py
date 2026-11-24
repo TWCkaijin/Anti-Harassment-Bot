@@ -15,6 +15,11 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
+try:
+    from scripts.project_config import project_id
+except ModuleNotFoundError:  # pragma: no cover
+    from project_config import project_id
+
 REGION = "asia-east1"
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -282,9 +287,7 @@ class WorkerSetup:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--project", default=json.loads((ROOT / ".firebaserc").read_text())["projects"]["default"]
-    )
+    parser.add_argument("--project", default=project_id())
     parser.add_argument("--environment", choices=["production", "preview"], required=True)
     parser.add_argument("--target-url")
     parser.add_argument("--write-env", type=Path)

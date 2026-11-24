@@ -44,6 +44,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Load project settings
+        run: grep -E '^[A-Z_]+=' project.env >> "$GITHUB_ENV"
       - name: Detect affected services on push
         id: filter
         if: github.event_name == 'push'
@@ -130,7 +132,7 @@ jobs:
         if: steps.scope.outputs.any == 'true'
         uses: google-github-actions/auth@v3
         with:
-          project_id: anti-harassment-bot
+          project_id: ${{ env.FIREBASE_PROJECT_ID }}
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3

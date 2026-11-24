@@ -57,7 +57,7 @@ def inventory(root: Path, entry: dict) -> dict:
     for candidate in ["venv", "__pycache__/entry.pyc", ".env", ".env.preview", "debug.log"]:
         if not excluded(candidate, patterns):
             raise ValueError(f"{service}: runtime/discovery path is not excluded: {candidate}")
-    allowed_roots = {"main.py", "requirements.txt", f"{service}_app", "rag_core"}
+    allowed_roots = {"main.py", "project.env", "requirements.txt", f"{service}_app", "rag_core"}
     files = []
     for directory, dirs, names in os.walk(source, followlinks=False):
         base = Path(directory)

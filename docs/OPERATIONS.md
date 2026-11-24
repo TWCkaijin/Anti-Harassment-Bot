@@ -8,7 +8,7 @@ Production 尚未發布新版。下列部署命令是操作步驟，不能視為
 
 | 項目 | production | preview／本機開發 |
 | --- | --- | --- |
-| Firebase project | `anti-harassment-bot` | `anti-harassment-bot` |
+| Firebase project | `project.env`（目前 `anti-harassment-bot`） | 同左 |
 | 業務 database | `(default)` | `app-dev` |
 | 設定文件 | `runtime_config/app_main` | `runtime_config/app_dev` |
 | 私有 database | `admin-private` | `admin-private-dev` |
@@ -17,6 +17,18 @@ Production 尚未發布新版。下列部署命令是操作步驟，不能視為
 | 私有原檔 bucket | `anti-harassment-bot-admin-prod` | `anti-harassment-bot-admin-dev` |
 | Cloud Tasks queue | `rag-admin-prod` | `rag-admin-dev` |
 | 執行／佇列區域 | `asia-east1` | `asia-east1` |
+
+### 專案 ID
+
+Firebase／GCP 專案 ID 只在根目錄 [`project.env`](../project.env) 設定一次（`FIREBASE_PROJECT_ID=…`）。Hosting site（`<project>`、`<project>-admin`）、Admin bucket（`<project>-admin-prod/dev`）、服務帳號 email、預設 CORS 白名單都由 `shared/python/rag_core/core/project.py` 推導；後端、`scripts/` 與三個部署 workflow 都讀同一份設定。讀取順序是環境變數 `FIREBASE_PROJECT_ID` → `project.env` → `GOOGLE_CLOUD_PROJECT`。
+
+改用其他專案時：
+
+1. 修改 `project.env` 的那一行。
+2. 執行 `uv run --frozen python scripts/sync_project_config.py --write` 重新產生 `.firebaserc`（測試會檢查兩者一致）。
+3. 在新專案完成〈雲端初始設定〉，並更新 GitHub Variables 與 WIF 設定。
+
+區域 `asia-east1` 與資料庫名稱仍寫在各處，尚未集中。
 
 Firestore 四個 databases 位於 `nam5`。`app-dev` 是 dev 業務庫的實際名稱，因 Firestore database ID 至少需要四個字元。所有資料庫禁止瀏覽器直連；網站僅呼叫 API。四個 Functions 分別使用 `rag-client-prod/dev`、`rag-admin-prod/dev` 服務帳號。
 

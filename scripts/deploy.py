@@ -20,6 +20,11 @@ try:
 except ImportError:
     from build_functions import ROOT
 
+try:
+    from scripts.project_config import project_id
+except ModuleNotFoundError:  # pragma: no cover
+    from project_config import project_id
+
 REGION = "asia-east1"
 FIREBASE_CLI_VERSION = "15.33.0"
 
@@ -212,7 +217,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", choices=["production", "preview"], required=True)
     parser.add_argument("--service", choices=["client", "admin"], required=True)
-    parser.add_argument("--project", default="anti-harassment-bot")
+    parser.add_argument("--project", default=project_id())
     parser.add_argument("--backend-only", action="store_true")
     parser.add_argument("--frontend-only", action="store_true")
     parser.add_argument("--output", type=Path, default=ROOT / "build" / "deployment.json")

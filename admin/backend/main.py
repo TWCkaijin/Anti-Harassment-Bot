@@ -8,8 +8,10 @@ from functools import lru_cache
 from firebase_functions import https_fn, options
 from flask import Response
 
+from rag_core.core.project import project_id, service_account
+
 logger = logging.getLogger(__name__)
-PROJECT = os.getenv("FIREBASE_PROJECT_ID", os.getenv("GOOGLE_CLOUD_PROJECT", "anti-harassment-bot"))
+PROJECT = project_id()
 
 
 @lru_cache
@@ -41,7 +43,7 @@ def handle_request(req):
     concurrency=8,
     max_instances=5,
     service_account=os.getenv(
-        "ADMIN_PROD_SERVICE_ACCOUNT", f"rag-admin-prod@{PROJECT}.iam.gserviceaccount.com"
+        "ADMIN_PROD_SERVICE_ACCOUNT", service_account("rag-admin-prod", PROJECT)
     ),
     secrets=["RAG_OPENROUTER_PROD", "RAG_CLARIFICATION_PROD", "RAG_CLARIFICATION_LEGACY_PROD"],
 )
@@ -57,7 +59,7 @@ def admin_api(req: https_fn.Request) -> https_fn.Response:
     concurrency=8,
     max_instances=5,
     service_account=os.getenv(
-        "ADMIN_PREVIEW_SERVICE_ACCOUNT", f"rag-admin-dev@{PROJECT}.iam.gserviceaccount.com"
+        "ADMIN_PREVIEW_SERVICE_ACCOUNT", service_account("rag-admin-dev", PROJECT)
     ),
     secrets=["RAG_OPENROUTER_DEV", "RAG_CLARIFICATION_DEV", "RAG_CLARIFICATION_LEGACY_DEV"],
 )

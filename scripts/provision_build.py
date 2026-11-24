@@ -18,6 +18,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from provision_firebase import REGION, Provisioner
 
+try:
+    from scripts.project_config import project_id
+except ModuleNotFoundError:  # pragma: no cover
+    from project_config import project_id
+
 
 def api(method, path, body=None):
     token = subprocess.check_output(["gcloud", "auth", "print-access-token"], text=True).strip()
@@ -176,7 +181,7 @@ def configure(p, environments):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project", default="anti-harassment-bot")
+    parser.add_argument("--project", default=project_id())
     parser.add_argument(
         "--environment", choices=["preview", "production", "all"], default="preview"
     )

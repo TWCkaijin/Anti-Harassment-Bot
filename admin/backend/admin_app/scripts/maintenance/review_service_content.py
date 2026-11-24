@@ -21,6 +21,7 @@ from pathlib import Path
 from admin_app.scripts.common.gcloud_login import get_gcloud_login_credentials
 from admin_app.scripts.common.legal_corpus import digest
 from admin_app.scripts.ingest.official_laws import decode_firestore, encode_firestore
+from rag_core.core.project import project_id
 from rag_core.core.referral_policy import (
     is_private_referral_action,
     is_private_referral_resource,
@@ -29,7 +30,7 @@ from rag_core.core.referral_policy import (
 from rag_core.core.scenario_scripts import _builtin_scenario_documents
 from rag_core.rag.legal_lookup import legacy_conflict_reason
 
-PROJECT = "anti-harassment-bot"
+PROJECT = project_id()
 DATABASE_DOCUMENTS = {"(default)": "app_main", "app-dev": "app_dev"}
 COLLECTIONS = ("scenario_scripts", "rag_documents", "rag_remedies")
 MASK_FIELDS = ("mask_message", "mask_case_context", "mask_retrieval_query")

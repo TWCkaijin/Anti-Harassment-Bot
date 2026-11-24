@@ -9,11 +9,12 @@ from flask import Response as FlaskResponse
 from client_app.main import app
 from rag_core.core.config import get_settings
 from rag_core.core.logger import get_request_log_context
+from rag_core.core.project import project_id, service_account
 from rag_core.core.security import cors_headers_for_origin, new_error_id
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-PROJECT = os.getenv("FIREBASE_PROJECT_ID", os.getenv("GOOGLE_CLOUD_PROJECT", "anti-harassment-bot"))
+PROJECT = project_id()
 
 
 class _ContextBoundIterable:
@@ -84,7 +85,7 @@ def handle_request(req: https_fn.Request) -> https_fn.Response:
     timeout_sec=180,
     memory=options.MemoryOption.MB_512,
     service_account=os.getenv(
-        "CLIENT_PROD_SERVICE_ACCOUNT", f"rag-client-prod@{PROJECT}.iam.gserviceaccount.com"
+        "CLIENT_PROD_SERVICE_ACCOUNT", service_account("rag-client-prod", PROJECT)
     ),
     secrets=["RAG_OPENROUTER_PROD", "RAG_CLARIFICATION_PROD", "RAG_CLARIFICATION_LEGACY_PROD"],
 )
@@ -98,7 +99,7 @@ def api(req: https_fn.Request) -> https_fn.Response:
     timeout_sec=180,
     memory=options.MemoryOption.MB_512,
     service_account=os.getenv(
-        "CLIENT_PREVIEW_SERVICE_ACCOUNT", f"rag-client-dev@{PROJECT}.iam.gserviceaccount.com"
+        "CLIENT_PREVIEW_SERVICE_ACCOUNT", service_account("rag-client-dev", PROJECT)
     ),
     secrets=["RAG_OPENROUTER_DEV", "RAG_CLARIFICATION_DEV", "RAG_CLARIFICATION_LEGACY_DEV"],
 )

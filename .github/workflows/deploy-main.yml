@@ -51,6 +51,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Load project settings
+        run: grep -E '^[A-Z_]+=' project.env >> "$GITHUB_ENV"
       - name: Detect affected services on push
         id: filter
         if: github.event_name == 'push'
@@ -153,7 +155,7 @@ jobs:
         if: steps.scope.outputs.any == 'true'
         uses: google-github-actions/auth@v3
         with:
-          project_id: anti-harassment-bot
+          project_id: ${{ env.FIREBASE_PROJECT_ID }}
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3
@@ -166,7 +168,7 @@ jobs:
         run: |
           set -euo pipefail
           current=$(gcloud functions describe api --v2 --region=asia-east1 \
-            --project=anti-harassment-bot \
+            --project="$FIREBASE_PROJECT_ID" \
             --format='value(serviceConfig.environmentVariables.CHAT_APP_CHECK_ENABLED)')
           if [[ "$current" != 'true' && "$DESIRED" == 'true' && "$MODE" != 'enforce' ]]; then
             echo 'First App Check enforcement requires explicit enforce mode after Client live and main-preview have App Check capable bundles.' >&2

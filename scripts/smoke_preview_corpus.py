@@ -26,9 +26,14 @@ try:
     from scripts.verify_runtime_iam import PROJECT, ProbeError, access_token, write_report
 except ModuleNotFoundError:
     from verify_runtime_iam import PROJECT, ProbeError, access_token, write_report
+try:
+    from scripts.project_config import admin_bucket, admin_site
+except ModuleNotFoundError:  # pragma: no cover
+    from project_config import admin_bucket, admin_site
 
-BASE_URL = "https://anti-harassment-bot-admin--dev-preview-q53x908r.web.app"
-BUCKET = "anti-harassment-bot-admin-dev"
+# Preview channel URLs change on every deploy, so the target is a required argument.
+BUCKET = admin_bucket(PROJECT, "development")
+PREVIEW_HOST = re.compile(rf"{re.escape(admin_site(PROJECT))}--dev-preview-[a-z0-9]+\.web\.app")
 BUSINESS_DATABASE = "app-dev"
 PRIVATE_DATABASE = "admin-private-dev"
 API = "/api/v1/admin"
@@ -43,10 +48,7 @@ def validate_base_url(value):
     parsed = urlparse(value)
     if (
         parsed.scheme != "https"
-        or not re.fullmatch(
-            r"anti-harassment-bot-admin--dev-preview-[a-z0-9]+\.web\.app",
-            parsed.netloc,
-        )
+        or not PREVIEW_HOST.fullmatch(parsed.netloc)
         or parsed.path not in {"", "/"}
         or parsed.query
         or parsed.fragment
@@ -587,7 +589,9 @@ class CorpusSmoke:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--base-url", default=BASE_URL)
+    parser.add_argument(
+        "--base-url", required=True, help="Admin dev-preview URL from the deployment output"
+    )
     parser.add_argument("--password-file", type=Path, default=Path(".admin-local/preview.password"))
     parser.add_argument("--job-timeout", type=int, default=300)
     parser.add_argument("--output", type=Path)

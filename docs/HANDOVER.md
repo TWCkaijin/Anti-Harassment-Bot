@@ -28,7 +28,7 @@
 | 項目 | 說明 |
 | --- | --- |
 | GitHub repository | `TWCkaijin/Anti-Harassment-Bot`（**公開**）。移交 admin 權限或轉移 repository；確認 branch protection。 |
-| Firebase／GCP project | `anti-harassment-bot`。授予接手者 Owner 或必要的最小角色；核對四個 runtime 服務帳號（`rag-client-prod/dev`、`rag-admin-prod/dev`）、兩個 Builder 帳號與 `rag-tasks-prod/dev`。 |
+| Firebase／GCP project | `anti-harassment-bot`（設定於根目錄 `project.env`；換專案步驟見操作手冊〈專案 ID〉）。授予接手者 Owner 或必要的最小角色；核對四個 runtime 服務帳號（`rag-client-prod/dev`、`rag-admin-prod/dev`）、兩個 Builder 帳號與 `rag-tasks-prod/dev`。 |
 | CI 身分（WIF） | GitHub Variables `WORKLOAD_IDENTITY_PROVIDER`、`DEPLOY_SERVICE_ACCOUNT`。WIF 條件綁定 repository ID；**轉移 repository 後 ID 不變，但更換 repository 必須重建 WIF**。見 [CI 權限審查](../infrastructure/iam/CI_DEPLOYMENT_REVIEW.md)。 |
 | CI 長效 token | `secrets.FIREBASE_TOKEN` 只用於 main-preview workflow。建議接手後撤銷並改用 WIF。 |
 | OpenRouter | 帳號與帳單移交；金鑰存在 Secret Manager。 |
@@ -85,6 +85,7 @@
 | Production 切換 | 新版只在 Preview | 依操作手冊先完成 Preview 四單元驗收、IAM 檢查、備份與回復演練。 |
 | Gate 與 App Check 啟用 | 都預設關閉 | 先在 Preview 以代表性案例量測，再決定。 |
 | Tiny NER 去留 | 未達門檻、GPL-3.0 | 決定繼續調整、換模型或移除驗證頁。 |
+| 區域與資料庫名稱集中化 | 專案 ID 已集中在 `project.env`；區域 `asia-east1` 與資料庫名稱仍散在程式、workflow 與設定中 | 若要搬到其他區域或專案再比照 `project.env` 處理。 |
 
 ## 6. 接手驗收建議
 

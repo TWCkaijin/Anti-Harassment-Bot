@@ -16,6 +16,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+try:
+    from scripts.project_config import admin_bucket, project_id
+except ModuleNotFoundError:  # pragma: no cover
+    from project_config import admin_bucket, project_id
+
 ROOT = Path(__file__).resolve().parents[1]
 SERVICES = (
     ("client-api", 8000, "http://127.0.0.1:8000/"),
@@ -26,6 +31,7 @@ SERVICES = (
 
 
 def environment(env_file: Path):
+    project = project_id()
     env = dict(os.environ)
     for key in (
         "K_SERVICE",
@@ -44,14 +50,14 @@ def environment(env_file: Path):
             "RAG_ENV_FILE": str(env_file),
             "FLASK_SKIP_DOTENV": "1",
             "ENVIRONMENT": "development",
-            "FIREBASE_PROJECT_ID": "anti-harassment-bot",
-            "GOOGLE_CLOUD_PROJECT": "anti-harassment-bot",
+            "FIREBASE_PROJECT_ID": project,
+            "GOOGLE_CLOUD_PROJECT": project,
             "FIRESTORE_DATABASE_ID": "app-dev",
             "RUNTIME_CONFIG_DOCUMENT_ID": "app_dev",
             "ADMIN_PRIVATE_DATABASE_ID": "admin-private-dev",
             "ADMIN_COOKIE_SECURE": "false",
             "ADMIN_ORIGINS": '["http://localhost:5174","http://127.0.0.1:5174"]',
-            "ADMIN_STORAGE_BUCKET": "anti-harassment-bot-admin-dev",
+            "ADMIN_STORAGE_BUCKET": admin_bucket(project, "development"),
             "ADMIN_TASKS_QUEUE": "",
             "ADMIN_TASKS_TARGET_URL": "",
             "ADMIN_TASKS_SERVICE_ACCOUNT": "",

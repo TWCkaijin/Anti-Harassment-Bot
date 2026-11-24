@@ -7,6 +7,8 @@ import pytest
 
 from scripts import smoke_preview_corpus as smoke
 
+PREVIEW_URL = "https://anti-harassment-bot-admin--dev-preview-q53x908r.web.app"
+
 
 @pytest.mark.parametrize(
     "url",
@@ -14,8 +16,8 @@ from scripts import smoke_preview_corpus as smoke
         "https://anti-harassment-bot-admin.web.app",
         "https://anti-harassment-bot-admin--prod-preview-abc.web.app",
         "http://anti-harassment-bot-admin--dev-preview-abc.web.app",
-        smoke.BASE_URL + "/corpus",
-        smoke.BASE_URL + "?redirect=production",
+        PREVIEW_URL + "/corpus",
+        PREVIEW_URL + "?redirect=production",
         "https://attacker.example@anti-harassment-bot-admin--dev-preview-abc.web.app",
     ],
 )
@@ -30,7 +32,7 @@ def test_default_plan_does_not_authenticate_or_create_clients(monkeypatch):
 
     monkeypatch.setattr(smoke, "access_token", forbidden)
     monkeypatch.setattr(smoke.httpx, "Client", forbidden)
-    plan = smoke.smoke_plan(smoke.BASE_URL)
+    plan = smoke.smoke_plan(PREVIEW_URL)
     assert plan["network_calls"] is False
     assert plan["business_database"] == "app-dev"
     assert plan["private_database"] == "admin-private-dev"
@@ -48,7 +50,7 @@ def test_fixture_is_generated_and_content_free_of_run_identifier():
 
 @pytest.fixture
 def runner(tmp_path):
-    instance = smoke.CorpusSmoke(smoke.BASE_URL, tmp_path / "not-read.password")
+    instance = smoke.CorpusSmoke(PREVIEW_URL, tmp_path / "not-read.password")
     yield instance
     instance.client.close()
     instance.observer.close()

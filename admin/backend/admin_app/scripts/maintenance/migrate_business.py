@@ -23,8 +23,9 @@ from admin_app.corpus.service import CorpusService
 from admin_app.infrastructure import ObjectStore
 from admin_app.scripts.common.legal_corpus import digest
 from admin_app.scripts.ingest.official_laws import decode_firestore, encode_firestore
+from rag_core.core.project import project_id
 
-PROJECT = "anti-harassment-bot"
+PROJECT = project_id()
 SOURCE_DATABASE = "(default)"
 TARGET_DATABASE = "app-dev"
 CORPUS = {"law": "rag_documents", "judgment": "rag_judgments", "remedy": "rag_remedies"}

@@ -30,6 +30,8 @@ scripts/         # 建置、部署、資源設定與維運工具
 docs/            # 交接、架構與操作文件
 ```
 
+部署目標的 Firebase／GCP 專案 ID 只設定在根目錄 `project.env`，其他名稱都由它推導（見 [操作手冊〈專案 ID〉](docs/OPERATIONS.md#專案-id)）。
+
 `data/` 與 `resource/` 是本機保留的知識庫來源與研究工作簿，不在 Git 中，需另行移交（見交接文件）。`build/`、`dist/`、`dist-preview/` 由建置產生。
 
 | 環境 | 業務資料庫 | Admin 私有庫 | Functions |
