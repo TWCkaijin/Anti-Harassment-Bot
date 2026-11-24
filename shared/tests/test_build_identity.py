@@ -98,6 +98,9 @@ def test_source_fingerprint_uses_version_and_rejects_missing_checksums():
         ("pull_request", "dev", "deploy-dev.yml", False),
         ("workflow_dispatch", "main", "deploy-dev.yml", False),
         ("workflow_dispatch", "dev", "deploy-main.yml", False),
+        ("workflow_dispatch", "main", "deploy-main-preview.yml", True),
+        ("push", "main", "deploy-main-preview.yml", False),
+        ("workflow_dispatch", "dev", "deploy-main-preview.yml", False),
     ],
 )
 def test_federation_restricts_release_events_and_workflows(event, branch, workflow, expected):

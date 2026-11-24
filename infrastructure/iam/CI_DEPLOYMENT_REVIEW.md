@@ -37,7 +37,8 @@ project-wide `roles/firebasehosting.admin` cannot honestly be described as a
 two-site or preview-channel-only grant. It is currently present on `rag-deploy`.
 The script still requires the separate `--allow-project-hosting-admin` option
 when provisioning this broad grant in a new environment. Its presence allows
-Hosting API authorization, but a federated CI deployment has not been tested.
+Hosting API authorization. Federated CI deployment of Hosting channels has been
+exercised by the dev workflow (run 44655512446, 2026-11-20, all four units).
 
 ## Firebase CLI 15.33.0 findings
 
@@ -80,8 +81,9 @@ those identities' runtime capabilities; this is inherent to authorized code
 deployment and remains limited to the named application identities.
 
 Federation remains restricted to the numeric repository and owner IDs, the
-exact `main/deploy-main.yml` or `dev/deploy-dev.yml` workflow references, and
-their branch refs. Main permits only `workflow_dispatch`; dev permits `push`
+exact `main/deploy-main.yml`, `main/deploy-main-preview.yml` or
+`dev/deploy-dev.yml` workflow references, and their branch refs. Both main
+workflows permit only `workflow_dispatch`; dev permits `push`
 or `workflow_dispatch`. The shared deployment identity can update both environments; the
 Hosting limitation also prevents channel-level IAM separation in this project.
 Branch protections and workflow review therefore remain significant controls.

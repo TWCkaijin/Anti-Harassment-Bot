@@ -19,6 +19,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: quality-gate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,9 +70,14 @@ jobs:
           VITE_APP_CHECK_SITE_KEY: ${{ vars.CLIENT_APP_CHECK_SITE_KEY_PROD }}
       - name: Install Firebase CLI
         run: npm install -g firebase-tools@15.33.0
+      # Same short-lived identity as the other deploy workflows; no long-lived token.
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.FIREBASE_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
       - name: Deploy only the independent Hosting channel
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
           firebase hosting:channel:deploy main-preview \
             --project "$FIREBASE_PROJECT_ID" \

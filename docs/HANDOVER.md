@@ -30,7 +30,7 @@
 | GitHub repository | `TWCkaijin/Anti-Harassment-Bot`（**公開**）。移交 admin 權限或轉移 repository；確認 branch protection。 |
 | Firebase／GCP project | `anti-harassment-bot`（設定於根目錄 `project.env`；換專案步驟見操作手冊〈專案 ID〉）。授予接手者 Owner 或必要的最小角色；核對四個 runtime 服務帳號（`rag-client-prod/dev`、`rag-admin-prod/dev`）、兩個 Builder 帳號與 `rag-tasks-prod/dev`。 |
 | CI 身分（WIF） | GitHub Variables `WORKLOAD_IDENTITY_PROVIDER`、`DEPLOY_SERVICE_ACCOUNT`。WIF 條件綁定 repository ID；**轉移 repository 後 ID 不變，但更換 repository 必須重建 WIF**。見 [CI 權限審查](../infrastructure/iam/CI_DEPLOYMENT_REVIEW.md)。 |
-| CI 長效 token | `secrets.FIREBASE_TOKEN` 只用於 main-preview workflow。建議接手後撤銷並改用 WIF。 |
+| CI 長效 token | 無。三個部署 workflow 都改用 WIF（main-preview 於 2026-11-24 切換，GCP 條件已更新）。GitHub 上殘留的 `FIREBASE_TOKEN`、`ADMIN_API_KEY`、`AGENT_SYSTEM_PROMPT`、`FIREBASE_SERVICE_ACCOUNT_JSON`、`OPENROUTER_API_KEY` 已無 workflow 使用，待 main-preview 在 main 上執行成功後刪除（見第 3 節）。 |
 | OpenRouter | 帳號與帳單移交；金鑰存在 Secret Manager。 |
 | 管理密碼 | Production 與 Preview 各一組（Argon2id hash 在私有庫）。交接時用 `password_cli --reset` 重設，舊 sessions 會失效。見操作手冊〈管理密碼與登入〉。 |
 | reCAPTCHA Enterprise／App Check | 若啟用，移交 site key 與 Firebase App 註冊；GitHub Variables 見下表。 |
@@ -45,7 +45,9 @@
 
 ### GitHub Variables
 
-`FIREBASE_PROJECT_ID`、`FIREBASE_API_KEY`、`WORKLOAD_IDENTITY_PROVIDER`、`DEPLOY_SERVICE_ACCOUNT`、`CLIENT_FIREBASE_APP_ID_DEV/PROD`、`CLIENT_APP_CHECK_ENABLED_DEV/PROD`、`CLIENT_APP_CHECK_SITE_KEY_DEV/PROD`、`CLIENT_CHAT_APP_CHECK_ENABLED_DEV/PROD`。
+`FIREBASE_API_KEY`、`WORKLOAD_IDENTITY_PROVIDER`、`DEPLOY_SERVICE_ACCOUNT`、`CLIENT_FIREBASE_APP_ID_DEV/PROD`、`CLIENT_APP_CHECK_ENABLED_DEV/PROD`、`CLIENT_APP_CHECK_SITE_KEY_DEV/PROD`、`CLIENT_CHAT_APP_CHECK_ENABLED_DEV/PROD`。
+
+`FIREBASE_PROJECT_ID` variable 已不被 workflow 使用（改讀 `project.env`），可一併刪除。
 
 ### 需要另外移交的資料
 

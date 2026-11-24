@@ -26,10 +26,14 @@ def federation_condition(repository_id: str, owner_id: str, repository: str) -> 
     """Authorize only the release events and exact workflow refs for each branch."""
     main_workflow = f"{repository}/.github/workflows/deploy-main.yml@refs/heads/main"
     dev_workflow = f"{repository}/.github/workflows/deploy-dev.yml@refs/heads/dev"
+    main_preview_workflow = (
+        f"{repository}/.github/workflows/deploy-main-preview.yml@refs/heads/main"
+    )
     return (
         f"assertion.repository_id == '{repository_id}' && "
         f"assertion.repository_owner_id == '{owner_id}' && ("
         f"(assertion.event_name == 'workflow_dispatch' && assertion.ref == 'refs/heads/main' && assertion.workflow_ref == '{main_workflow}') || "
+        f"(assertion.event_name == 'workflow_dispatch' && assertion.ref == 'refs/heads/main' && assertion.workflow_ref == '{main_preview_workflow}') || "
         f"((assertion.event_name == 'push' || assertion.event_name == 'workflow_dispatch') && assertion.ref == 'refs/heads/dev' && assertion.workflow_ref == '{dev_workflow}'))"
     )
 
@@ -223,7 +227,6 @@ def federation(p, repository, *, allow_project_hosting_admin=False):
         for name, value in {
             "WORKLOAD_IDENTITY_PROVIDER": provider,
             "DEPLOY_SERVICE_ACCOUNT": p.sa("rag-deploy"),
-            "FIREBASE_PROJECT_ID": p.project,
         }.items():
             subprocess.run(
                 ["gh", "variable", "set", name, "--repo", repository, "--body", value], check=True

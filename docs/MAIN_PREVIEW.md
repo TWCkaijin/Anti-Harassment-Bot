@@ -8,17 +8,17 @@
 
 ## GitHub Actions
 
-手動執行 **Deploy — Main Hosting Preview**，branch 選 `main`。CI gate 通過後才建置及部署，網址寫入 workflow summary。使用現有 `FIREBASE_TOKEN` secret；正式 Client Web App ID 由 `CLIENT_FIREBASE_APP_ID_PROD` 指定，必須與其 App Check 註冊一致。此 workflow 沒有 push trigger，也不會部署正式 live 或 dev 預覽。
+手動執行 **Deploy — Main Hosting Preview**，branch 選 `main`。CI gate 通過後才建置及部署，網址寫入 workflow summary。以 Workload Identity Federation 取得短期憑證（與其他部署 workflow 相同的 `rag-deploy` 身分，不使用長效 token）；正式 Client Web App ID 由 `CLIENT_FIREBASE_APP_ID_PROD` 指定，必須與其 App Check 註冊一致。此 workflow 沒有 push trigger，也不會部署正式 live 或 dev 預覽。
 
 ## 本機部署
 
-確認 checkout 在 main，並先完成 Firebase CLI 登入（`firebase login`），或在本機以 `GOOGLE_APPLICATION_CREDENTIALS` 指定具有 Hosting 部署權限的服務帳戶檔。不要提交或印出憑證內容。若正式 Client API 將強制 App Check，先匯出正式 Client Web App 的 `VITE_FIREBASE_API_KEY`、`VITE_FIREBASE_PROJECT_ID`、`VITE_FIREBASE_APP_ID` 與 `VITE_APP_CHECK_SITE_KEY`；該 Enterprise key 須允許本 channel 的實際網域。
+確認 checkout 在 main，並以具有 Hosting 部署權限的帳號完成 Firebase CLI 登入（`firebase login`）或 ADC（`gcloud auth application-default login`）。不要建立或使用服務帳戶金鑰檔。若正式 Client API 將強制 App Check，先匯出正式 Client Web App 的 `VITE_FIREBASE_API_KEY`、`VITE_FIREBASE_PROJECT_ID`、`VITE_FIREBASE_APP_ID` 與 `VITE_APP_CHECK_SITE_KEY`；該 Enterprise key 須允許本 channel 的實際網域。
 
 ```sh
 VITE_API_BASE_URL=/api VITE_ENV=preview VITE_ANALYTICS_ENABLED=false \
   VITE_APP_CHECK_ENABLED=true pnpm --filter @rag/client build
 firebase hosting:channel:deploy main-preview \
-  --project anti-harassment-bot \
+  --project "$(grep ^FIREBASE_PROJECT_ID= project.env | cut -d= -f2)" \
   --config firebase.main-preview.json \
   --expires 30d --non-interactive
 ```
