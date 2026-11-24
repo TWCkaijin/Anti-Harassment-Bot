@@ -60,12 +60,18 @@
 - 本機服務帳號金鑰 `firebase_admin.json` 已刪除，GCP 上 `firebase-adminsdk-fbsvc` 的使用者管理金鑰已撤銷（剩 0 把）。本機開發只用 ADC。
 - 原開發機的舊 `.env` 已搬到 `.admin-local/development.env`（移除 `ADMIN_API_KEY`），`.code-review-graph/` 與舊 `dev-runs` 紀錄已刪除。
 - main-preview workflow 改用 WIF，GCP 的 WIF 條件已更新；沒有 workflow 再使用 repository secrets。
-- Git 歷史中的兩份工作簿已在本機以 `git filter-repo` 移除，**尚未推送**。只改寫了 `36d673d`（2026-09-21）之後的 62 個 commit；更早的 commit 與其他分支不變。被改寫的 commit 原有的簽章會消失（內容改變後無法保留）。main 的最新版本原本仍含這兩個檔案，推送後會一併移除。改寫前的完整備份在 `.admin-local/backups/pre-filter-20261124.bundle`（含工作簿，確認推送無誤後請刪除）。
+- **Git 歷史已在本機改寫（尚未推送）**，所有本機分支的完整歷史都已處理：
+  - 移除兩份來源工作簿，以及由它們產生、內含全部 634 則情境的 `tests/reliability/candidates/cases.candidate.jsonl`。
+  - 測試中唯一引用的工作簿情境改成新寫的合成情境，歷史中的舊版本也一併替換。
+  - 作者與 committer 的個人 email 一律改為 GitHub noreply 地址。
+  - 改寫後以 gitleaks 和自訂規則重新掃描所有 commit 與每個檔案版本：沒有金鑰、個人 email、非合成身分證號，也沒有工作簿內容。
+  - 代價：所有 commit 的 SHA 都改變，原有簽章全部消失。
+  - 改寫前的備份在 `.admin-local/backups/pre-filter-20261124.bundle` 與 `pre-filter2-20261124.bundle`，**內含被移除的內容**，確認推送無誤後請刪除。
 
 ### 仍需本人執行
 
 1. **重設 Preview 與 Production 管理密碼**，以安全管道交給接手者。
-2. **推送改寫後的歷史**（在本機檢查後）：
+2. **推送改寫後的歷史**（在本機檢查後）。遠端 12 個分支都還帶著舊歷史（含舊 email），每一個都必須覆寫或刪除：
 
    ```bash
    git fetch origin
@@ -75,18 +81,18 @@
    git push --force-with-lease origin main dev
    ```
 
-   `--force-with-lease` 只在遠端仍是你上次看到的版本時才覆寫；若有人在這期間推送過，推送會被拒絕，需先核對。
-
    ```bash
    git push origin refactor/handover
    ```
 
+   其餘 10 個都是已合併的舊分支，建議直接刪除：
+
    ```bash
-   git push origin --delete action-button codex/client-admin-split-20261010
+   git push origin --delete action-button admin-pannel auto-search-framework reach-reaction codex/client-admin-split-20261010 auto-fix-backend-lint-admin-pannel auto-fix-backend-lint-auto-search-framework auto-fix-backend-lint-dev auto-fix-backend-lint-main auto-fix-backend-lint-reach-reaction
    ```
 
-   其他人手上的 clone 都要重新 clone，否則舊 commit 會被推回來。
-3. **請 GitHub Support 清除快取。** PR #11、#12、#13 仍引用含工作簿的舊 commit，只改寫分支無法移除；依 GitHub〈Removing sensitive data from a repository〉的說明提出申請。
+   `--force-with-lease` 只在遠端仍是你上次看到的版本時才覆寫；若有人在這期間推送過，推送會被拒絕，需先核對。其他人手上的 clone 都要重新 clone，否則舊 commit 會被推回來。
+3. **請 GitHub Support 清除快取。** PR #1–#13 的 ref 仍指向舊 commit（含工作簿與舊 email），只改寫分支無法移除；依 GitHub〈Removing sensitive data from a repository〉的說明提出申請。
 4. **main-preview 在 main 上執行成功後**，刪除 GitHub secrets `FIREBASE_TOKEN`、`ADMIN_API_KEY`、`AGENT_SYSTEM_PROMPT`、`FIREBASE_SERVICE_ACCOUNT_JSON`、`OPENROUTER_API_KEY` 與 variable `FIREBASE_PROJECT_ID`，並在 Google 帳號的第三方存取設定中撤銷 Firebase CLI 的授權，讓舊 CI token 失效。
 
 ## 4. 已知限制
