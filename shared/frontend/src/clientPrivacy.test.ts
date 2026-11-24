@@ -40,12 +40,6 @@ describe("browser-only payload privacy", () => {
     expect(draft.fields.map(field => field.path.join("."))).toEqual(["message", "history.0.content", "history.1.content", "case_context.summary"]);
     expect(draft.request.case_context?.revision).toBe(2);
   });
-  it("redacts every legacy fact value, including arrays", () => {
-    const draft = createPrivacyDraft({ ...base(), contract_version: 3, case_context: { schema_version: 2, revision: 1, facts: { subject_role: { status: "provided", value: ["合成甲", "sample@example.test"] }, city: { status: "provided", value: "合成甲住在台北市" } } } }, ["合成甲"]);
-    const body = reviewedRequestBody(approvePrivacyDraft(draft));
-    expect(body).not.toContain("合成甲"); expect(body).not.toContain("sample@example.test");
-    expect(body).toContain("台北市"); expect(body).toContain("[已隱藏資訊1]");
-  });
   it("uses the same local alias throughout new text, history and a regeneration summary", () => {
     const draft = createPrivacyDraft({ ...base("合成甲在虛構公司遇到不受歡迎的言詞"), regenerate_from_summary: true,
       history: [{ role: "assistant", content: "合成甲" }], case_context: { schema_version: 3, revision: 3, facts: {}, summary: "虛構公司的合成甲", summary_origin: "user" } }, ["合成甲", "虛構公司"]);

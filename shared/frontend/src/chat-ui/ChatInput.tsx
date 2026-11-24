@@ -35,7 +35,8 @@ interface ChatInputProps {
   streamingPrompt?: Pick<ConversationMessage, "id" | "streamingGuidance">;
   onStop?: () => void;
   caseRevision?: number;
-  activeContractVersion?: 1 | 2 | 3 | 4;
+  /** Contract of the connected backend; typed clarifications need it to match. */
+  activeContractVersion?: 4;
   disabled?: boolean;
   allowImageUpload?: boolean;
   onClarificationDraftChange?: (messageId: string, draft: ClarificationDraft) => void;
@@ -52,13 +53,15 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
   const preview = isLoading ? streamingPrompt?.streamingGuidance : undefined;
   const promptKey = streamingPrompt?.id ?? replyPrompt?.id ?? JSON.stringify(suggestedReplies);
   const panelReplies = preview ? preview.suggested_replies ?? [] : replyPrompt?.suggestedReplies ?? suggestedReplies;
-  const typedContract = replyPrompt?.contractVersion === 2 || replyPrompt?.contractVersion === 3 || replyPrompt?.contractVersion === 4;
-  const typedQuestion = !preview && typedContract && replyPrompt.contractVersion === activeContractVersion
+  // Replies from any versioned contract (including saved v2/v3 turns) never use the
+  // pre-contract free-text question panel.
+  const typedContract = replyPrompt?.contractVersion !== undefined;
+  const typedQuestion = !preview && activeContractVersion === 4 && replyPrompt?.contractVersion === 4
     && !replyPrompt.superseded && !replyPrompt.isError && !replyPrompt.isCancelled && !replyPrompt.isStreaming
     && replyPrompt.interactionMode === "clarify" && replyPrompt.factsRevision === caseRevision
-    && isClarification(replyPrompt.clarification, replyPrompt.contractVersion)
-    && (replyPrompt.contractVersion !== 4 || replyPrompt.clarification.context_revision === caseRevision)
-    && (replyPrompt.contractVersion === 2 || Boolean(replyPrompt.clarification.validation_token))
+    && isClarification(replyPrompt.clarification, 4)
+    && replyPrompt.clarification.context_revision === caseRevision
+    && Boolean(replyPrompt.clarification.validation_token)
       ? replyPrompt.clarification : undefined;
   const interactionMode = preview ? preview.interaction_mode : typedContract ? "answer" : replyPrompt?.interactionMode;
   const clarifyingQuestions = preview ? preview.clarifying_questions : replyPrompt?.clarifyingQuestions;

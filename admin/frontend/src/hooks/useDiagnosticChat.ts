@@ -91,7 +91,7 @@ export function useDiagnosticChat(csrfToken: string, config: RuntimeConfig, mode
     try {
       const history = messagesRef.current.slice(historyBoundary.current).filter(item => !item.superseded && item.requestKind !== "regeneration" && (!item.diagnosticMode || item.diagnosticMode === selectedMode));
       const candidate: ChatRequest = {
-        ...createChatRequest(history, message, imageBase64, 4), contract_version: 4,
+        ...createChatRequest(history, message, imageBase64),
         use_rag: config.pipeline?.enable_rag ?? true, case_context: structuredClone(summary),
         ...(answer ? { clarification_answer: answer } : {}),
         ...(regenerationOrigin ? { regenerate_from_summary: true } : {}),

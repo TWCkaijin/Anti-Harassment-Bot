@@ -73,7 +73,7 @@ export async function runAdminChatTest(csrfToken: string, request: ChatRequest, 
   const reviewedBody = reviewedRequestBody(request);
   const result = await runTestJob(csrfToken, `{"request":${reviewedBody},"overrides":${JSON.stringify(overrides)}${expectedContractSha256 ? `,"expected_chat_test_contract_sha256":${JSON.stringify(expectedContractSha256)}` : ""}}`, signal) as AdminChatTestResult;
   if (!result || typeof result.diagnostics !== "object" || !result.diagnostics || Array.isArray(result.diagnostics)) throw new ApiError(502, "診斷回應格式不正確");
-  return { response: parseChatResponse(result.response, request.contract_version ?? 1), diagnostics: result.diagnostics };
+  return { response: parseChatResponse(result.response), diagnostics: result.diagnostics };
 }
 export async function runAdminApplicableLawTest(csrfToken: string, request: ChatRequest, overrides: RuntimeConfigUpdate, signal?: AbortSignal, expectedContractSha256?: string): Promise<AdminApplicableLawTestResult> {
   const reviewedBody = reviewedRequestBody(request);

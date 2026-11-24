@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiError,
+  CHAT_CONTRACT_VERSION,
   assertResponseContract,
   sendChat,
   checkHealth,
@@ -25,7 +26,7 @@ import {
   createChatRequest,
   getUserMessageValidationError,
 } from "@rag/shared/conversationHistory";
-import { applyFactUpdates, applySummaryUpdate, emptySummaryContext, hasCaseContext, isCaseContext, normalizeCaseContext, parseFact, toSummaryContext, type ClarificationDraft, type LegacyCaseContext } from "@rag/shared/caseFacts";
+import { applySummaryUpdate, emptySummaryContext, hasCaseContext, isCaseContext, normalizeCaseContext, parseFact, toSummaryContext, type ClarificationDraft, type LegacyCaseContext } from "@rag/shared/caseFacts";
 import { appendReasoning } from "@rag/shared/reasoning";
 import { preparePrivateRequest } from "@rag/shared/privateRequest";
 import type { PrivacyDraft } from "@rag/shared/clientPrivacy";
@@ -133,38 +134,32 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
   const storageChangedRef = useRef(false);
   const migrationSnapshotRef = useRef(initialState.storage.migrationSnapshot ?? null);
   const persistedMigrationSessionsRef = useRef<ConversationSession[] | null>(null);
-  const [contractVersion, setContractVersion] = useState<1 | 2 | 3 | 4>(1);
-  const contractV2 = contractVersion >= 2;
   const [clientSettings, setClientSettings] = useState<ClientSettings>();
   const [isBackendConnected, setIsBackendConnected] = useState<boolean | null>(null);
-  const connectionRef = useRef<{ connected: boolean | null; contractVersion: 1 | 2 | 3 | 4; clientSettings?: ClientSettings }>({ connected: null, contractVersion: 1 });
+  const connectionRef = useRef<{ connected: boolean | null; clientSettings?: ClientSettings }>({ connected: null });
   const healthControllerRef = useRef<AbortController | null>(null);
   const checkBackendConnection = useCallback(() => {
-    connectionRef.current = { connected: null, contractVersion: 1 };
+    connectionRef.current = { connected: null };
     healthControllerRef.current?.abort();
     const controller = new AbortController();
     healthControllerRef.current = controller;
     return checkHealth(controller.signal).then(health => {
       if (controller.signal.aborted || healthControllerRef.current !== controller) return;
+      // A backend without the current chat contract is treated as unreachable.
       const versions = health.capabilities?.chat_contract_versions;
-      if (versions !== undefined && (!Array.isArray(versions) || ![1, 2, 3, 4].some(version => versions.includes(version)))) {
-        throw new Error("No supported chat contract");
-      }
-      const selectedVersion = versions?.includes(4) ? 4 : versions?.includes(3) ? 3 : versions?.includes(2) ? 2 : 1;
-      connectionRef.current = { connected: true, contractVersion: selectedVersion, clientSettings: health.client_settings };
-      setContractVersion(selectedVersion);
+      if (!Array.isArray(versions) || !versions.includes(CHAT_CONTRACT_VERSION)) throw new Error("No supported chat contract");
+      connectionRef.current = { connected: true, clientSettings: health.client_settings };
       setClientSettings(health.client_settings);
       setIsBackendConnected(true);
     }).catch(() => {
       if (!controller.signal.aborted && healthControllerRef.current === controller) {
-        connectionRef.current = { connected: false, contractVersion: 1 };
+        connectionRef.current = { connected: false };
         setIsBackendConnected(false);
       }
     });
   }, []);
   const reconnectBackend = useCallback(() => {
     setIsBackendConnected(null);
-    setContractVersion(1);
     return checkBackendConnection();
   }, [checkBackendConnection]);
   useEffect(() => {
@@ -332,11 +327,10 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
     async (userInput: string, imageBase64?: string, imageUrl?: string, replyContext?: ReplyContext, contextOverride?: CaseContext, regenerationOriginId?: string) => {
       // UI work can retain an older callback while a
       // reconnect is in flight; consult the current completed handshake.
-      const { connected: isBackendConnected, contractVersion } = connectionRef.current;
+      const { connected: isBackendConnected } = connectionRef.current;
       if (storageChangedRef.current) { setError("其他分頁已更新對話紀錄；請重新整理後再繼續。"); return false; }
       if (imageBase64) { setError("圖片上傳目前已停用，請改用文字描述。"); return false; }
       if (imageUrl && !imageBase64) { setError("圖片資料不完整，請重新選擇圖片。"); return false; }
-      const contractV2 = contractVersion >= 2;
       const targetSessionId = currentSessionId;
       if (loadingSessionIdsRef.current.has(targetSessionId)) return false;
       const targetSession = sessionsRef.current.find(session => session.id === targetSessionId);
@@ -347,33 +341,19 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
         setError(isBackendConnected === null ? "正在確認服務連線，請稍候再傳送。" : "請先重新連線，再傳送訊息。");
         return false;
       }
-      if (!contractV2 && hasCaseContext(caseContext)) {
-        setError("目前服務尚未支援這份情境摘要，請改開新對話。");
-        return false;
-      }
-      if (contractVersion < 4 && caseContext.schema_version === 3 && caseContext.summary.trim()) {
-        setError("目前服務尚未支援這份文字情境摘要，請重新連線或開啟新對話。");
-        return false;
-      }
-      if (contractVersion < 3 && Object.values(caseContext.facts).some(fact => Array.isArray(fact?.value))) {
-        setError("目前服務尚未支援這份複選情境摘要，請重新連線或開啟新對話。");
-        return false;
-      }
       try {
-        caseContext = contractVersion === 4 ? toSummaryContext(caseContext)
-          : { schema_version: contractVersion === 3 ? 2 : 1, revision: caseContext.revision, facts: caseContext.facts };
+        // Sessions saved before the summary contract still hold structured facts.
+        caseContext = toSummaryContext(caseContext);
       } catch {
         setError("舊摘要超過可轉換長度，請先整理摘要內容；原始資料仍保留。");
         return false;
       }
       const typedAnswer = replyContext?.clarificationAnswer;
-      if (typedAnswer && (!contractV2 || replyContext.factsRevision !== caseContext.revision || !parseFact(typedAnswer)
-        || (contractVersion === 4 ? typedAnswer.fact_key !== undefined || typedAnswer.context_revision !== caseContext.revision : typedAnswer.fact_key === undefined)
-        || (contractVersion < 3 && Array.isArray(typedAnswer.value)))) {
+      if (typedAnswer && (replyContext.factsRevision !== caseContext.revision || !parseFact(typedAnswer)
+        || typedAnswer.fact_key !== undefined || typedAnswer.context_revision !== caseContext.revision)) {
         setError("情境摘要已更新，請使用最新問題或直接輸入。");
         return false;
       }
-      if (typedAnswer?.fact_key && typedAnswer.context_scope !== "scenario" && caseContext.schema_version !== 3) caseContext = { ...caseContext, revision: caseContext.revision + 1, facts: { ...caseContext.facts, [typedAnswer.fact_key]: parseFact(typedAnswer)! } };
 
       const normalizedUserInput = userInput.trim() || (imageBase64 ? "請協助說明這張圖片。" : "");
       if (!normalizedUserInput && !imageBase64) return false;
@@ -399,13 +379,10 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
         ? targetSession.messages.findIndex(message => message.id === targetSession.summaryEditedAfterMessageId) : -1;
       const historyAfterEdit = editBoundaryIndex >= 0 ? targetSession.messages.slice(editBoundaryIndex + 1)
         : targetSession.summaryEditedAt !== undefined ? targetSession.messages.filter(message => message.timestamp >= targetSession.summaryEditedAt!) : targetSession.messages;
-      const candidate = createChatRequest(historyAfterEdit.filter(message => !message.superseded && (contractVersion !== 4 || message.requestKind !== "regeneration")), normalizedUserInput, imageBase64, contractVersion === 1 ? undefined : contractVersion);
-      if (contractV2) {
-        candidate.contract_version = contractVersion === 4 ? 4 : contractVersion === 3 ? 3 : 2;
-        candidate.case_context = structuredClone(caseContext);
-        if (contractVersion === 4 && regenerationOriginId) candidate.regenerate_from_summary = true;
-        if (typedAnswer) candidate.clarification_answer = typedAnswer;
-      }
+      const candidate = createChatRequest(historyAfterEdit.filter(message => !message.superseded && message.requestKind !== "regeneration"), normalizedUserInput, imageBase64);
+      candidate.case_context = structuredClone(caseContext);
+      if (regenerationOriginId) candidate.regenerate_from_summary = true;
+      if (typedAnswer) candidate.clarification_answer = typedAnswer;
 
       let request: ChatRequest;
       let reviewAccepted = false;
@@ -415,13 +392,12 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
         if (!approved || !isOwner() || abortController.signal.aborted || currentSessionIdRef.current !== targetSessionId) return false;
         const current = sessionsRef.current.find(session => session.id === targetSessionId);
         if (!current || normalizeCaseContext(current.caseFacts ?? emptySummaryContext()).revision !== startingRevision) return false;
-        if (connectionRef.current.connected !== true || connectionRef.current.contractVersion !== contractVersion
-          || approved.image_base64) {
+        if (connectionRef.current.connected !== true || approved.image_base64) {
           setError("服務連線已變更，請重新檢查送出內容。");
           return false;
         }
         request = approved;
-        if (contractV2 && request.case_context) caseContext = normalizeCaseContext(request.case_context);
+        if (request.case_context) caseContext = normalizeCaseContext(request.case_context);
         reviewAccepted = true;
       } catch (failure) {
         if (isOwner() && !abortController.signal.aborted) setError(errorMessage(failure, "無法準備送出內容，請重新檢查。"));
@@ -445,8 +421,8 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
       userMsg.originRequestId = regenerationOriginId ?? (typedAnswer ? latestUserRequest(targetSession.messages)?.id : userMsg.id);
       setSessions(previous => previous.map(session => session.id === targetSessionId && isOwner() ? {
         ...session,
-        ...(contractV2 ? { caseFacts: caseContext } : {}),
-        ...(contractVersion === 4 && session.caseFacts && session.caseFacts.schema_version !== 3 ? { legacyCaseFacts: session.legacyCaseFacts ?? session.caseFacts } : {}),
+        caseFacts: caseContext,
+        ...(session.caseFacts && session.caseFacts.schema_version !== 3 ? { legacyCaseFacts: session.legacyCaseFacts ?? session.caseFacts } : {}),
         pendingFacts: [], messages: [...session.messages, userMsg].slice(-MAX_MESSAGES_PER_SESSION),
       } : session));
       setSessionRetryStatus(targetSessionId, WAITING_MESSAGE);
@@ -498,13 +474,12 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
             : message);
           const currentContext = normalizeCaseContext(session.caseFacts ?? emptySummaryContext());
           const sameRevision = currentContext.revision === caseContext.revision;
-          const accepted = response?.contract_version === 4 && sameRevision && response.context_revision === caseContext.revision && caseContext.schema_version === 3
+          const accepted = response && sameRevision && response.context_revision === caseContext.revision && caseContext.schema_version === 3
             ? { context: regenerationOriginId ? currentContext : applySummaryUpdate(caseContext, response.summary_update ?? null), pending: [] }
-            : (response?.contract_version === 2 || response?.contract_version === 3) && sameRevision && response.facts_revision === caseContext.revision
-              ? applyFactUpdates(caseContext, response.fact_updates ?? []) : { context: currentContext, pending: session.pendingFacts ?? [] };
+            : { context: currentContext, pending: session.pendingFacts ?? [] };
           const interrupted = assistant.isCancelled || assistant.isError;
-          return { ...session, ...(contractV2 ? { caseFacts: accepted.context, pendingFacts: accepted.pending } : {}),
-            messages: [...updated, { ...assistant, analysis: interrupted ? undefined : response?.analysis ?? assistant.analysis ?? partialAnalysis, reasoning: interrupted ? undefined : partialReasoning, processingTrace: finalTrace, ...(response?.contract_version === 2 || response?.contract_version === 3 || response?.contract_version === 4 ? { factsRevision: accepted.context.revision } : {}) }].slice(-MAX_MESSAGES_PER_SESSION) };
+          return { ...session, caseFacts: accepted.context, pendingFacts: accepted.pending,
+            messages: [...updated, { ...assistant, analysis: interrupted ? undefined : response?.analysis ?? assistant.analysis ?? partialAnalysis, reasoning: interrupted ? undefined : partialReasoning, processingTrace: finalTrace, ...(response ? { factsRevision: accepted.context.revision } : {}) }].slice(-MAX_MESSAGES_PER_SESSION) };
         }));
       };
 
@@ -584,8 +559,7 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
         if (!isOwner()) return;
         if (!response) throw new Error("Chat response is missing after retry attempts");
         assertResponseContract(request, response);
-        if ((response.contract_version === 2 || response.contract_version === 3) && response.facts_revision !== caseContext.revision) throw new ApiError(502, "情境摘要版本不符", "請重新送出訊息", false);
-        if (response.contract_version === 4 && response.context_revision !== caseContext.revision) throw new ApiError(502, "情境摘要版本不符", "請重新送出訊息", false);
+        if (response.context_revision !== caseContext.revision) throw new ApiError(502, "情境摘要版本不符", "請重新送出訊息", false);
         if (wasRetracted) {
           // A denied turn may only leave the replacement refusal. Do not retain
           // earlier guidance, retrieval, analysis, or proposed case updates.
@@ -607,7 +581,6 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
           debugToolCalls: response.debug_tool_calls,
           contractVersion: response.contract_version,
           clarification: response.clarification,
-          answerSections: response.answer_sections,
           analysis: response.analysis,
         }, response);
         metrics.finish("success", response);
@@ -786,8 +759,6 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
     isLoading,
     error,
     retryStatus,
-    contractV2,
-    contractVersion,
     clientSettings,
     isBackendConnected,
     reconnectBackend,
@@ -796,9 +767,6 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
     confirmPrivacyReview: (draft: PrivacyDraft) => finishPrivacyReview(draft),
     cancelPrivacyReview: () => finishPrivacyReview(null),
     caseFacts,
-    incompatibleSummary: isBackendConnected === true && ((!contractV2 && hasCaseFacts)
-      || (contractVersion < 4 && caseFacts.schema_version === 3 && Boolean(caseFacts.summary.trim()))
-      || (contractVersion < 3 && Object.values(caseFacts.facts).some(fact => Array.isArray(fact?.value)))),
     summaryRequiresConnection: isBackendConnected !== true && hasCaseFacts,
     canRegenerate: Boolean(latestUserRequest(currentSession?.messages ?? [])),
     pendingFacts: currentSession?.pendingFacts ?? [],

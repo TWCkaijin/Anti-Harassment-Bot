@@ -1,5 +1,5 @@
 /** Local-only review of the complete chat payload. No text leaves this module. */
-import type { ChatRequest } from "./api";
+import { CHAT_CONTRACT_VERSION, type ChatRequest } from "./api";
 import { FACT_KEYS, isCaseContext, isFactKey, isRecord, type CaseContext, type ClarificationAnswer } from "./caseFacts";
 import { validateImageDataUrl } from "./imageUpload";
 
@@ -73,7 +73,7 @@ function freeze<T>(value: T): T {
   return value;
 }
 
-function decodeToken(token: string, version: number): Record<string, unknown> | null {
+function decodeToken(token: string): Record<string, unknown> | null {
   try {
     const parts = /^([A-Za-z0-9_-]{1,8100})\.([a-f0-9]{64})$/.exec(token);
     if (!parts) return null;
@@ -81,12 +81,12 @@ function decodeToken(token: string, version: number): Record<string, unknown> | 
     const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     const data: unknown = JSON.parse(decoded);
     const common = ["question_id", "selection_mode", "max_selections", "context_scope", "allowed_values"];
-    if (!isRecord(data) || Object.keys(data).some(key => ![...common, ...(version === 4 ? ["contract_version", "context_revision"] : ["fact_key"])].includes(key))) return null;
+    if (!isRecord(data) || Object.keys(data).some(key => ![...common, "contract_version", "context_revision"].includes(key))) return null;
     if (typeof data.question_id !== "string" || !/^[a-zA-Z0-9_.:-]{1,80}$/.test(data.question_id)
       || !["single", "multiple"].includes(String(data.selection_mode)) || !integer(data.max_selections, 1) || data.max_selections > 4
       || !["personal", "scenario"].includes(String(data.context_scope)) || !Array.isArray(data.allowed_values)
       || data.allowed_values.length > 8 || !data.allowed_values.every(value => typeof value === "string" && value.length <= 300)) return null;
-    if (version === 4 ? data.contract_version !== 4 || !integer(data.context_revision) : !isFactKey(data.fact_key)) return null;
+    if (data.contract_version !== CHAT_CONTRACT_VERSION || !integer(data.context_revision)) return null;
     // The server emits compact JSON. Unknown whitespace/extra data is not sent back blindly.
     if (JSON.stringify(data) !== decoded) return null;
     return data;
@@ -113,7 +113,7 @@ function buildDraft(input: ChatRequest, hiddenTerms: string[]): PrivacyDraft {
     warnings.push("圖片將以原圖傳送，不會自動遮蔽其中的姓名、臉孔或其他資訊。請確認預覽內容。");
   }
   if (input.contract_version !== undefined) {
-    if (![2, 3, 4].includes(input.contract_version)) throw invalid();
+    if (input.contract_version !== CHAT_CONTRACT_VERSION) throw invalid();
     request.contract_version = input.contract_version;
   }
   if (input.regenerate_from_summary !== undefined) {
@@ -158,14 +158,14 @@ function buildDraft(input: ChatRequest, hiddenTerms: string[]): PrivacyDraft {
     if (answer.allowed_values !== undefined) { safe = safe && Array.isArray(answer.allowed_values) && answer.allowed_values.every(item => typeof item === "string"); candidate.allowed_values = answer.allowed_values; }
     let decoded: Record<string, unknown> | null = null;
     if (answer.validation_token !== undefined) {
-      decoded = typeof answer.validation_token === "string" ? decodeToken(answer.validation_token, input.contract_version ?? 2) : null;
+      decoded = typeof answer.validation_token === "string" ? decodeToken(answer.validation_token) : null;
       safe = safe && decoded !== null;
       if (decoded) {
         for (const key of ["question_id", "fact_key", "context_revision", "selection_mode", "max_selections", "context_scope", "allowed_values"] as const) {
           if (candidate[key] !== undefined && JSON.stringify(candidate[key]) !== JSON.stringify(decoded[key])) safe = false;
         }
       }
-    } else if (input.contract_version === 3 || input.contract_version === 4) safe = false;
+    } else safe = false;
     const readableData = { answer: candidate, ...(decoded ? { signed_options: decoded } : {}) };
     // Check original leaves, before JSON escaping can conceal newlines or quotes
     // from the same checks applied to message/history/summary text.

@@ -38,7 +38,6 @@ describe("ChatInput", () => {
     clarification: { question_id: "open.2", context_revision: 2, question: "事情發生在哪種場合？", reason: "釐清場合", options: [{ label: "校外", value: "校外" }], selection_mode: "single", max_selections: 1, validation_token: "signed" } };
   it.each([
     ["capabilities are pending", undefined, v4Prompt],
-    ["the backend is older", 3, v4Prompt],
     ["the question revision is stale", 4, { ...v4Prompt, clarification: { ...v4Prompt.clarification!, context_revision: 1 } }],
     ["the message revision is stale", 4, { ...v4Prompt, factsRevision: 1 }],
     ["the question is superseded", 4, { ...v4Prompt, superseded: true }],
@@ -95,11 +94,11 @@ describe("ChatInput", () => {
   });
   it("disables typed clarification sending while keeping hide and draft recovery available", () => {
     const onSend = vi.fn();
-    const typedPrompt: ConversationMessage = { ...replyPrompt, contractVersion: 2, factsRevision: 2, clarification: { question_id: "case.other_role.2", fact_key: "other_role", question: "對方與您是什麼關係？", reason: "協助了解處理管道", options: [{ label: "主管", value: "主管" }] } };
-    const { rerender } = render(<I18nProvider><ChatInput onSend={onSend} replyPrompt={typedPrompt} caseRevision={2} activeContractVersion={2} /></I18nProvider>);
+    const typedPrompt: ConversationMessage = { ...v4Prompt, clarification: { ...v4Prompt.clarification!, question: "對方與您是什麼關係？", options: [{ label: "主管", value: "主管" }] } };
+    const { rerender } = render(<I18nProvider><ChatInput onSend={onSend} replyPrompt={typedPrompt} caseRevision={2} activeContractVersion={4} /></I18nProvider>);
     fireEvent.click(screen.getByRole("radio", { name: "自行補充" }));
     fireEvent.change(screen.getByRole("textbox", { name: "自行補充" }), { target: { value: "客戶" } });
-    rerender(<I18nProvider><ChatInput onSend={onSend} replyPrompt={typedPrompt} caseRevision={2} activeContractVersion={2} disabled /></I18nProvider>);
+    rerender(<I18nProvider><ChatInput onSend={onSend} replyPrompt={typedPrompt} caseRevision={2} activeContractVersion={4} disabled /></I18nProvider>);
     expect(screen.getByRole("radio", { name: "主管" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "送出回覆" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "送出回覆" }));

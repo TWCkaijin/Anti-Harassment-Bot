@@ -1,9 +1,7 @@
-import type { ChatRequest, MessageItem } from "./api";
+import { CHAT_CONTRACT_VERSION, type ChatRequest, type MessageItem } from "./api";
 
 export const MAX_HISTORY_MESSAGES = 8;
 export const MAX_HISTORY_TURNS = 4;
-export const LEGACY_HISTORY_MESSAGES = 40;
-export const LEGACY_HISTORY_CHARACTERS = 12_000;
 export const MAX_USER_MESSAGE_CHARACTERS = 2_000;
 export const MAX_USER_HISTORY_CHARACTERS = MAX_USER_MESSAGE_CHARACTERS;
 export const MAX_ASSISTANT_HISTORY_CHARACTERS = 6_000;
@@ -132,18 +130,16 @@ export function createChatRequest(
   messages: readonly HistoryCandidate[],
   userInput: string,
   imageBase64?: string,
-  contractVersion?: 2 | 3 | 4,
 ): ChatRequest {
   const validationError = getUserMessageValidationError(userInput);
   if (validationError) throw new RangeError(validationError);
 
   return {
     message: userInput.trim(),
-    // v3 lets the server apply the current environment or temporary diagnostic
-    // policy. Transport bounds still protect the request itself.
-    history: contractVersion === 3 || contractVersion === 4 ? buildChatHistory(messages, 120_000, 200, 200)
-      : contractVersion === 2 ? buildChatHistory(messages) : buildChatHistory(messages, LEGACY_HISTORY_CHARACTERS, LEGACY_HISTORY_MESSAGES, LEGACY_HISTORY_MESSAGES),
+    // The server applies the environment's history policy; these are transport bounds.
+    history: buildChatHistory(messages, 120_000, 200, 200),
     use_rag: true,
     image_base64: imageBase64,
+    contract_version: CHAT_CONTRACT_VERSION,
   };
 }

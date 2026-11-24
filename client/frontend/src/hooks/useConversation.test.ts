@@ -27,12 +27,19 @@ const successfulResponse: ChatResponse = {
   action_buttons: [],
   interaction_mode: "answer",
   clarifying_questions: [],
+  contract_version: 4,
+  context_revision: 0,
+  summary_update: null,
+  clarification: null,
+  execution: { route: "direct_retrieval", model_calls: 1 },
+  analysis: [],
 };
+const health = { status: "ok", timestamp: "test", version: "test", environment: "test", capabilities: { chat_contract_versions: [4] } };
 
 beforeEach(() => {
   window.localStorage.clear();
   vi.mocked(sendChat).mockReset();
-  vi.mocked(checkHealth).mockReset().mockResolvedValue({ status: "ok", timestamp: "test", version: "test", environment: "test" });
+  vi.mocked(checkHealth).mockReset().mockResolvedValue(health);
   vi.mocked(trackAnalytics).mockClear();
   vi.useFakeTimers();
 });
@@ -42,84 +49,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const v2Response = (revision: number, extra: Partial<ChatResponse> = {}): ChatResponse => ({ ...successfulResponse, contract_version: 2, facts_revision: revision, fact_updates: [], clarification: null, answer_sections: [], execution: { route: "direct_retrieval", model_calls: 1 }, ...extra });
-const v2Health = { status: "ok", timestamp: "test", version: "test", environment: "test", capabilities: { chat_contract_versions: [1, 2] } };
-
-describe("v3 conversation contracts", () => {
-  const v3Health = { ...v2Health, capabilities: { chat_contract_versions: [1, 2, 3] } };
-  const v3Response = (revision: number, extra: Partial<ChatResponse> = {}): ChatResponse => ({ ...v2Response(revision), contract_version: 3, analysis: [], ...extra });
-  it("selects v3 after health and sends multi-value facts without reducing them", async () => {
-    vi.mocked(checkHealth).mockResolvedValue(v3Health);
-    vi.mocked(sendChat).mockImplementation(async request => v3Response(request.case_context!.revision));
-    const { result } = renderHook(() => useConversation("v3-multi"));
-    await act(async () => { await Promise.resolve(); });
-    const clarificationAnswer = { question_id: "case.subject_role.0", fact_key: "subject_role" as const, status: "provided" as const, value: ["學生", "兼職員工"], selection_mode: "multiple" as const, max_selections: 2, validation_token: "signed", context_scope: "personal" as const };
-    await act(async () => { await result.current.sendMessage("學生、兼職員工", undefined, undefined, { answers: [], factsRevision: 0, clarificationAnswer }); });
-    expect(vi.mocked(sendChat).mock.calls[0][0]).toMatchObject({ contract_version: 3, case_context: { schema_version: 2, revision: 1, facts: { subject_role: { status: "provided", value: ["學生", "兼職員工"] } } }, clarification_answer: clarificationAnswer });
-    expect(result.current.caseFacts.facts.subject_role?.value).toEqual(["學生", "兼職員工"]);
-  });
-  it("keeps a third-person typed answer in history while preserving the personal summary", async () => {
-    const caseFacts: LegacyCaseContext = { schema_version: 2, revision: 1, facts: { subject_role: { status: "provided", value: "學生" } } };
-    vi.mocked(checkHealth).mockResolvedValue(v3Health);
-    vi.mocked(sendChat).mockResolvedValue(v3Response(1));
-    const { result } = renderHook(() => useConversation("v3-scenario"));
-    await act(async () => { await Promise.resolve(); });
-    await act(async () => { await result.current.saveCaseFacts(caseFacts); });
-    const clarificationAnswer = { question_id: "scenario.subject_role.4", fact_key: "subject_role" as const, status: "provided" as const, value: ["員工", "實習生"], selection_mode: "multiple" as const, max_selections: 2, validation_token: "signed-scenario", context_scope: "scenario" as const };
-    await act(async () => { await result.current.sendMessage("朋友是員工、實習生", undefined, undefined, { answers: [{ question: "朋友的身分？", answer: "員工、實習生" }], factsRevision: 1, clarificationAnswer }); });
-    expect(vi.mocked(sendChat).mock.calls[0][0]).toMatchObject({ contract_version: 3, case_context: caseFacts, clarification_answer: clarificationAnswer });
-    expect(result.current.caseFacts).toEqual(caseFacts);
-    expect(result.current.messages.at(-2)).toMatchObject({ role: "user", content: "朋友是員工、實習生", replyContext: { clarificationAnswer } });
-  });
-  it("blocks v2 fallback for saved arrays without rewriting or silently joining their values", async () => {
-    const caseFacts = { schema_version: 2, revision: 4, facts: { subject_role: { status: "provided", value: ["學生", "兼職員工"] } } };
-    localStorage.setItem("harass_bot_conversations", JSON.stringify([{ id: "v3-fallback", createdAt: 1, schemaVersion: 3, caseFacts, messages: [{ id: "u", role: "user", content: "原問題", timestamp: 1 }] }]));
-    vi.mocked(checkHealth).mockResolvedValue(v2Health);
-    const { result } = renderHook(() => useConversation("v3-fallback"));
-    await act(async () => { await Promise.resolve(); });
-    expect(result.current.incompatibleSummary).toBe(true);
-    await act(async () => { await result.current.sendMessage("繼續"); });
-    expect(sendChat).not.toHaveBeenCalled();
-    expect(result.current.caseFacts).toEqual(toSummaryContext(caseFacts as LegacyCaseContext));
-    expect(JSON.parse(localStorage.getItem("harass_bot_conversations")!)[0]).toMatchObject({ caseFacts: toSummaryContext(caseFacts as LegacyCaseContext), legacyCaseFacts: caseFacts });
-  });
-  it("streams stage explanations but persists only final validated analysis", async () => {
-    vi.mocked(checkHealth).mockResolvedValue(v3Health);
-    const preview = { stage: "understanding" as const, summary: "正在整理", facts: [], source_labels: [], limitations: [] };
-    const final = { ...preview, summary: "已依提供資訊整理", facts: ["學生"] };
-    vi.mocked(sendChat).mockImplementation(async (_request, _signal, _delta, _guidance, _progress, analysis) => { analysis?.(preview); return v3Response(0, { analysis: [final] }); });
-    const { result } = renderHook(() => useConversation("v3-analysis"));
-    await act(async () => { await Promise.resolve(); });
-    await act(async () => { await result.current.sendMessage("我是學生"); });
-    expect(result.current.messages.at(-1)?.analysis).toEqual([final]);
-    expect(localStorage.getItem("harass_bot_conversations")).toContain("已依提供資訊整理");
-    expect(localStorage.getItem("harass_bot_conversations")).not.toContain("正在整理");
-  });
-  it("does not automatically replay a request after analysis has become visible", async () => {
-    vi.mocked(checkHealth).mockResolvedValue(v3Health);
-    const entry = { stage: "understanding" as const, summary: "正在整理已知條件", facts: [], source_labels: [], limitations: [] };
-    vi.mocked(sendChat).mockImplementation(async (_request, _signal, _delta, _guidance, _progress, analysis) => { analysis?.(entry); throw new ApiError(502, "中斷", undefined, true); });
-    const { result } = renderHook(() => useConversation("v3-analysis-error"));
-    await act(async () => { await Promise.resolve(); });
-    await act(async () => { await result.current.sendMessage("合成情境"); });
-    expect(sendChat).toHaveBeenCalledOnce();
-    expect(result.current.messages.at(-1)).toMatchObject({ isError: true, analysis: undefined });
-    expect(localStorage.getItem("harass_bot_conversations")).not.toContain(entry.summary);
-  });
-});
 
 describe("backend connection recovery", () => {
   it("checks the latest handshake when an older send callback survives a reconnect", async () => {
-    vi.mocked(checkHealth).mockResolvedValueOnce(v2Health);
+    vi.mocked(checkHealth).mockResolvedValueOnce(health);
     const { result } = renderHook(() => useConversation("old-send-callback"));
     await act(async () => { await Promise.resolve(); });
     const oldSend = result.current.sendMessage;
-    let resolveHealth!: (value: typeof v2Health) => void;
+    let resolveHealth!: (value: typeof health) => void;
     vi.mocked(checkHealth).mockReturnValueOnce(new Promise(resolve => { resolveHealth = resolve; }));
     act(() => { void result.current.reconnectBackend(); });
     await act(async () => { await oldSend("圖片轉換後才送出"); });
     expect(sendChat).not.toHaveBeenCalled();
-    await act(async () => { resolveHealth({ ...v2Health, capabilities: { chat_contract_versions: [1, 2, 3, 4] } }); });
+    await act(async () => { resolveHealth({ ...health, capabilities: { chat_contract_versions: [1, 2, 3, 4] } }); });
     vi.mocked(sendChat).mockResolvedValueOnce({ ...successfulResponse, contract_version: 4, context_revision: 0, summary_update: null, clarification: null, analysis: [], execution: { route: "direct_retrieval", model_calls: 1 } });
     await act(async () => { await oldSend("圖片轉換後才送出"); });
     expect(sendChat).toHaveBeenCalledOnce();
@@ -131,18 +73,18 @@ describe("backend connection recovery", () => {
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await result.current.sendMessage("第一個問題"); });
     expect(sendChat).not.toHaveBeenCalled();
-    let resolveHealth!: (value: typeof v2Health) => void;
+    let resolveHealth!: (value: typeof health) => void;
     vi.mocked(checkHealth).mockReturnValueOnce(new Promise(resolve => { resolveHealth = resolve; }));
     act(() => { void result.current.reconnectBackend(); });
     await act(async () => { await result.current.sendMessage("第一個問題"); });
     expect(sendChat).not.toHaveBeenCalled();
-    await act(async () => { resolveHealth(v2Health); });
+    await act(async () => { resolveHealth(health); });
     expect(result.current.isBackendConnected).toBe(true);
     expect(result.current.messages).toEqual([]);
     expect(sendChat).not.toHaveBeenCalled();
   });
   it.each([{ versions: [] }, { versions: [5] }])("does not silently select v1 when an explicit capabilities list has no supported versions: $versions", async ({ versions }) => {
-    vi.mocked(checkHealth).mockResolvedValue({ ...v2Health, capabilities: { chat_contract_versions: versions } });
+    vi.mocked(checkHealth).mockResolvedValue({ ...health, capabilities: { chat_contract_versions: versions } });
     const { result } = renderHook(() => useConversation("unsupported-health"));
     await act(async () => { await Promise.resolve(); });
     expect(result.current.isBackendConnected).toBe(false);
@@ -150,8 +92,8 @@ describe("backend connection recovery", () => {
     expect(sendChat).not.toHaveBeenCalled();
   });
   it.each([undefined, 2, 3] as const)("rejects a v4 response mismatch with version %s without retry or summary updates", async version => {
-    vi.mocked(checkHealth).mockResolvedValue({ ...v2Health, capabilities: { chat_contract_versions: [1, 2, 3, 4] } });
-    vi.mocked(sendChat).mockResolvedValue({ ...v2Response(0), contract_version: version, reply: "不應成為已完成回覆", analysis: [], fact_updates: [{ fact_key: "other_role", status: "provided", value: "主管", kind: "confirmation", evidence: "合成資料" }] });
+    vi.mocked(checkHealth).mockResolvedValue({ ...health, capabilities: { chat_contract_versions: [1, 2, 3, 4] } });
+    vi.mocked(sendChat).mockResolvedValue({ ...successfulResponse, contract_version: version as never, reply: "不應成為已完成回覆", summary_update: { summary: "不應套用" } as never });
     const { result } = renderHook(() => useConversation("contract-mismatch"));
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await result.current.sendMessage("第一個問題"); });
@@ -167,20 +109,16 @@ describe("backend connection recovery", () => {
     const { result } = renderHook(() => useConversation("reconnect"));
     expect(result.current.isBackendConnected).toBeNull();
     expect(result.current.summaryRequiresConnection).toBe(true);
-    expect(result.current.incompatibleSummary).toBe(false);
     await act(async () => { await result.current.sendMessage("繼續原本的問題"); });
     expect(result.current.isBackendConnected).toBe(false);
     expect(result.current.summaryRequiresConnection).toBe(true);
-    expect(result.current.incompatibleSummary).toBe(false);
     expect(result.current.caseFacts).toEqual(toSummaryContext(facts as LegacyCaseContext));
     expect(sendChat).not.toHaveBeenCalled();
 
-    vi.mocked(checkHealth).mockResolvedValueOnce({ ...v2Health, capabilities: { chat_contract_versions: [1, 2, 3, 4] } });
+    vi.mocked(checkHealth).mockResolvedValueOnce({ ...health, capabilities: { chat_contract_versions: [1, 2, 3, 4] } });
     await act(async () => { await result.current.reconnectBackend(); });
     expect(result.current.isBackendConnected).toBe(true);
-    expect(result.current.contractV2).toBe(true);
     expect(result.current.summaryRequiresConnection).toBe(false);
-    expect(result.current.incompatibleSummary).toBe(false);
     expect(sendChat).not.toHaveBeenCalled();
     vi.mocked(sendChat).mockResolvedValueOnce({ ...successfulResponse, contract_version: 4, context_revision: 3, summary_update: null, clarification: null, analysis: [], execution: { route: "direct_retrieval", model_calls: 1 } });
     await act(async () => { await result.current.sendMessage("繼續原本的問題"); });
@@ -198,40 +136,23 @@ describe("backend connection recovery", () => {
   });
 
   it("aborts the previous check and ignores its late response after reconnection", async () => {
-    let resolveOld!: (value: typeof v2Health) => void;
+    let resolveOld!: (value: typeof health) => void;
     vi.mocked(checkHealth).mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
     const { result } = renderHook(() => useConversation("stale-health"));
     const signal = vi.mocked(checkHealth).mock.calls[0][0];
-    vi.mocked(checkHealth).mockResolvedValueOnce(v2Health);
+    vi.mocked(checkHealth).mockResolvedValueOnce(health);
     await act(async () => { await result.current.reconnectBackend(); });
     expect(signal?.aborted).toBe(true);
-    await act(async () => { resolveOld({ ...v2Health, capabilities: { chat_contract_versions: [1] } }); });
+    await act(async () => { resolveOld({ ...health, capabilities: { chat_contract_versions: [1] } }); });
     expect(result.current.isBackendConnected).toBe(true);
-    expect(result.current.contractV2).toBe(true);
     expect(sendChat).not.toHaveBeenCalled();
   });
 });
 
 describe("local case facts and request ownership", () => {
-  it("regenerates the original user request after two typed answers and repeated summary edits", async () => {
-    vi.mocked(checkHealth).mockResolvedValue(v2Health);
-    vi.mocked(sendChat).mockImplementation(async request => v2Response(request.case_context!.revision));
-    const { result } = renderHook(() => useConversation("original-intent"));
-    await act(async () => { await Promise.resolve(); });
-    await act(async () => { await result.current.sendMessage("我想知道如何申訴"); });
-    const originId = result.current.messages[0].id;
-    await act(async () => { await result.current.sendMessage("對方是誰？\n主管", undefined, undefined, { answers: [{ question: "對方是誰？", answer: "主管" }], factsRevision: 0, clarificationAnswer: { question_id: "case.other_role.0", fact_key: "other_role", status: "provided", value: "主管" } }); });
-    await act(async () => { await result.current.sendMessage("與工作有關？\n是", undefined, undefined, { answers: [{ question: "與工作有關？", answer: "是" }], factsRevision: 1, clarificationAnswer: { question_id: "case.work_related.1", fact_key: "work_related", status: "provided", value: "是" } }); });
-    await act(async () => { await result.current.saveCaseFacts({ schema_version: 1, revision: result.current.caseFacts.revision, facts: { ...result.current.caseFacts.facts, other_role: { status: "provided", value: "同事" } } }, true); });
-    expect(vi.mocked(sendChat).mock.calls[3][0].message).toBe("我想知道如何申訴");
-    expect(result.current.messages.filter(message => message.role === "user").at(-1)).toMatchObject({ requestKind: "regeneration", originRequestId: originId });
-    await act(async () => { await result.current.saveCaseFacts(result.current.caseFacts, true); });
-    expect(vi.mocked(sendChat).mock.calls[4][0].message).toBe("我想知道如何申訴");
-    expect(result.current.messages.filter(message => message.role === "user").at(-1)?.originRequestId).toBe(originId);
-  });
 
   it("keeps facts-only edits local when there is no original request to regenerate", async () => {
-    vi.mocked(checkHealth).mockResolvedValue(v2Health);
+    vi.mocked(checkHealth).mockResolvedValue(health);
     const { result } = renderHook(() => useConversation("facts-only"));
     await act(async () => { await Promise.resolve(); });
     expect(result.current.canRegenerate).toBe(false);
@@ -239,99 +160,19 @@ describe("local case facts and request ownership", () => {
     expect(sendChat).not.toHaveBeenCalled();
     expect(result.current.caseFacts.facts.city).toEqual({ status: "declined" });
   });
-  it("blocks an existing summary on legacy services without erasing it, and permits a new legacy chat", async () => {
-    const facts = { schema_version: 1, revision: 3, facts: { other_role: { status: "provided", value: "同事" } } };
-    localStorage.setItem("harass_bot_conversations", JSON.stringify([{ id: "v2-existing", createdAt: 1, schemaVersion: 2, caseFacts: facts, messages: [{ id: "u", role: "user", content: "原本的問題", timestamp: 1 }] }]));
-    vi.mocked(sendChat).mockResolvedValue(successfulResponse);
-    const { result } = renderHook(() => useConversation("v2-existing"));
-    await act(async () => { await Promise.resolve(); });
-    expect(result.current.incompatibleSummary).toBe(true);
-    await act(async () => { await result.current.sendMessage("接續原本的問題"); });
-    expect(sendChat).not.toHaveBeenCalled();
-    expect(result.current.caseFacts).toEqual(toSummaryContext(facts as LegacyCaseContext));
-    act(() => { result.current.createNewSession(); });
-    expect(result.current.incompatibleSummary).toBe(false);
-    await act(async () => { await result.current.sendMessage("新的問題"); });
-    expect(sendChat).toHaveBeenCalledOnce();
-    expect(vi.mocked(sendChat).mock.calls[0][0]).not.toHaveProperty("contract_version");
-    expect(result.current.sessions.find(session => session.id === "v2-existing")?.caseFacts).toEqual(toSummaryContext(facts as LegacyCaseContext));
-  });
   it("waits for a completed capability handshake even for a new empty session", async () => {
-    let resolveHealth!: (value: typeof v2Health) => void;
+    let resolveHealth!: (value: typeof health) => void;
     vi.mocked(checkHealth).mockReturnValueOnce(new Promise(resolve => { resolveHealth = resolve; }));
-    vi.mocked(sendChat).mockResolvedValue(v2Response(0));
+    vi.mocked(sendChat).mockResolvedValue(successfulResponse);
     const { result } = renderHook(() => useConversation("handshake"));
     await act(async () => { await result.current.sendMessage("第一個問題"); });
     expect(sendChat).not.toHaveBeenCalled();
     expect(result.current.messages).toEqual([]);
-    await act(async () => { resolveHealth(v2Health); });
+    await act(async () => { resolveHealth(health); });
     expect(sendChat).not.toHaveBeenCalled();
     await act(async () => { await result.current.sendMessage("第一個問題"); });
     expect(sendChat).toHaveBeenCalledOnce();
-    expect(vi.mocked(sendChat).mock.calls[0][0]).toMatchObject({ contract_version: 2, case_context: { schema_version: 1, revision: 0, facts: {} } });
-  });
-
-  it("applies explicit updates only on done and marks conflicting information pending", async () => {
-    vi.mocked(checkHealth).mockResolvedValue(v2Health);
-    const pending = deferredResponse();
-    const { result } = renderHook(() => useConversation("v2-done"));
-    await act(async () => { await Promise.resolve(); });
-    let request!: Promise<void | boolean>;
-    await act(async () => { request = result.current.sendMessage("我是學生"); await Promise.resolve(); });
-    act(() => pending.delta("學生"));
-    expect(result.current.caseFacts.facts).toEqual({});
-    await act(async () => {
-      pending.resolve(v2Response(0, { fact_updates: [{ fact_key: "subject_role", status: "provided", value: "學生", evidence: "我是學生", kind: "explicit" }] }));
-      await request;
-    });
-    expect(result.current.caseFacts).toMatchObject({ revision: 1, facts: { subject_role: { status: "provided", value: "學生" } } });
-    vi.mocked(sendChat).mockResolvedValueOnce(v2Response(1, { fact_updates: [{ fact_key: "subject_role", status: "provided", value: "員工", evidence: "我是員工", kind: "explicit" }] }));
-    await act(async () => { await result.current.sendMessage("我是員工"); });
-    expect(result.current.caseFacts.facts.subject_role?.value).toBe("學生");
-    expect(result.current.pendingFacts).toHaveLength(1);
-  });
-
-  it("keeps a new request alive when a replaced request finishes after a correction", async () => {
-    vi.mocked(checkHealth).mockResolvedValue(v2Health);
-    let resolveOld!: (value: ChatResponse) => void;
-    let oldDelta!: (text: string) => void;
-    let oldProgress!: (value: ChatProgress) => void;
-    vi.mocked(sendChat).mockImplementationOnce((_request, _signal, delta, _guidance, progress) => {
-      oldDelta = delta!;
-      oldProgress = progress!;
-      return new Promise(resolve => { resolveOld = resolve; });
-    });
-    const { result } = renderHook(() => useConversation("replace"));
-    await act(async () => { await Promise.resolve(); });
-    let oldRequest!: Promise<void | boolean>;
-    await act(async () => { oldRequest = result.current.sendMessage("原本的問題"); await Promise.resolve(); });
-    const replacement = deferredResponse();
-    let newRequest!: Promise<void | boolean>;
-    await act(async () => { newRequest = result.current.saveCaseFacts({ schema_version: 1, revision: 0, facts: { other_role: { status: "provided", value: "同事" } } }, true); await Promise.resolve(); });
-    expect(vi.mocked(sendChat).mock.calls[1][0].case_context).toMatchObject({ revision: 1, facts: { other_role: { value: "同事" } } });
-    act(() => replacement.delta("新的回覆"));
-    await act(async () => { resolveOld(v2Response(0)); await oldRequest; });
-    act(() => oldDelta("過期的文字"));
-    act(() => oldProgress({ phase: "retrieving", elapsed_ms: 9999 }));
-    expect(result.current.isLoading).toBe(true);
-    expect(result.current.messages.at(-1)?.content).toBe("新的回覆");
-    expect(result.current.messages.at(-1)?.processingTrace?.steps.map(step => step.phase)).toEqual(["connecting", "generating"]);
-    await act(async () => { replacement.resolve(v2Response(1, { reply: "依新摘要回答" })); await newRequest; });
-    expect(result.current.messages.at(-1)?.content).toBe("依新摘要回答");
-    expect(result.current.caseFacts.facts.other_role?.value).toBe("同事");
-  });
-
-  it("rejects answers from an obsolete summary and preserves unknown on a successful typed reply", async () => {
-    vi.mocked(checkHealth).mockResolvedValue(v2Health);
-    const { result } = renderHook(() => useConversation("stale-question"));
-    await act(async () => { await Promise.resolve(); });
-    const answer = { answers: [{ question: "對方是？", answer: "不確定" }], factsRevision: 8, clarificationAnswer: { question_id: "case.other_role.8", fact_key: "other_role" as const, status: "unknown" as const } };
-    await act(async () => { await result.current.sendMessage("不確定", undefined, undefined, answer); });
-    expect(sendChat).not.toHaveBeenCalled();
-    vi.mocked(sendChat).mockResolvedValueOnce(v2Response(1));
-    await act(async () => { await result.current.sendMessage("不確定", undefined, undefined, { ...answer, factsRevision: 0 }); });
-    expect(result.current.caseFacts.facts.other_role).toEqual({ status: "unknown" });
-    expect(vi.mocked(sendChat).mock.calls[0][0].clarification_answer).toEqual(answer.clarificationAnswer);
+    expect(vi.mocked(sendChat).mock.calls[0][0]).toMatchObject({ contract_version: 4, case_context: { schema_version: 3, revision: 0 } });
   });
 
   it("surfaces storage failure without discarding messages", async () => {
@@ -815,7 +656,6 @@ describe("useConversation streamed replies", () => {
     expect(result.current.isLoading).toBe(false);
   });
 });
-
 
 describe("chat analytics integration", () => {
   it("records streamed text and completion once without sending content or session IDs", async () => {

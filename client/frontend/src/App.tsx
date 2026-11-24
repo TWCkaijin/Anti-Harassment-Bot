@@ -56,7 +56,7 @@ export default function App() {
     deleteSession,
     renameSession,
     clearAllSessions,
-    caseFacts, pendingFacts, saveCaseFacts, contractV2, contractVersion, clientSettings, saveClarificationDraft, isBackendConnected, reconnectBackend, storageIssue, incompatibleSummary, summaryRequiresConnection, canRegenerate, privacyReview, confirmPrivacyReview, cancelPrivacyReview,
+    caseFacts, pendingFacts, saveCaseFacts, clientSettings, saveClarificationDraft, isBackendConnected, reconnectBackend, storageIssue, summaryRequiresConnection, canRegenerate, privacyReview, confirmPrivacyReview, cancelPrivacyReview,
   } = useConversation(undefined, confirmPrivacyBeforeSending);
 
   const closeSidebar = useCallback(() => {
@@ -113,17 +113,15 @@ export default function App() {
           isLoading={isLoading}
           retryStatus={retryStatus}
           onStop={stopCurrentResponse}
-          caseFacts={contractV2 || caseFacts.schema_version === 3 ? caseFacts : undefined}
+          caseFacts={caseFacts}
           pendingFacts={pendingFacts}
           onSaveCaseFacts={saveCaseFacts}
           onClarificationDraftChange={saveClarificationDraft}
           backendConnected={isBackendConnected}
-          contractVersion={contractVersion}
           onReconnect={reconnectBackend}
           storageIssue={storageIssue}
           showEmotions={showEmotions}
           showReasoning={clientSettings?.enable_reasoning_display === true}
-          incompatibleSummary={incompatibleSummary}
           summaryRequiresConnection={summaryRequiresConnection}
           canRegenerate={canRegenerate}
           allowImageUpload={false}

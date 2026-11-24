@@ -6,7 +6,8 @@ const turnId = "12345678-1234-4234-8234-123456789abc";
 const request = () => approvePrivacyDraft(createPrivacyDraft({ message: "合成問題", history: [], use_rag: false }));
 const frame = (event: string, data: object) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 const done = (reply: string) => ({ turn_id: turnId, reply, session_id: "synthetic-session", anonymized: true,
-  rag_used: { status: false, sources: [] }, suggested_replies: [], action_buttons: [], interaction_mode: "answer", clarifying_questions: [] });
+  rag_used: { status: false, sources: [] }, suggested_replies: [], action_buttons: [], interaction_mode: "answer", clarifying_questions: [],
+  contract_version: 4, context_revision: 0, summary_update: null, clarification: null, execution: { route: "direct_retrieval", model_calls: 1 }, analysis: [] });
 function streamResponse(events: string): Response {
   const bytes = new TextEncoder().encode(events);
   return new Response(new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }),

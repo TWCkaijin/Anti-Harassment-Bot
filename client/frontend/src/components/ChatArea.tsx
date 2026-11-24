@@ -31,12 +31,10 @@ interface ChatAreaProps {
   pendingFacts?: FactUpdate[];
   onSaveCaseFacts?: (context: CaseContext, answerAgain?: boolean) => void;
   backendConnected?: boolean | null;
-  contractVersion?: 1 | 2 | 3 | 4;
   onReconnect?: () => void;
   storageIssue?: StorageIssue;
   showEmotions?: boolean;
   showReasoning?: boolean;
-  incompatibleSummary?: boolean;
   summaryRequiresConnection?: boolean;
   canRegenerate?: boolean;
   allowImageUpload?: boolean;
@@ -54,7 +52,7 @@ export default function ChatArea({
   sidebarModalOpen = false,
   onStop,
   showReasoning = false,
-    caseFacts, onSaveCaseFacts, backendConnected, contractVersion, onReconnect, storageIssue, showEmotions = false, incompatibleSummary = false, summaryRequiresConnection = false, canRegenerate = false, allowImageUpload = true, onClarificationDraftChange,
+    caseFacts, onSaveCaseFacts, backendConnected, onReconnect, storageIssue, showEmotions = false, summaryRequiresConnection = false, canRegenerate = false, allowImageUpload = true, onClarificationDraftChange,
 }: ChatAreaProps) {
   const { t } = useI18n();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -83,7 +81,7 @@ export default function ChatArea({
     };
   }, [backendConnected]);
   const connected = backendConnected === undefined ? isBackendConnected : backendConnected;
-  const sendingDisabled = connected !== true || incompatibleSummary || summaryRequiresConnection || storageIssue === "changed";
+  const sendingDisabled = connected !== true || summaryRequiresConnection || storageIssue === "changed";
 
   const hasMessages = messages.length > 0;
   const summaryMessageId = [...messages].reverse().find(message => message.role === "assistant" && !message.superseded && !message.isError && !message.isCancelled)?.id;
@@ -162,7 +160,6 @@ export default function ChatArea({
       </header>
       <div className="conversation-workspace flex min-h-0 flex-1 flex-col">
         {storageIssue && <p role="alert" className="border-b border-error/20 bg-error-container/20 px-6 py-3 text-xs text-error">{storageIssue === "migration" ? t.storageMigration : storageIssue === "future" ? t.storageFuture : storageIssue === "invalid" ? t.storageInvalid : storageIssue === "changed" ? t.storageChanged : t.storageUnavailable}</p>}
-        {incompatibleSummary && <p role="alert" className="border-b border-outline/20 bg-surface-container-low px-6 py-3 text-xs">{t.incompatibleSummary}</p>}
         {summaryRequiresConnection && <p role="status" className="border-b border-outline/20 bg-surface-container-low px-6 py-3 text-xs">{connected === null ? t.summaryCheckingConnection : t.summaryConnectionFailed}</p>}
         {summaryOpen && caseFacts && onSaveCaseFacts && <CaseSummary context={caseFacts} onSave={onSaveCaseFacts} onStartEdit={onStop} onClose={() => setSummaryOpen(false)} canRegenerate={canRegenerate} />}
 
@@ -191,7 +188,7 @@ export default function ChatArea({
               && !latestMessage.isError && !latestMessage.isCancelled ? latestMessage : undefined}
             onStop={onStop}
             caseRevision={caseFacts?.revision}
-            activeContractVersion={connected === true ? contractVersion : undefined}
+            activeContractVersion={connected === true ? 4 : undefined}
             disabled={sendingDisabled}
             allowImageUpload={allowImageUpload}
             onClarificationDraftChange={onClarificationDraftChange}

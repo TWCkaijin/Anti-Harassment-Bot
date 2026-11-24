@@ -66,7 +66,7 @@ export async function runScriptBatch(options: {
         { role: 'user' as const, content: turn.request.message },
         { role: 'assistant' as const, content: turn.result?.response.reply ?? JSON.stringify(turn.prediction) },
       ]);
-      const request: ChatRequest = { ...createChatRequest(history, test.turns[number - 1], undefined, 4), contract_version: 4,
+      const request: ChatRequest = { ...createChatRequest(history, test.turns[number - 1]),
         case_context: structuredClone(completed.at(-1)?.contextAfter ?? emptySummaryContext()), use_rag: run.overrides.pipeline?.enable_rag !== false };
       let approved: ChatRequest | null;
       try { approved = await preparePrivateRequest(createPrivacyDraft(request, options.hiddenTerms ?? []).request, async draft => draft, signal); }

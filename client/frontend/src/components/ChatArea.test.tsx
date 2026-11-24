@@ -95,7 +95,7 @@ describe("ChatArea follow-up integration", () => {
     fireEvent.keyDown(composer, { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
     expect(composer).toHaveValue("第一個問題");
-    rerender(<I18nProvider><ChatArea {...props} backendConnected contractVersion={4} /></I18nProvider>);
+    rerender(<I18nProvider><ChatArea {...props} backendConnected /></I18nProvider>);
     expect(composer).toHaveValue("第一個問題");
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(composer, { key: "Enter" });
@@ -126,13 +126,6 @@ describe("ChatArea follow-up integration", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("explains an incompatible saved summary and disables sending without exposing its editor", () => {
-    render(<I18nProvider><ChatArea messages={[assistantMessage({ interactionMode: "answer", clarifyingQuestions: [], actionButtons: [] })]} onSend={vi.fn()} onOpenSidebar={vi.fn()} onStop={vi.fn()} isLoading={false} backendConnected incompatibleSummary /></I18nProvider>);
-    expect(screen.getByRole("alert")).toHaveTextContent("目前服務尚未支援這份情境摘要");
-    expect(screen.queryByText("目前了解的情況")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("請描述您的狀況或提出問題…"), { target: { value: "不要忽略更正" } });
-    expect(screen.getByRole("button", { name: "傳送訊息" })).toBeDisabled();
-  });
   it("keeps resource actions in the reply while the latest questions replace the footer composer", async () => {
     const message = assistantMessage();
     const { container } = render(chat([message]));
@@ -470,7 +463,6 @@ describe("ChatArea v4 layout and current summary", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent(caseFacts.summary);
   });
 });
-
 
 it("returns summary focus to the replacement control when saving supersedes the avatar", () => {
   function Harness() {

@@ -18,7 +18,7 @@ export function sanitizeBehaviorData(value: unknown, depth = 0): unknown {
 }
 export function sanitizeBehaviorResult(result: AdminChatTestResult): AdminChatTestResult {
   const clean = sanitizeBehaviorData(result) as AdminChatTestResult;
-  const response = parseChatResponse(clean.response, 4);
+  const response = parseChatResponse(clean.response);
   // Restrict persisted response fields to the public contract.
   const fields = ["reply", "session_id", "anonymized", "rag_used", "emotion", "emotion_color", "suggested_replies", "action_buttons", "interaction_mode", "clarifying_questions", "contract_version", "context_revision", "summary_update", "clarification", "execution", "analysis", "answer_sections"];
   return { response: Object.fromEntries(fields.filter(key => key in response).map(key => [key, response[key as keyof typeof response]])) as unknown as typeof response, diagnostics: clean.diagnostics };

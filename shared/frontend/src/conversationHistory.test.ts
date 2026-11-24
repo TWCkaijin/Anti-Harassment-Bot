@@ -104,13 +104,11 @@ describe("buildChatHistory", () => {
 });
 
 describe("createChatRequest", () => {
-  it("retains the legacy history budget until v2 capability is confirmed", () => {
+  it("sends the current contract and leaves the history policy to the server", () => {
     const messages = Array.from({ length: 7 }, (_, index) => [{ role: "user" as const, content: `Q${index}` }, { role: "assistant" as const, content: `A${index}` }]).flat();
-    expect(createChatRequest(messages, "下一題").history).toHaveLength(14);
-    expect(createChatRequest(messages, "下一題", undefined, 2).history).toHaveLength(8);
+    expect(createChatRequest(messages, "下一題")).toMatchObject({ contract_version: 4, history: messages });
     const longTurns = Array.from({ length: 3 }, () => [{ role: "user" as const, content: "Q".repeat(2000) }, { role: "assistant" as const, content: "A".repeat(2000) }]).flat();
     expect(createChatRequest(longTurns, "下一題").history.reduce((sum, message) => sum + message.content.length, 0)).toBe(12_000);
-    expect(createChatRequest(longTurns, "下一題", undefined, 2).history.reduce((sum, message) => sum + message.content.length, 0)).toBe(4_000);
   });
   it("preserves the image-only request contract", () => {
     expect(createChatRequest([], "   ", "data:image/png;base64,AAAA")).toEqual({
@@ -118,6 +116,7 @@ describe("createChatRequest", () => {
       history: [],
       use_rag: true,
       image_base64: "data:image/png;base64,AAAA",
+      contract_version: 4,
     });
   });
 

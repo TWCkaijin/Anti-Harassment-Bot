@@ -137,24 +137,14 @@ const chatResponse = {
   action_buttons: [],
   interaction_mode: "answer",
   clarifying_questions: [],
+  contract_version: 4,
+  context_revision: 0,
+  summary_update: null,
+  clarification: null,
+  execution: { route: "direct_retrieval", model_calls: 1 },
+  analysis: [],
 };
 const chatRequest = { message: "你好", history: [], use_rag: true };
-it("validates typed done metadata and rejects malformed facts", () => {
-  const response = { ...chatResponse, contract_version: 2, facts_revision: 0, fact_updates: [], clarification: null, answer_sections: [], execution: { route: "tool", model_calls: 1 } };
-  expect(parseChatResponse(response)).toEqual(response);
-  expect(() => parseChatResponse({ ...response, fact_updates: [{ fact_key: "name", status: "provided", value: "secret", evidence: "secret", kind: "explicit" }] })).toThrow();
-  expect(() => parseChatResponse({ ...response, facts_revision: -1 })).toThrow();
-});
-it("rejects extra fact metadata, absent evidence and unsafe clarification shapes", () => {
-  const response = { ...chatResponse, contract_version: 2, facts_revision: 0, fact_updates: [], clarification: null, answer_sections: [], execution: { route: "tool", model_calls: 1 } };
-  const update = { fact_key: "other_role", status: "provided", value: "主管", evidence: "我的主管", kind: "confirmation" };
-  expect(() => parseChatResponse({ ...response, fact_updates: [{ ...update, person_name: "private" }] })).toThrow();
-  expect(() => parseChatResponse({ ...response, fact_updates: [{ ...update, evidence: undefined }] })).toThrow();
-  expect(() => parseChatResponse({ ...response, fact_updates: [{ ...update, evidence: "   " }] })).toThrow();
-  const clarification = { question_id: "case.other_role.0", fact_key: "other_role", reason: "影響方向", question: "對方是？", options: [{ label: "主管", value: "主管" }] };
-  expect(() => parseChatResponse({ ...response, clarification: { ...clarification, private_detail: "private" } })).toThrow();
-  expect(() => parseChatResponse({ ...response, clarification: { ...clarification, options: [{ label: "主管", value: "主管", private_detail: "private" }] } })).toThrow();
-});
 it.each([{}, [null], [{ label: {} }], [{ label: "法規", source_url: {} }], [{ label: "法規", type: "made-up" }]])("rejects malformed retrieved sources before rendering: %j", sources => {
   expect(() => parseChatResponse({ ...chatResponse, rag_used: { status: true, sources } })).toThrow();
 });
@@ -164,31 +154,26 @@ it("accepts nullable optional source metadata from older APIs", () => {
 });
 const encoder = new TextEncoder();
 
-describe("negotiated response versions", () => {
-  const responseFor = (version: 1 | 2 | 3 | 4 | 5) => version === 1 ? chatResponse : {
-    ...chatResponse, contract_version: version, facts_revision: 0, fact_updates: [], clarification: null,
-    answer_sections: [], execution: { route: "direct_retrieval", model_calls: 1 }, analysis: [], context_revision: 0, summary_update: null,
-  };
-  it.each([1, 2, 3, 4] as const)("accepts matching version %i via JSON", async version => {
-    const response = responseFor(version);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json" } })));
-    expect(await sendChat({ ...chatRequest, ...(version === 1 ? {} : { contract_version: version }) })).toEqual(response);
+describe("contract version checks", () => {
+  const { contract_version: _omitted, ...unversioned } = chatResponse;
+  void _omitted;
+  const responseFor = (version: 1 | 2 | 3 | 5) => version === 1 ? unversioned : { ...chatResponse, contract_version: version };
+  it("accepts a v4 response, including for a request that omits the version", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(JSON.stringify(chatResponse), { headers: { "Content-Type": "application/json" } })));
+    expect(await sendChat({ ...chatRequest, contract_version: 4 })).toEqual(chatResponse);
+    expect(await sendChat(chatRequest)).toEqual(chatResponse);
   });
-  it.each([1, 2, 3, 5] as const)("rejects a v4 JSON response with version %i without retry permission", async version => {
+  it.each([1, 2, 3, 5] as const)("rejects a JSON response with version %i without retry permission", async version => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(responseFor(version)), { headers: { "Content-Type": "application/json" } })));
     await expect(sendChat({ ...chatRequest, contract_version: 4 })).rejects.toMatchObject({ status: 502, retryable: false, message: "回覆協定版本不符" });
   });
-  it.each([1, 2, 3, 5] as const)("rejects a v4 SSE done with version %i while retaining already received text", async version => {
+  it.each([1, 2, 3, 5] as const)("rejects an SSE done with version %i while retaining already received text", async version => {
     const { controller } = streamResponse();
     const onDelta = vi.fn();
     const request = sendChat({ ...chatRequest, contract_version: 4 }, undefined, onDelta);
     controller.enqueue(encoder.encode(eventText("delta", { text: "尚未完成" }) + eventText("done", responseFor(version))));
     await expect(request).rejects.toMatchObject({ status: 502, retryable: false, message: "回覆協定版本不符" });
     expect(onDelta).toHaveBeenCalledExactlyOnceWith("尚未完成");
-  });
-  it("rejects a versioned response to an unversioned v1 request", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(responseFor(2)), { headers: { "Content-Type": "application/json" } })));
-    await expect(sendChat(chatRequest)).rejects.toMatchObject({ status: 502, retryable: false });
   });
 });
 
@@ -221,41 +206,40 @@ describe("v4 summary and reasoning protocol", () => {
   });
 });
 
-describe("v3 protocol and isolated admin requests", () => {
+describe("analysis, source metadata and isolated admin requests", () => {
   const analysis = { stage: "sources", summary: "已檢查引用來源", facts: [], source_labels: ["測試法第1條"], limitations: ["尚未确认適用關係"] };
-  const v3Response = { ...chatResponse, contract_version: 3, facts_revision: 2, fact_updates: [], clarification: null, answer_sections: [], execution: { route: "direct_retrieval", model_calls: 1 }, analysis: [analysis] };
-  it("accepts official law metadata and array facts without dropping their structure", () => {
+  const v4Response = { ...chatResponse, analysis: [analysis] };
+  it("accepts official law metadata without dropping its structure", () => {
     const source = { label: "測試法第1條", type: "law", law_name: "測試法", article_number: "1", checked_at: "2026-09-30", effective_date: "2024-03-08", promulgated_date: "2023-08-16", effective_note: "日期屬法規版本資料", promulgated_date_scope: "law_latest_amendment_not_article_specific", effective_date_scope: "law_version_not_article_specific", source_url: "https://law.moj.gov.tw/", article: "合成測試條文" };
-    const response = { ...v3Response, fact_updates: [{ fact_key: "subject_role", status: "provided", value: ["學生", "員工"], evidence: "我是學生也是員工", kind: "explicit" }], rag_used: { status: true, sources: [source] } };
+    const response = { ...v4Response, rag_used: { status: true, sources: [source] } };
     expect(parseChatResponse(response)).toEqual(response);
-    expect(() => parseChatResponse({ ...response, contract_version: 2 })).toThrow();
   });
   it("only displays typed questions for clarify responses while preserving signed scenario metadata", () => {
-    const clarification = { question_id: "scenario.role.2", fact_key: "subject_role", reason: "釐清情境", question: "朋友的身分？", options: [{ label: "學生", value: "學生" }], selection_mode: "multiple", max_selections: 2, validation_token: "signed", context_scope: "scenario" };
-    expect(parseChatResponse({ ...v3Response, interaction_mode: "clarify", clarification }).clarification).toEqual(clarification);
-    expect(parseChatResponse({ ...v3Response, clarification }).clarification).toBeNull();
+    const clarification = { question_id: "scenario.role.2", context_revision: 0, reason: "釐清情境", question: "朋友的身分？", options: [{ label: "學生", value: "學生" }], selection_mode: "multiple", max_selections: 2, validation_token: "signed", context_scope: "scenario" };
+    expect(parseChatResponse({ ...v4Response, interaction_mode: "clarify", clarification }).clarification).toEqual(clarification);
+    expect(parseChatResponse({ ...v4Response, clarification }).clarification).toBeNull();
   });
   it("rejects invalid analysis rather than exposing arbitrary model metadata", () => {
-    expect(() => parseChatResponse({ ...v3Response, analysis: [{ ...analysis, reasoning: "private" }] })).toThrow();
-    expect(() => parseChatResponse({ ...v3Response, analysis: [{ ...analysis, facts: "invalid" }] })).toThrow();
-    expect(() => parseChatResponse({ ...v3Response, analysis: undefined })).toThrow();
+    expect(() => parseChatResponse({ ...v4Response, analysis: [{ ...analysis, reasoning: "private" }] })).toThrow();
+    expect(() => parseChatResponse({ ...v4Response, analysis: [{ ...analysis, facts: "invalid" }] })).toThrow();
+    expect(() => parseChatResponse({ ...v4Response, analysis: undefined })).toThrow();
   });
   it("delivers validated analysis events and final analysis through the same stream", async () => {
     const { controller } = streamResponse();
     const onAnalysis = vi.fn();
-    const request = sendChat({ ...chatRequest, contract_version: 3 }, undefined, undefined, undefined, undefined, onAnalysis);
-    controller.enqueue(encoder.encode(eventText("analysis", analysis) + eventText("done", v3Response)));
-    expect(await request).toEqual(v3Response);
+    const request = sendChat({ ...chatRequest, contract_version: 4 }, undefined, undefined, undefined, undefined, onAnalysis);
+    controller.enqueue(encoder.encode(eventText("analysis", analysis) + eventText("done", v4Response)));
+    expect(await request).toEqual(v4Response);
     expect(onAnalysis).toHaveBeenCalledExactlyOnceWith(analysis);
   });
   it("uses only the authenticated diagnostic endpoint for one-request partial overrides", async () => {
-    const response = { response: v3Response, diagnostics: { history: { removed_messages: 2 }, effective_config: { pipeline: { trim_history: false } } } };
+    const response = { response: v4Response, diagnostics: { history: { removed_messages: 2 }, effective_config: { pipeline: { trim_history: false } } } };
     const fetchMock = queuedResult(response);
     vi.stubGlobal("fetch", fetchMock);
     const overrides = { pipeline: { trim_history: false } };
-    expect(await runAdminChatTest("admin-token", { ...chatRequest, contract_version: 3 }, overrides)).toEqual(response);
+    expect(await runAdminChatTest("admin-token", { ...chatRequest, contract_version: 4 }, overrides)).toEqual(response);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/v1/admin/test-jobs"), expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ request: { ...chatRequest, contract_version: 3 }, overrides }) }));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/v1/admin/test-jobs"), expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ request: { ...chatRequest, contract_version: 4 }, overrides }) }));
   });
 });
 const eventText = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -326,7 +310,7 @@ describe("isolated applicable-law admin contract", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(runApprovedAdminApplicableLawTest("admin-token", { ...chatRequest, contract_version: 4 }, {})).rejects.toMatchObject({ code: "review_required" });
     await expect(runAdminApplicableLawTest(" ", { ...chatRequest, contract_version: 4 }, {})).rejects.toMatchObject({ status: 401 });
-    await expect(runAdminApplicableLawTest("admin-token", { ...chatRequest, contract_version: 3 }, {})).rejects.toMatchObject({ status: 422 });
+    await expect(async () => runAdminApplicableLawTest("admin-token", { ...chatRequest, contract_version: 3 as never }, {})).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -611,7 +595,6 @@ it.each([undefined, null, "", " \n", "字".repeat(301), 123])("rejects an absten
     expect(() => parseAdminApplicableLawTestResult({ output_contract: "applicable_laws_v1", diagnostics: {}, prediction: { predicted_laws: [], decision_status, decision_reason } })).toThrow("適用法規預測格式不正確");
   }
 });
-
 
 it("sends the independent chat-test fingerprint only on the authenticated admin request", async () => {
   const { behaviorResult } = await import("../test/behaviorFixture");

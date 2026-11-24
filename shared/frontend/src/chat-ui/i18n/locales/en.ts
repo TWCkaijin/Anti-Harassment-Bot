@@ -179,7 +179,6 @@ const en = {
   storageInvalid: "Some saved records cannot be read. Saving has paused to protect the original data. Export readable content before clearing records.",
   storageFuture: "Saved records use a newer format. Saving is paused; open them with a newer version.",
   storageChanged: "Another tab updated your conversations. Sending and saving are paused here; reload this tab to continue.",
-  incompatibleSummary: "This service has not confirmed support for your summary. Sending is paused to avoid ignoring corrected details. You can start a new chat; the original summary remains on this device.",
   answerDirection: "Possible direction",
   answerBasis: "Supporting sources",
   answerNextSteps: "Next steps",

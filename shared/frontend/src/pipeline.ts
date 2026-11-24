@@ -1,3 +1,5 @@
+import type { CHAT_CONTRACT_VERSION } from "./api";
+
 export interface PipelineSettings {
   mask_message: boolean;
   mask_case_context: boolean;
@@ -22,7 +24,7 @@ export const DEFAULT_PIPELINE: PipelineSettings = {
 };
 
 export interface ClientSettings {
-  contract_version: 3 | 4;
+  contract_version: typeof CHAT_CONTRACT_VERSION;
   pipeline: Pick<PipelineSettings, "trim_history" | "history_max_messages" | "history_max_chars" | "model_selection_mode" | "enable_analysis">;
   enable_image_upload: boolean;
   enable_reasoning_display?: boolean;

@@ -3,7 +3,7 @@
  * 所有與後端通訊皆透過此模組，方便統一管理 base URL 與錯誤處理。
  */
 
-import { isClarification, isFactUpdate, isSummaryUpdate, type SummaryUpdate, type CaseContext, type Clarification, type ClarificationAnswer, type FactUpdate } from "./caseFacts";
+import { isClarification, isSummaryUpdate, type SummaryUpdate, type CaseContext, type Clarification, type ClarificationAnswer } from "./caseFacts";
 import { isAnalysisEntry, sanitizeAnalysis, type AnalysisEntry } from "./analysis";
 import { isReasoningEntry, type ReasoningEntry } from "./reasoning";
 import type { ClientSettings, PipelineSettings } from "./pipeline";
@@ -23,12 +23,16 @@ export interface MessageItem {
   content: string;
 }
 
+/** The only chat contract the backend accepts. */
+export const CHAT_CONTRACT_VERSION = 4;
+
 export interface ChatRequest {
   message: string;
   history: MessageItem[];
   use_rag: boolean;
   image_base64?: string;
-  contract_version?: 2 | 3 | 4;
+  /** Optional: the backend assumes the current contract when it is omitted. */
+  contract_version?: typeof CHAT_CONTRACT_VERSION;
   case_context?: CaseContext;
   clarification_answer?: ClarificationAnswer;
   regenerate_from_summary?: boolean;
@@ -85,12 +89,11 @@ export interface ChatResponse {
   interaction_mode: "answer" | "clarify";
   clarifying_questions: string[];
   debug_tool_calls?: DebugToolCall[];
-  contract_version?: 2 | 3 | 4;
+  contract_version?: typeof CHAT_CONTRACT_VERSION;
   context_revision?: number;
   summary_update?: SummaryUpdate | null;
-  facts_revision?: number;
-  fact_updates?: FactUpdate[];
   clarification?: Clarification | null;
+  /** Only present in conversations saved under the retired v2/v3 contract. */
   answer_sections?: Array<{ kind: "direction" | "basis" | "next_steps"; text: string; source_ids: string[] }>;
   execution?: { route: string; model_calls: number };
   analysis?: AnalysisEntry[];
@@ -409,7 +412,7 @@ function invalidStream(): ApiError {
 }
 
 export function assertResponseContract(request: ChatRequest, response: ChatResponse): void {
-  if ((response.contract_version ?? 1) !== (request.contract_version ?? 1)) {
+  if (response.contract_version !== (request.contract_version ?? CHAT_CONTRACT_VERSION)) {
     throw new ApiError(502, "回覆協定版本不符", "服務回覆與本次要求的版本不符，請重新連線後再試。", false);
   }
 }
@@ -441,7 +444,6 @@ const RAG_SOURCE_ALLOWED_KEYS = new Set<string>([
 const RAG_SOURCE_TYPES = new Set<string>(["law", "judgment", "remedy", "unknown"]);
 const RETRIEVAL_STATUSES = new Set<string>(["ok", "empty", "failed", "disabled", "not_requested"]);
 const RETRIEVAL_DATA_TYPES = new Set<string>(["law", "judgment", "remedy"]);
-const ANSWER_SECTION_KINDS = new Set<string>(["direction", "basis", "next_steps"]);
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -455,35 +457,7 @@ function isValidExecutionSummary(value: unknown): value is { route: string; mode
   );
 }
 
-function isValidAnswerSection(
-  value: unknown,
-): value is NonNullable<ChatResponse["answer_sections"]>[number] {
-  return (
-    isRecord(value) &&
-    ANSWER_SECTION_KINDS.has(String(value.kind)) &&
-    typeof value.text === "string" &&
-    Array.isArray(value.source_ids) &&
-    value.source_ids.every((id): id is string => typeof id === "string")
-  );
-}
-
-export function parseChatResponse(
-  payload: unknown,
-  expectedContractVersion?: number,
-): ChatResponse {
-  if (
-    expectedContractVersion !== undefined &&
-    isRecord(payload) &&
-    (payload.contract_version ?? 1) !== expectedContractVersion
-  ) {
-    throw new ApiError(
-      502,
-      "回覆協定版本不符",
-      "服務回覆與本次要求的版本不符，請重新連線後再試。",
-      false,
-    );
-  }
-
+export function parseChatResponse(payload: unknown): ChatResponse {
   if (
     !isRecord(payload) ||
     typeof payload.reply !== "string" ||
@@ -501,44 +475,22 @@ export function parseChatResponse(
     throw invalidStream();
   }
 
-  const version = payload.contract_version;
-  if (version !== undefined && version !== 2 && version !== 3 && version !== 4) {
-    throw invalidStream();
+  if (payload.contract_version !== CHAT_CONTRACT_VERSION) {
+    throw new ApiError(
+      502,
+      "回覆協定版本不符",
+      "服務回覆與本次要求的版本不符，請重新連線後再試。",
+      false,
+    );
   }
 
-  if (version === 2 || version === 3) {
-    if (
-      !isNonNegativeSafeInteger(payload.facts_revision) ||
-      !Array.isArray(payload.fact_updates) ||
-      payload.fact_updates.length > 13 ||
-      !payload.fact_updates.every(isFactUpdate) ||
-      (payload.clarification !== null && !isClarification(payload.clarification, version)) ||
-      !Array.isArray(payload.answer_sections) ||
-      payload.answer_sections.length > 6 ||
-      !payload.answer_sections.every(isValidAnswerSection) ||
-      !isValidExecutionSummary(payload.execution) ||
-      (version === 2 && payload.fact_updates.some((update) => Array.isArray(update.value)))
-    ) {
-      throw invalidStream();
-    }
-  }
-
-  if (version === 4) {
-    const validV4 =
-      isNonNegativeSafeInteger(payload.context_revision) &&
-      (payload.summary_update === null || isSummaryUpdate(payload.summary_update)) &&
-      (payload.clarification === null || isClarification(payload.clarification, 4)) &&
-      isValidExecutionSummary(payload.execution);
-
-    if (!validV4) throw invalidStream();
-  }
-
-  if ((version === 3 || version === 4) && sanitizeAnalysis(payload.analysis) === undefined) {
-    throw invalidStream();
-  }
-  if (payload.analysis !== undefined && sanitizeAnalysis(payload.analysis) === undefined) {
-    throw invalidStream();
-  }
+  const validV4 =
+    isNonNegativeSafeInteger(payload.context_revision) &&
+    (payload.summary_update === null || isSummaryUpdate(payload.summary_update)) &&
+    (payload.clarification === null || isClarification(payload.clarification, 4)) &&
+    isValidExecutionSummary(payload.execution) &&
+    sanitizeAnalysis(payload.analysis) !== undefined;
+  if (!validV4) throw invalidStream();
 
   return {
     ...payload,
@@ -609,7 +561,6 @@ async function readChatStream(
   onAnalysis?: (analysis: AnalysisEntry) => void,
   onReasoning?: (reasoning: ReasoningEntry) => void,
   onRetract?: (retraction: ChatRetraction) => void,
-  expectedContractVersion?: number,
 ): Promise<ChatResponse> {
   if (!response.body) throw invalidStream();
   const reader = response.body.getReader();
@@ -673,7 +624,7 @@ async function readChatStream(
         if (Object.keys(guidance).length > 0) onGuidance?.(guidance);
       } else if (eventName === "done") {
         if (payload.turn_id !== undefined && (typeof payload.turn_id !== "string" || (turnId && turnId !== payload.turn_id))) throw invalidStream();
-        result = parseChatResponse(payload, expectedContractVersion);
+        result = parseChatResponse(payload);
       } else {
         throw new ApiError(
           typeof payload.status === "number" ? payload.status : 502,
@@ -755,8 +706,8 @@ export async function sendChat(
     receivedActivity();
     if (!response.ok) await throwResponseError(response);
     const result = !response.headers.get("content-type")?.includes("text/event-stream")
-      ? parseChatResponse(await response.json(), request.contract_version ?? 1)
-      : await readChatStream(response, guard.signal, onDelta, onGuidance, onProgress, receivedActivity, onAnalysis, onReasoning, onRetract, request.contract_version ?? 1);
+      ? parseChatResponse(await response.json())
+      : await readChatStream(response, guard.signal, onDelta, onGuidance, onProgress, receivedActivity, onAnalysis, onReasoning, onRetract);
     assertResponseContract(request, result);
     return result;
   } catch (error) {
