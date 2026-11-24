@@ -1,4 +1,4 @@
-interface Token { id: number; start: number; end: number }
+export interface Token { id: number; start: number; end: number }
 interface Character { text: string; start: number; end: number }
 const punctuation = /[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e\p{P}]/u;
 const whitespace = /[\t\n\r\p{Zs}]/u;

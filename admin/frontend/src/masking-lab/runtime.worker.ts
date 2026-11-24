@@ -5,11 +5,8 @@ import { MaskingError } from "./extraction";
 import { TINY_ASSET_PATH, TINY_REVISION } from "./config";
 import { compactSpans, detectRuleSpans, prioritizeRules } from "./rules";
 import { TinyTokenizer } from "./wordpiece";
+import { decodeEntitySpans } from "./entityDecoding";
 import type { EntitySpan, WorkerCommand, WorkerEvent } from "./types";
-
-const LABEL_COUNT = 73;
-const people = [14, 32, 50, 68];
-const organizations = [12, 30, 48, 66];
 
 let model: { session: InferenceSession; tokenizer: TinyTokenizer } | undefined;
 
@@ -53,25 +50,8 @@ async function detectTiny(source: string, { tokenizer, session }: NonNullable<ty
     const { logits } = await session.run({ input_ids: ids, attention_mask: mask, token_type_ids: types });
     try {
       const data = logits.data;
-      if (!(data instanceof Float32Array) || data.length !== tokens.length * LABEL_COUNT) throw new MaskingError("tiny_invalid_output");
-      let current: EntitySpan | undefined;
-      const flush = () => { if (current) spans.push(current); current = undefined; };
-      for (const [index, token] of tokens.entries()) {
-        const offset = index * LABEL_COUNT;
-        let label = 0;
-        for (let next = 1; next < LABEL_COUNT; next++) {
-          if (data[offset + next] > data[offset + label]) label = next;
-        }
-        const person = people.indexOf(label), organization = organizations.indexOf(label);
-        const kind = token.end <= token.start ? null : person >= 0 ? "person" : organization >= 0 ? "organization" : null;
-        const tag = kind === "person" ? person : organization;
-        if (!kind || tag === 0 || tag === 3 || (current && (current.type !== kind || current.end !== token.start))) flush();
-        if (kind) {
-          current = { start: current?.start ?? token.start, end: token.end, type: kind };
-          if (tag === 2 || tag === 3) flush();
-        }
-      }
-      flush();
+      if (!(data instanceof Float32Array)) throw new MaskingError("tiny_invalid_output");
+      spans.push(...decodeEntitySpans(tokens, data));
     } finally {
       logits.dispose();
       ids.dispose(); mask.dispose(); types.dispose();
