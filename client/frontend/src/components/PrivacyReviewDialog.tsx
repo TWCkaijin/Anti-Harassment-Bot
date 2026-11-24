@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { approvePrivacyDraft, createPrivacyDraft, type PrivacyDraft } from "../services/clientPrivacy";
 import type { ChatRequest } from "../services/api";
+import { errorMessage } from "@rag/shared/browser";
 
 interface PrivacyReviewDialogProps {
   initialDraft: PrivacyDraft;
@@ -43,7 +44,7 @@ export default function PrivacyReviewDialog({ initialDraft, onConfirm, onCancel 
       setDraft(previous => createPrivacyDraft(editField(previous.request, path, value), hiddenTerms(appliedTerms)));
       setError(null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "無法編輯欄位。");
+      setError(errorMessage(failure, "無法編輯欄位。"));
     }
   };
   const applyTerms = () => {
@@ -52,7 +53,7 @@ export default function PrivacyReviewDialog({ initialDraft, onConfirm, onCancel 
       setAppliedTerms(terms);
       setError(null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "無法套用隱藏詞。");
+      setError(errorMessage(failure, "無法套用隱藏詞。"));
     }
   };
   const confirm = () => {
@@ -63,7 +64,7 @@ export default function PrivacyReviewDialog({ initialDraft, onConfirm, onCancel 
       approvePrivacyDraft(draft);
       onConfirm(draft);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "請修正送出內容。");
+      setError(errorMessage(failure, "請修正送出內容。"));
     }
   };
   const keepFocus = (event: KeyboardEvent<HTMLDivElement>) => {

@@ -3,6 +3,8 @@ import { createPrivacyDraft } from '@rag/shared/clientPrivacy';
 import { getRerankModels, type RuntimeConfig } from '../services/api';
 import { cancelCorpusJob, retryCorpusJob, getSource, type CorpusRecord, type CorpusSource } from '../services/corpus';
 import * as api from '../services/rerankTests';
+import { errorMessage } from "@rag/shared/browser";
+import { downloadBlob } from "@rag/shared/browser";
 
 const kinds: api.Kind[] = ['law', 'judgment', 'remedy'];
 const stages: api.Stage[] = ['candidate', 'before', 'model', 'final'];
@@ -34,7 +36,7 @@ export default function AdminRerankTests({ csrfToken, config, active }: { csrfTo
   async function perform(action: () => Promise<void>) {
     if (!active || busy) return;
     setError(''); setBusy(true);
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    try { await action(); } catch (e) { setError(errorMessage(e, String(e))); } finally { setBusy(false); }
   }
   useEffect(() => {
     if (!active) return;
@@ -70,8 +72,7 @@ export default function AdminRerankTests({ csrfToken, config, active }: { csrfTo
   }
   async function download(format: 'json' | 'csv') {
     if (!run) return;
-    const blob = await api.downloadRun(run.id, format); const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a'); anchor.href = url; anchor.download = `rerank-${run.id}.${format}`; anchor.click(); URL.revokeObjectURL(url);
+    downloadBlob(await api.downloadRun(run.id, format), `rerank-${run.id}.${format}`);
   }
   return <div className="mx-auto max-w-6xl space-y-6" aria-label="Rerank 測試">
     <header><h3 className="text-xl font-bold">Rerank 測試</h3><p className="text-sm">量測相對人工標註來源的召回率。K 是片段數：先取前 K 筆，再以法條／來源去重。</p></header>
@@ -144,7 +145,7 @@ function CaseEditor({ dataset, onSaved, token, settings, active, external }: { d
   async function perform(action: () => Promise<void>) {
     if (!active || busy) return;
     setBusy(true); setError('');
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    try { await action(); } catch (e) { setError(errorMessage(e, String(e))); } finally { setBusy(false); }
   }
   function load(value?: api.EvaluationCase) {
     setId(value?.id ?? null); setRaw(value?.query ?? ''); setHidden(''); setPreview(value?.query ?? null); setApproved(!!value);

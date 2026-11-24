@@ -5,11 +5,12 @@ import { batchConfig, fixtureWorkbook, tabularFixtureWorkbook } from '../test/sc
 import { behaviorConfig, behaviorResult } from '../test/behaviorFixture';
 import { getRuntimeConfig, runAdminApplicableLawTest, runAdminChatTest } from '../services/api';
 import { reviewedRequestBody } from '../services/clientPrivacy';
-import { downloadLocalFile, parseScenarioWorkbook } from '../services/scenarioWorkbook';
+import { parseScenarioWorkbook } from '../services/scenarioWorkbook';
+import { downloadBlob } from '@rag/shared/browser';
 import AdminBatchPrediction from './AdminBatchPrediction';
 
 vi.mock('../services/api', async () => ({ ...await vi.importActual('../services/api'), getRuntimeConfig: vi.fn(), runAdminApplicableLawTest: vi.fn(), runAdminChatTest: vi.fn() }));
-vi.mock('../services/scenarioWorkbook', async () => ({ ...await vi.importActual('../services/scenarioWorkbook'), downloadLocalFile: vi.fn() }));
+vi.mock('@rag/shared/browser', async () => ({ ...await vi.importActual('@rag/shared/browser'), downloadBlob: vi.fn() }));
 vi.mock('../services/batchRunner', async importOriginal => {
   const actual = await importOriginal<typeof import('../services/batchRunner')>();
   return { ...actual, runScriptBatch: (options: Parameters<typeof actual.runScriptBatch>[0]) => actual.runScriptBatch({ ...options, delayMs: 0 }) };
@@ -34,7 +35,7 @@ beforeEach(() => {
   vi.mocked(getRuntimeConfig).mockReset().mockResolvedValue(behaviorConfig);
   vi.mocked(runAdminApplicableLawTest).mockReset().mockResolvedValue(lawResult);
   vi.mocked(runAdminChatTest).mockReset().mockImplementation(async (_token, request) => behaviorResult(request));
-  vi.mocked(downloadLocalFile).mockClear();
+  vi.mocked(downloadBlob).mockClear();
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -51,9 +52,9 @@ describe('unified batch workflow', () => {
     expect(screen.getByLabelText('並行案例')).toBeDisabled();
     expect(screen.getByRole('button', { name: '確認送出並開始預測' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '下載送出預覽' }));
-    expect(downloadLocalFile).toHaveBeenCalledWith(expect.not.stringContaining('test@example.com'), 'batch-preview.json', 'application/json');
+    expect(downloadBlob).toHaveBeenCalledWith(expect.not.stringContaining('test@example.com'), 'batch-preview.json', 'application/json');
     fireEvent.click(screen.getByRole('button', { name: '下載結果 Excel' }));
-    const [bytes] = vi.mocked(downloadLocalFile).mock.calls.at(-1)!;
+    const [bytes] = vi.mocked(downloadBlob).mock.calls.at(-1)!;
     expect(parseScenarioWorkbook(bytes as Uint8Array, 'copy.xlsx').sheets[0].rows.get(2)?.get(4)).toBe('待執行');
   });
   it('selects another sheet and sends only its input to the authenticated job API', async () => {
@@ -87,7 +88,7 @@ describe('unified batch workflow', () => {
     expect(JSON.stringify(requests)).not.toContain('gold');
     expect(runAdminApplicableLawTest).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '下載結果 Excel' }));
-    const copy = parseScenarioWorkbook(vi.mocked(downloadLocalFile).mock.calls.at(-1)![0] as Uint8Array, 'copy.xlsx');
+    const copy = parseScenarioWorkbook(vi.mocked(downloadBlob).mock.calls.at(-1)![0] as Uint8Array, 'copy.xlsx');
     expect(copy.sheets[0].rows.get(2)?.get(2)).toContain('合成回覆');
     expect(copy.sheets[0].rows.get(2)?.get(10)).toBe('gold');
   });
@@ -113,7 +114,7 @@ describe('unified batch workflow', () => {
     await screen.findByRole('button', { name: '確認送出並繼續未完成預測' });
     expect(runAdminApplicableLawTest).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '下載結果 Excel' }));
-    const copy = parseScenarioWorkbook(vi.mocked(downloadLocalFile).mock.calls.at(-1)![0] as Uint8Array, 'copy.xlsx');
+    const copy = parseScenarioWorkbook(vi.mocked(downloadBlob).mock.calls.at(-1)![0] as Uint8Array, 'copy.xlsx');
     expect(copy.sheets[0].rows.get(2)?.get(4)).toBe('不適用三法');
     expect(copy.sheets[0].rows.get(2)?.get(6)).toBe('合成原因');
     expect(copy.sheets[0].rows.get(5)?.get(4)).toBe('待執行');
@@ -134,7 +135,7 @@ describe('unified batch workflow', () => {
     await screen.findByText(/完成 1 \/ 1 · 失敗 0 · 待執行 0/);
     expect(JSON.stringify(vi.mocked(runAdminApplicableLawTest).mock.calls[0][1])).not.toContain('性平法');
     fireEvent.click(screen.getByRole('button', { name: '下載結果 Excel' }));
-    const copy = parseScenarioWorkbook(vi.mocked(downloadLocalFile).mock.calls.at(-1)![0] as Uint8Array, 'copy.xlsx');
+    const copy = parseScenarioWorkbook(vi.mocked(downloadBlob).mock.calls.at(-1)![0] as Uint8Array, 'copy.xlsx');
     expect(copy.sheets[0].rows.get(2)?.get(5)).toBe('正確');
     expect(copy.sheets[0].rows.get(2)?.get(7)).toBe('性平法、性工法');
     expect(copy.sheets[0].rows.get(2)?.get(8)).toBe('原備註');
@@ -147,7 +148,7 @@ describe('unified batch workflow', () => {
     fireEvent.click(screen.getByText('內建行為案例'));
     fireEvent.click(screen.getByRole('button', { name: '載入 Context' }));
     fireEvent.click(screen.getByRole('button', { name: '下載腳本範本' }));
-    const raw = vi.mocked(downloadLocalFile).mock.calls[0][0] as string;
+    const raw = vi.mocked(downloadBlob).mock.calls[0][0] as string;
     view.unmount();
     render(<AdminBatchPrediction csrfToken="test" onHasDataChange={vi.fn()} />);
     const file = new File([raw], 'preset.json'); Object.defineProperty(file, 'text', { value: async () => raw });

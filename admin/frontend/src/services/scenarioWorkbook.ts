@@ -181,14 +181,6 @@ export function exportScenarioPredictions(workbook: ScenarioWorkbook, sheet: Sce
   return zipSync(entries, { level: 6 });
 }
 
-export function downloadLocalFile(bytes: Uint8Array | string, name: string, type: string): void {
-  const blob = new Blob([typeof bytes === "string" ? bytes : new Uint8Array(bytes)], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a"); link.href = url; link.download = name;
-  document.body.append(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 /** Add a worksheet using fresh package relationships, preserving all original cells. */
 function appendSummarySheet(entries: Record<string, Uint8Array>, rows: (string | number | null)[][]) {
   const workbook = xml(entries["xl/workbook.xml"]);

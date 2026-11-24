@@ -31,6 +31,7 @@ import { preparePrivateRequest } from "../services/privateRequest";
 import type { PrivacyDraft } from "../services/clientPrivacy";
 import { loadConversationStorage, recoverConversationMigration, saveConversationStorage, STORAGE_KEY, type StorageIssue } from "./conversationStorage";
 import { appendProcessingStep, type ConversationMessage, type ProcessingPhase, type ReplyContext, type ProcessingTrace } from "@rag/shared/chat-ui";
+import { errorMessage } from "@rag/shared/browser";
 
 export type { ConversationMessage, ReplyContext } from "@rag/shared/chat-ui";
 
@@ -423,7 +424,7 @@ export function useConversation(sessionId?: string, confirmPrivacyBeforeSending 
         if (contractV2 && request.case_context) caseContext = normalizeCaseContext(request.case_context);
         reviewAccepted = true;
       } catch (failure) {
-        if (isOwner() && !abortController.signal.aborted) setError(failure instanceof Error ? failure.message : "無法準備送出內容，請重新檢查。");
+        if (isOwner() && !abortController.signal.aborted) setError(errorMessage(failure, "無法準備送出內容，請重新檢查。"));
         return false;
       } finally {
         reviewingSessionIdsRef.current.delete(targetSessionId);

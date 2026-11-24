@@ -5,12 +5,12 @@ import { createChatRequest } from "@rag/shared/conversationHistory";
 import { preparePrivateRequest } from "../services/privateRequest";
 import { temporaryOverrides } from "../services/runtimeConfig";
 import type { ConversationMessage, ReplyContext } from "@rag/shared/chat-ui";
+import { errorMessage } from "@rag/shared/browser";
 
 export type TestMode = "chat" | "applicable_laws_v1";
 export interface TestRun { id: number; mode: TestMode; request: ChatRequest; result: AdminChatTestResult | AdminApplicableLawTestResult; comparison: boolean }
 type Message = ConversationMessage & { diagnosticMode?: TestMode };
 type ActiveRequest = { controller: AbortController; userId?: string };
-const describe = (error: unknown) => error instanceof ApiError ? error.detail ?? error.message : error instanceof Error ? error.message : "測試失敗";
 export function predictionText(result: AdminApplicableLawTestResult) {
   return result.prediction.decision_status === "predicted" ? result.prediction.predicted_laws.join("、")
     : result.prediction.decision_status === "insufficient_facts" ? "資訊不足，無法判斷適用法規。" : "不適用三法。";
@@ -68,7 +68,7 @@ export function useDiagnosticChat(csrfToken: string, config: RuntimeConfig, mode
       setRuns(previous => [...previous, { id: ++sequence.current, request, result, mode: selectedMode, comparison }].slice(-2));
     } catch (failure) {
       if (active.current === owner && !owner.controller.signal.aborted) {
-        const detail = describe(failure); setError(detail);
+        const detail = errorMessage(failure, "測試失敗"); setError(detail);
         if (owner.userId) updateMessages([...messagesRef.current, { id: crypto.randomUUID(), role: "assistant", content: detail, timestamp: Date.now(), isError: true, diagnosticMode: selectedMode }]);
       }
     } finally { finish(owner); }
@@ -111,7 +111,7 @@ export function useDiagnosticChat(csrfToken: string, config: RuntimeConfig, mode
       void perform(owner, request, overrides, selectedMode);
       return true;
     } catch (failure) {
-      if (active.current === owner && !owner.controller.signal.aborted) setError(describe(failure));
+      if (active.current === owner && !owner.controller.signal.aborted) setError(errorMessage(failure, "測試失敗"));
       finish(owner); return false;
     }
   };

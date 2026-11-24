@@ -33,7 +33,6 @@ import { exportBehaviorWorkbook } from "../services/behaviorWorkbook";
 import { formatBatchRate, LAW_MATCH_RULE, scoreLawBatch } from "../services/lawBatchScoring";
 import {
   columnName,
-  downloadLocalFile,
   insertScenarioResults,
   MAX_WORKBOOK_BYTES,
   parseScenarioWorkbook,
@@ -42,6 +41,8 @@ import {
 } from "../services/scenarioWorkbook";
 import ReviewForm from "./BatchReviewForm";
 import { BATCH_STATUS_LABELS } from "../services/applicableLawBatch";
+import { errorMessage } from "@rag/shared/browser";
+import { downloadBlob } from "@rag/shared/browser";
 
 interface Props {
   csrfToken: string;
@@ -111,7 +112,7 @@ export default function AdminBatchPrediction({ csrfToken, onHasDataChange }: Pro
 
   const reportError = (failure: unknown) => {
     if (alive.current) {
-      setError(failure instanceof Error ? failure.message : "無法完成操作。");
+      setError(errorMessage(failure, "無法完成操作。"));
     }
   };
 
@@ -311,7 +312,7 @@ export default function AdminBatchPrediction({ csrfToken, onHasDataChange }: Pro
       const filename = workbook
         ? workbook.fileName.replace(/\.xlsx$/i, ".predicted.xlsx")
         : `batch-${run.runId}.xlsx`;
-      downloadLocalFile(
+      downloadBlob(
         bytes,
         filename,
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -707,7 +708,7 @@ export default function AdminBatchPrediction({ csrfToken, onHasDataChange }: Pro
             className={BUTTON_CLASS}
             onClick={() =>
               safeAction(() =>
-                downloadLocalFile(
+                downloadBlob(
                   JSON.stringify(importBatchTemplate(JSON.stringify(template)), null, 2),
                   "batch-template.json",
                   "application/json",
@@ -850,7 +851,7 @@ export default function AdminBatchPrediction({ csrfToken, onHasDataChange }: Pro
               className={BUTTON_CLASS}
               onClick={() =>
                 safeAction(() =>
-                  downloadLocalFile(
+                  downloadBlob(
                     JSON.stringify(
                       run.cases.map((item) => ({
                         id: item.id,
@@ -872,7 +873,7 @@ export default function AdminBatchPrediction({ csrfToken, onHasDataChange }: Pro
               className={BUTTON_CLASS}
               onClick={() =>
                 safeAction(() =>
-                  downloadLocalFile(
+                  downloadBlob(
                     exportScriptRun(run),
                     `batch-${run.runId}.json`,
                     "application/json",

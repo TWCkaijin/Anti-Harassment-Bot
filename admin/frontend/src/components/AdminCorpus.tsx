@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { invalidateReadCache } from "../services/readCache";
-import { ApiError } from "../services/api";
 import {
   confirmImport,
   deleteSource,
@@ -25,6 +24,8 @@ import {
 } from "../services/corpus";
 import CorpusJobs from "./CorpusJobs";
 import { CorpusDrafts, CorpusMapping } from "./CorpusDrafts";
+import { errorMessage } from "@rag/shared/browser";
+import { downloadBlob } from "@rag/shared/browser";
 
 const KIND_LABELS: Record<CorpusKind, string> = {
   law: "法規",
@@ -54,12 +55,6 @@ const VIEW_TABS = [
 ] as const;
 
 type CorpusView = (typeof VIEW_TABS)[number][0];
-
-function errorText(value: unknown): string {
-  if (value instanceof ApiError) return value.detail ?? value.message;
-  if (value instanceof Error) return value.message;
-  return "資料操作失敗";
-}
 
 export default function AdminCorpus({
   csrfToken,
@@ -129,7 +124,7 @@ export default function AdminCorpus({
           }
         }
       } catch (failure) {
-        if (!abort.signal.aborted) setError(errorText(failure));
+        if (!abort.signal.aborted) setError(errorMessage(failure, "資料操作失敗"));
       } finally {
         if (!abort.signal.aborted) setLoading(false);
       }
@@ -173,7 +168,7 @@ export default function AdminCorpus({
       }
       if (!controller.signal.aborted) acceptDraft(value);
     } catch (failure) {
-      if (!controller.signal.aborted) setError(errorText(failure));
+      if (!controller.signal.aborted) setError(errorMessage(failure, "資料操作失敗"));
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
@@ -222,7 +217,7 @@ export default function AdminCorpus({
       const value = await mapImport(draft, mapping, csrfToken);
       if (alive.current) acceptDraft(value);
     } catch (failure) {
-      if (alive.current) setError(errorText(failure));
+      if (alive.current) setError(errorMessage(failure, "資料操作失敗"));
     } finally {
       if (alive.current) setBusy(false);
     }
@@ -236,7 +231,7 @@ export default function AdminCorpus({
       const value = await resumeParse(draft.import_id, csrfToken);
       if (alive.current) acceptDraft(value);
     } catch (failure) {
-      if (alive.current) setError(errorText(failure));
+      if (alive.current) setError(errorMessage(failure, "資料操作失敗"));
     } finally {
       if (alive.current) setBusy(false);
     }
@@ -266,7 +261,7 @@ export default function AdminCorpus({
         );
       }
     } catch (failure) {
-      if (!controller.signal.aborted) setError(errorText(failure));
+      if (!controller.signal.aborted) setError(errorMessage(failure, "資料操作失敗"));
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
@@ -278,14 +273,9 @@ export default function AdminCorpus({
     setError("");
     try {
       const blob = await downloadSource(selected.source_id);
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = selected.filename;
-      anchor.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      downloadBlob(blob, selected.filename);
     } catch (failure) {
-      if (alive.current) setError(errorText(failure));
+      if (alive.current) setError(errorMessage(failure, "資料操作失敗"));
     } finally {
       if (alive.current) setBusy(false);
     }
@@ -315,7 +305,7 @@ export default function AdminCorpus({
       );
       if (!controller.signal.aborted) acceptDraft(result);
     } catch (failure) {
-      if (!controller.signal.aborted) setError(errorText(failure));
+      if (!controller.signal.aborted) setError(errorMessage(failure, "資料操作失敗"));
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
@@ -336,7 +326,7 @@ export default function AdminCorpus({
         }
       }
     } catch (failure) {
-      if (alive.current) setError(errorText(failure));
+      if (alive.current) setError(errorMessage(failure, "資料操作失敗"));
     } finally {
       if (alive.current) setBusy(false);
     }
@@ -355,7 +345,7 @@ export default function AdminCorpus({
         setDeleteName("");
       }
     } catch (failure) {
-      if (alive.current) setError(errorText(failure));
+      if (alive.current) setError(errorMessage(failure, "資料操作失敗"));
     } finally {
       if (alive.current) setBusy(false);
     }
@@ -806,7 +796,7 @@ function RecordDetail({
       const value = await getRecord(record.kind, record.id, controller.signal);
       if (!controller.signal.aborted) setLatest(value);
     } catch (failure) {
-      if (!controller.signal.aborted) setError(errorText(failure));
+      if (!controller.signal.aborted) setError(errorMessage(failure, "資料操作失敗"));
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }

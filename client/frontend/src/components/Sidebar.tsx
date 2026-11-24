@@ -5,6 +5,7 @@ import { useI18n } from "@rag/shared/chat-ui";
 import type { ConversationSession } from "../hooks/useConversation";
 import { formatConversationText } from "../services/conversationExport";
 import { hasCaseContext } from "../services/caseFacts";
+import { downloadBlob } from "@rag/shared/browser";
 
 interface SidebarProps {
   sessions: ConversationSession[];
@@ -113,13 +114,7 @@ export default function Sidebar({
 
   const handleExport = (session: ConversationSession) => {
     const exportData = formatConversationText(session, t);
-    const blob = new Blob([exportData], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `chat-${session.title || session.id.slice(0, 8)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(exportData, `chat-${session.title || session.id.slice(0, 8)}.txt`, "text/plain");
     setMenuOpenId(null);
     setMenuPosition(null);
     menuTriggerRef.current?.focus();

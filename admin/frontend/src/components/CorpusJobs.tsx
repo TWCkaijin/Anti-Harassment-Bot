@@ -8,6 +8,7 @@ import {
   retryCorpusJob,
   type CorpusJob,
 } from "../services/corpus";
+import { errorMessage } from "@rag/shared/browser";
 
 const TERMINAL_STATUSES = new Set([
   "succeeded",
@@ -32,12 +33,6 @@ const KIND_LABELS: Record<string, string> = {
   corpus_import: "匯入資料",
   corpus_delete: "刪除來源",
 };
-
-function describeError(error: unknown): string {
-  if (error instanceof ApiError) return error.detail ?? error.message;
-  if (error instanceof Error) return error.message;
-  return "無法取得工作狀態";
-}
 
 export default function CorpusJobs({
   csrfToken,
@@ -96,7 +91,7 @@ export default function CorpusJobs({
         setNextCursor(page.next_cursor);
       })
       .catch((failure) => {
-        if (!abort.signal.aborted) setError(describeError(failure));
+        if (!abort.signal.aborted) setError(errorMessage(failure, "無法取得工作狀態"));
       });
     return () => abort.abort();
   }, [cursor, refresh, refreshKey, csrfToken, activeJobId, active]);
@@ -135,7 +130,7 @@ export default function CorpusJobs({
         }
       } catch (failure) {
         if (abort.signal.aborted) return;
-        setError(describeError(failure));
+        setError(errorMessage(failure, "無法取得工作狀態"));
         if (!(failure instanceof ApiError && [401, 403, 404, 410].includes(failure.status))) {
           const delay =
             failure instanceof AdminRequestError && failure.status === 429
@@ -168,7 +163,7 @@ export default function CorpusJobs({
       setAcknowledged(false);
       setRefresh((value) => value + 1);
     } catch (failure) {
-      setError(describeError(failure));
+      setError(errorMessage(failure, "無法取得工作狀態"));
     } finally {
       setBusy(false);
     }

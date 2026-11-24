@@ -9,6 +9,7 @@ import { useI18n, type Locale } from "@rag/shared/chat-ui";
 import type { ConversationSession } from "../hooks/useConversation";
 import { formatConversationText } from "../services/conversationExport";
 import { TEXT_SIZES, type TextSize } from "../hooks/useTextSizePreference";
+import { downloadBlob } from "@rag/shared/browser";
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -45,7 +46,7 @@ export default function SettingsPanel({
   // ── 匯出為 JSON ──
   const exportAsJson = () => {
     const data = JSON.stringify(sessions, null, 2);
-    downloadFile(data, "conversations.json", "application/json");
+    downloadBlob(data, "conversations.json", "application/json");
   };
 
   // ── 匯出為純文字 ──
@@ -57,19 +58,7 @@ export default function SettingsPanel({
       text += formatConversationText(session, t);
       text += "\n---\n\n";
     }
-    downloadFile(text, "conversations.txt", "text/plain");
-  };
-
-  const downloadFile = (content: string, filename: string, mimeType: string) => {
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(text, "conversations.txt", "text/plain");
   };
 
   const handleClearAll = () => {

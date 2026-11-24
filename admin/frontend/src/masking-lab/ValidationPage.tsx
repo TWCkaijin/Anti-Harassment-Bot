@@ -5,6 +5,7 @@ import { createReport, evaluateSplit, type CaseResult, type EvaluationReport, ty
 import type { LoadMetrics } from "./types";
 import { MaskingError } from "./extraction";
 import { runBasicChecks, type BasicCheckReport } from "./selfCheck";
+import { downloadBlob } from "@rag/shared/browser";
 
 declare global { interface Window { maskingValidationReport?: EvaluationReport } }
 const seconds = (ms: number | null | undefined) => ms == null ? "尚未量測" : `${(ms / 1000).toFixed(2)} 秒`;
@@ -99,9 +100,7 @@ export default function ValidationPage({ active = true }: { active?: boolean }) 
     generation.current++; controller.current?.abort(); runtime.current?.dispose(); runtime.current = null; setBusy(false); setReady(false); setStatus("已停止；需重新載入模型");
   };
   const download = () => {
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
-    link.href = url; link.download = "browser-masking-validation-rules-tiny.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadBlob(JSON.stringify(report, null, 2), "browser-masking-validation-rules-tiny.json", "application/json");
   };
   return <section aria-label="本機遮罩驗證" className="mx-auto max-w-5xl space-y-6 text-on-surface">
     <header className="space-y-3">

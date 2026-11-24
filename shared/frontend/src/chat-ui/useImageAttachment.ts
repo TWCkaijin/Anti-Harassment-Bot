@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { validateImageDataUrl, validateImageFile } from "../imageUpload";
+import { errorMessage } from "../browser";
 
 export interface ImageAttachment { file: File; dataUrl: string }
 
@@ -17,7 +18,7 @@ export function useImageAttachment() {
 
   const selectFile = (file: File) => {
     try { validateImageFile(file); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : "無法讀取圖片。"); return; }
+    catch (failure) { setError(errorMessage(failure, "無法讀取圖片。")); return; }
     const previous = readerRef.current;
     readerRef.current = null;
     previous?.abort();
@@ -29,7 +30,7 @@ export function useImageAttachment() {
     reader.onload = () => {
       if (readerRef.current !== reader) return;
       try { setAttachment({ file, dataUrl: validateImageDataUrl(reader.result) }); }
-      catch (failure) { setError(failure instanceof Error ? failure.message : "無法讀取圖片。"); }
+      catch (failure) { setError(errorMessage(failure, "無法讀取圖片。")); }
       finish();
     };
     reader.onerror = () => { if (readerRef.current === reader) { setError("無法讀取圖片，請重新選擇。"); finish(); } };
