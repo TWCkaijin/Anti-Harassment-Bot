@@ -1,0 +1,513 @@
+"""Admin configuration and diagnostic job APIs, behind session middleware."""
+
+import asyncio
+import functools
+import hashlib
+import uuid
+from dataclasses import asdict
+from typing import Literal
+
+from flask import Blueprint, current_app, g, jsonify, request
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from admin_app import infrastructure
+from admin_app.jobs import JobFailure, canonical, register_handler, submit_job
+from rag_core.agents.openrouter_agent import get_default_prompt_sections
+from rag_core.core.agent_errors import (
+    ApplicableLawsContractMismatchError,
+    ChatTestContractMismatchError,
+)
+from rag_core.core.logger import get_logger
+from rag_core.core.privacy_claims import is_local_privacy_reply
+from rag_core.core.runtime_config import (
+    ConfigConflictError,
+    RuntimeConfig,
+    get_runtime_config,
+    reset_runtime_config,
+    resolve_runtime_config,
+    seed_runtime_config_if_missing,
+    update_runtime_config,
+)
+from rag_core.core.scenario_scripts import (
+    ScenarioRevisionConflict,
+    _parse_script,
+    delete_scenario_script,
+    get_scenario_revision,
+    read_scenario_catalog,
+    seed_example_scenario_scripts,
+    upsert_scenario_script,
+    use_scenario_snapshot,
+)
+from rag_core.core.scenario_scripts import (
+    get_scenario_scripts as get_enabled_scenario_catalog,
+)
+
+logger = get_logger(__name__)
+admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+
+def _log_operation_failure(operation: str, error: Exception) -> None:
+    logger.exception(
+        "Admin operation failed: %s",
+        operation,
+        extra={
+            "event": "admin_operation_failed",
+            "operation": operation,
+            "error_type": type(error).__name__,
+        },
+    )
+
+
+def _admin_operation(operation: str, failure: str):
+    """Map known admin failures to one error envelope and log anything unexpected.
+
+    Revision conflicts are 409, validation errors 422 (their messages are written by
+    this service for the administrator), and other failures 500 with the type only.
+    """
+
+    def decorate(view):
+        @functools.wraps(view)
+        def wrapper(*args, **kwargs):
+            try:
+                return view(*args, **kwargs)
+            except ConfigConflictError as exc:
+                return jsonify({"code": "config_conflict", "detail": str(exc)}), 409
+            except ScenarioRevisionConflict as exc:
+                return jsonify({"code": "skills_conflict", "detail": str(exc)}), 409
+            except ValueError as exc:
+                return jsonify({"code": "invalid_request", "detail": str(exc)}), 422
+            except Exception as exc:
+                _log_operation_failure(operation, exc)
+                return jsonify(
+                    {"code": "internal_error", "detail": f"{failure}: {type(exc).__name__}"}
+                ), 500
+
+        return wrapper
+
+    return decorate
+
+
+def _public_config(runtime_config=None, catalog_state=None):
+    from rag_core.agents.guided_v4 import (
+        applicable_laws_contract_sha256,
+        applicable_laws_scenario_catalog_sha256,
+        chat_test_contract_sha256,
+    )
+
+    runtime_config = runtime_config or get_runtime_config(force_refresh=True, strict=True)
+    config = runtime_config.public_dict()
+    prompt_sections = get_default_prompt_sections()
+    prompt_sections.update(config.get("agent_prompt_sections") or {})
+    config["agent_prompt_sections"] = prompt_sections
+    catalog, skill_revision = catalog_state or read_scenario_catalog()
+    with use_scenario_snapshot(catalog):
+        catalog = (
+            tuple(get_enabled_scenario_catalog())
+            if runtime_config.pipeline.get("enable_skills", True)
+            else ()
+        )
+    config["skills_revision"] = skill_revision
+    config["applicable_laws_contract_sha256"] = applicable_laws_contract_sha256(
+        runtime_config, catalog
+    )
+    config["applicable_laws_scenario_catalog_sha256"] = applicable_laws_scenario_catalog_sha256(
+        runtime_config, catalog
+    )
+    config["chat_test_contract_sha256"] = chat_test_contract_sha256(runtime_config, catalog)
+    return config
+
+
+def _require_admin() -> tuple[str | None, tuple[object, int] | None]:
+    identity = getattr(g, "admin_identity", None)
+    if identity:
+        return identity, None
+    return None, (jsonify({"detail": "Unauthorized"}), 401)
+
+
+def _expected_revision(*, skills=False):
+    revision = request.headers.get("If-Match", "").strip().strip('"')
+    if not revision:
+        raise JobFailure("revision_required", "If-Match revision is required", http_status=428)
+    if len(revision) > 128 or revision == "*" or revision.startswith("W/"):
+        raise JobFailure("invalid_revision", "Invalid revision", http_status=422)
+    if skills:
+        if not revision.isdigit():
+            raise JobFailure(
+                "invalid_revision", "Skills revision must be an integer", http_status=422
+            )
+        return int(revision)
+    return revision
+
+
+def _config_response():
+    data = _public_config()
+    response = jsonify(data)
+    response.set_etag(str(data["revision"]))
+    return response
+
+
+@admin_bp.route("/rerank-models", methods=["GET"])
+def rerank_models():
+    _, error = _require_admin()
+    if error:
+        return error
+    from rag_core.core.rerank_models import list_rerank_models
+
+    try:
+        return jsonify({"data": list_rerank_models()})
+    except Exception:
+        return jsonify({"detail": "無法取得 rerank 模型清單；可保留設定或手填模型 ID。"}), 502
+
+
+@admin_bp.route("/config", methods=["GET"])
+def get_config():
+    _, error = _require_admin()
+    if error:
+        return error
+    return _config_response()
+
+
+def run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
+    """Service-level diagnostic. Only the authenticated worker invokes it remotely."""
+    previous = getattr(g, "admin_diagnostic", False)
+    g.admin_diagnostic = True
+    try:
+        response = current_app.make_response(_run_chat_test(payload, snapshot_config))
+    finally:
+        g.admin_diagnostic = previous
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _run_chat_test(payload: dict, snapshot_config: RuntimeConfig | None = None):
+    # Keep imports local: ordinary chat never imports or accepts admin overrides.
+    from rag_core import chat_service as chat_api
+
+    class ChatTestRequest(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        chat_request: chat_api.ChatRequest = Field(alias="request")
+        overrides: dict = Field(default_factory=dict)
+        output_contract: Literal["chat", "applicable_laws_v1"] = "chat"
+        expected_applicable_laws_contract_sha256: str | None = Field(
+            default=None, pattern="^[0-9a-f]{64}$"
+        )
+        expected_chat_test_contract_sha256: str | None = Field(
+            default=None, pattern="^[0-9a-f]{64}$"
+        )
+
+    try:
+        data = ChatTestRequest.model_validate(payload)
+        if data.chat_request.stream:
+            return jsonify({"detail": "Admin chat tests return JSON; stream must be false"}), 422
+        if (
+            data.expected_applicable_laws_contract_sha256 is not None
+            and data.output_contract != "applicable_laws_v1"
+        ):
+            return jsonify({"detail": "Applicable-law fingerprint requires prediction mode"}), 422
+        if data.expected_chat_test_contract_sha256 is not None and data.output_contract != "chat":
+            return jsonify({"detail": "Chat-test fingerprint requires v4 chat"}), 422
+        base_config = snapshot_config or get_runtime_config()
+        if base_config.source in chat_api.UNAVAILABLE_CONFIG_SOURCES:
+            return chat_api.agent_error(
+                base_config, chat_api.GateUnavailableError("Runtime config unavailable")
+            )
+        config = snapshot_config or resolve_runtime_config(base_config, data.overrides)
+    except ValidationError as exc:
+        return chat_api.request_validation_error(exc)
+    except ValueError as exc:
+        return jsonify({"code": "invalid_request", "detail": str(exc)}), 422
+    if data.chat_request.image_base64 and not chat_api.image_upload_enabled(config):
+        return chat_api.image_upload_disabled_error()
+    diagnostics = {"effective_config": config.public_dict()}
+    if config.gate_enabled and data.output_contract == "chat":
+        diagnostics["gate_reviews"] = []
+    try:
+        arguments, was_anonymized = chat_api.prepare_agent_input(
+            data.chat_request, config, diagnostics, include_input_stages=True
+        )
+        if data.output_contract == "applicable_laws_v1":
+            arguments["output_contract"] = data.output_contract
+            arguments["expected_applicable_laws_contract_sha256"] = (
+                data.expected_applicable_laws_contract_sha256
+            )
+        if data.expected_chat_test_contract_sha256 is not None:
+            arguments["expected_chat_test_contract_sha256"] = (
+                data.expected_chat_test_contract_sha256
+            )
+        if data.output_contract == "applicable_laws_v1":
+            # Prediction is an admin-only evaluation contract, not a user-visible chat turn.
+            result = asyncio.run(chat_api.get_agent().run(**arguments))
+            response = None
+        else:
+            session_id = str(uuid.uuid4())
+            refusal_used = [False]
+
+            def refusal_payload(reply):
+                refusal_used[0] = True
+                return chat_api.gate_refusal_payload(
+                    reply, session_id, was_anonymized, data.chat_request
+                )
+
+            response = asyncio.run(
+                chat_api.run_chat_turn(
+                    data.chat_request,
+                    config,
+                    session_id=session_id,
+                    was_anonymized=was_anonymized,
+                    run_kwargs=arguments,
+                    build_refusal_payload=refusal_payload,
+                    review_trace=diagnostics.get("gate_reviews"),
+                )
+            )
+            if refusal_used[0] or is_local_privacy_reply(response):
+                # The business task may have finished before Gate denied. Keep
+                # test input diagnostics, but never store the rejected answer.
+                diagnostics = {
+                    key: value
+                    for key, value in diagnostics.items()
+                    if key in {"effective_config", "history", "pii", "input_stages", "gate_reviews"}
+                }
+    except ChatTestContractMismatchError:
+        return jsonify(
+            {
+                "code": "chat_test_contract_mismatch",
+                "detail": "對話測試的提示或情境腳本已變更，請重新準備測試。",
+                "retryable": False,
+            }
+        ), 409
+    except ApplicableLawsContractMismatchError:
+        return jsonify(
+            {
+                "code": "applicable_laws_contract_mismatch",
+                "detail": "適用法規測試的提示或情境腳本已變更，請重新準備測試。",
+                "retryable": False,
+            }
+        ), 409
+    except Exception as exc:
+        return chat_api.agent_error(config, exc)
+    try:
+        if data.output_contract == "applicable_laws_v1":
+            from rag_core.agents.guided_v4 import ApplicableLawPrediction
+            from rag_core.agents.openrouter_agent import (
+                AgentContractError,
+                ApplicableLawPredictionResult,
+            )
+
+            if not isinstance(result, ApplicableLawPredictionResult):
+                raise AgentContractError("Invalid applicable-law result type")
+            prediction = ApplicableLawPrediction.model_validate(result.prediction)
+            return jsonify(
+                {
+                    "output_contract": data.output_contract,
+                    "prediction": prediction.model_dump(),
+                    "diagnostics": diagnostics,
+                }
+            )
+        assert response is not None
+    except Exception as exc:
+        return chat_api.retryable_error(config, exc)
+    payload = jsonify({"response": response, "diagnostics": diagnostics})
+    payload.headers["Cache-Control"] = "no-store"
+    return payload
+
+
+def _snapshot():
+    config = get_runtime_config(force_refresh=True, strict=True)
+    catalog, revision = read_scenario_catalog()
+    catalog = tuple(script for script in catalog if script.enabled)
+    value = {
+        "config": asdict(config),
+        "skills": [script.public_dict() for script in catalog],
+        "prompt_contract": _public_config(config, (catalog, revision)),
+    }
+    return value, hashlib.sha256(canonical(value)).hexdigest()
+
+
+@admin_bp.post("/test-jobs")
+def submit_test_job():
+    from rag_core import chat_service
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get("request"), dict):
+        return jsonify({"detail": "A diagnostic request is required"}), 422
+    try:
+        chat = chat_service.ChatRequest.model_validate(payload["request"])
+        if chat.stream:
+            raise ValueError("Admin diagnostic jobs require stream=false")
+        if payload.get("output_contract", "chat") not in {"chat", "applicable_laws_v1"}:
+            raise ValueError("Unsupported diagnostic output contract")
+        snapshot, fingerprint = _snapshot()
+        effective = resolve_runtime_config(
+            RuntimeConfig(**snapshot["config"]), payload.get("overrides", {})
+        )
+        if chat.image_base64 and not effective.enable_image_upload:
+            raise ValueError("Image upload is disabled")
+        snapshot.update(base_fingerprint=fingerprint, effective_config=asdict(effective))
+        job = submit_job(
+            "chat_test",
+            payload,
+            snapshot=snapshot,
+            idempotency_key=request.headers.get("Idempotency-Key"),
+        )
+    except (ValueError, ValidationError) as exc:
+        return jsonify({"code": "invalid_request", "detail": str(exc)}), 422
+    return jsonify({"job_id": job["job_id"], "status": job["status"]}), 202
+
+
+def execute_chat_test(job, context):
+    import json
+
+    completed = job.get("checkpoint", {}).get("diagnostic_completed")
+    completed_ref = job.get("checkpoint", {}).get("diagnostic_completed_ref")
+    if completed_ref:
+        completed = json.loads(infrastructure.object_store().read_bytes(completed_ref))
+    if completed is not None:
+        return _diagnostic_result(completed["result"], completed["http_status"])
+    snapshot = job["snapshot"]
+    _, fingerprint = _snapshot()
+    if fingerprint != snapshot["base_fingerprint"]:
+        raise JobFailure(
+            "config_snapshot_changed", "設定或 Skills 已變更；請重新準備測試。", http_status=409
+        )
+    scripts = tuple(_parse_script(row["id"], row) for row in snapshot["skills"])
+    if any(script is None for script in scripts):
+        raise JobFailure(
+            "invalid_skill_snapshot", "Stored Skill snapshot is invalid", http_status=409
+        )
+    context.external_call_started("diagnostic_model")
+    with use_scenario_snapshot(scripts):
+        response = current_app.make_response(
+            run_chat_test(job["payload"], RuntimeConfig(**snapshot["effective_config"]))
+        )
+    result = response.get_json()
+    # A connection failure after dispatch can have an unknown paid outcome.
+    if response.status_code >= 500 and (result or {}).get("retryable"):
+        raise JobFailure(
+            "external_outcome_unknown",
+            "模型回應未完成，需要人工確認。",
+            http_status=response.status_code,
+        )
+    completed = {"result": result, "http_status": response.status_code}
+    if len(canonical(completed)) > 150000:
+        reference = infrastructure.object_store().put_bytes(
+            f"jobs/chat_test/{job['job_id']}/diagnostic-{context.lease_token}.json",
+            canonical(completed),
+            "application/json",
+        )
+        checkpoint = {"diagnostic_completed_ref": reference}
+    else:
+        checkpoint = {"diagnostic_completed": completed}
+    context.external_call_finished(checkpoint=checkpoint)
+    return _diagnostic_result(result, response.status_code)
+
+
+def _diagnostic_result(result, http_status):
+    if http_status >= 400:
+        raise JobFailure(
+            (result or {}).get("code", "diagnostic_failed"),
+            (result or {}).get("detail", "Diagnostic failed"),
+            retryable=(result or {}).get("retryable", False),
+            http_status=http_status,
+        )
+    return result
+
+
+register_handler("chat_test", execute_chat_test)
+
+
+@admin_bp.route("/config", methods=["PUT"])
+@_admin_operation("update_runtime_config", "Failed to update runtime config")
+def put_config():
+    identity, error = _require_admin()
+    if error:
+        return error
+    revision = _expected_revision()
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"detail": "JSON body must be an object"}), 400
+    update_runtime_config(payload, updated_by=identity or "admin", expected_revision=revision)
+    return _config_response()
+
+
+@admin_bp.route("/config/seed", methods=["POST"])
+@_admin_operation("seed_runtime_config", "Failed to seed runtime config")
+def seed_config():
+    identity, error = _require_admin()
+    if error:
+        return error
+    revision = _expected_revision()
+    seed_runtime_config_if_missing(updated_by=identity or "admin", expected_revision=revision)
+    return _config_response()
+
+
+@admin_bp.route("/config/reset", methods=["POST"])
+@_admin_operation("reset_runtime_config", "Failed to reset runtime config")
+def reset_config():
+    identity, error = _require_admin()
+    if error:
+        return error
+    revision = _expected_revision()
+    reset_runtime_config(updated_by=identity or "admin", expected_revision=revision)
+    return _config_response()
+
+
+@admin_bp.route("/scenario-scripts/seed", methods=["POST"])
+@_admin_operation("seed_scenario_scripts", "Failed to seed scenario scripts")
+def seed_scenario_scripts():
+    identity, error = _require_admin()
+    if error:
+        return error
+    revision = _expected_revision(skills=True)
+    scripts = seed_example_scenario_scripts(
+        updated_by=identity or "admin", expected_revision=revision
+    )
+    return jsonify(
+        {
+            "script_ids": [script.script_id for script in scripts],
+            "revision": get_scenario_revision(),
+        }
+    )
+
+
+@admin_bp.route("/scenario-scripts", methods=["GET"])
+@_admin_operation("list_scenario_scripts", "Failed to load scenario scripts")
+def get_scenario_scripts():
+    _, error = _require_admin()
+    if error:
+        return error
+    scripts, revision = read_scenario_catalog()
+    response = jsonify(
+        {"skills": [script.public_dict() for script in scripts], "revision": revision}
+    )
+    response.set_etag(str(revision))
+    return response
+
+
+@admin_bp.route("/scenario-scripts/<script_id>", methods=["PUT"])
+@_admin_operation("upsert_scenario_script", "Failed to save scenario script")
+def put_scenario_script(script_id: str):
+    identity, error = _require_admin()
+    if error:
+        return error
+    revision = _expected_revision(skills=True)
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"detail": "JSON body must be an object"}), 400
+    response = jsonify(
+        upsert_scenario_script(
+            script_id, payload, identity or "admin", expected_revision=revision
+        ).public_dict()
+    )
+    response.headers["X-Skills-Revision"] = str(get_scenario_revision())
+    return response
+
+
+@admin_bp.route("/scenario-scripts/<script_id>", methods=["DELETE"])
+@_admin_operation("delete_scenario_script", "Failed to delete scenario script")
+def remove_scenario_script(script_id: str):
+    _, error = _require_admin()
+    if error:
+        return error
+    revision = _expected_revision(skills=True)
+    delete_scenario_script(script_id, expected_revision=revision)
+    return "", 204

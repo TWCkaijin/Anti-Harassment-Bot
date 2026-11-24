@@ -1,10 +1,16 @@
-# custom
+# ===== 本機來源資料 =====
+data
+resource/
 
-Agent.md
-USAGE.md
-TODO.md
-!/TODO.md
-docs/
+# ===== 憑證與本機設定 =====
+.env
+.env.local
+.env.*.local
+firebase_admin.json
+.admin-local/
+*.pem
+*.key
+gha-creds-*.json
 
 # ===== Python =====
 __pycache__/
@@ -14,41 +20,47 @@ dist/
 wheels/
 *.egg-info/
 .venv/
+venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-*.pyo
-*.pyc
 
-# ===== Environment & Secrets =====
-.env
-.env.local
-.env.*.local
-firebase_admin.json
-*.pem
-*.key
-data
-
-# ===== Node / Frontend =====
+# ===== 前端建置與依賴 =====
 node_modules/
 .pnpm-store/
-frontend/dist/
-frontend/.vite/
-frontend/coverage/
+admin/frontend/dist-preview/
+admin/frontend/.masking-tiny/
+**/.vite/
+**/coverage/
 *.tsbuildinfo
 
-# ===== Firebase =====
+# ===== Firebase 與本機記錄 =====
 .firebase/
-firebase-debug.log
-firestore-debug.log
-ui-debug.log
+*.log
+firepit-log.txt
+functions_error.json
+.code-review-graph/
 
-# ===== IDE =====
+# ===== 本機測試與報告產物 =====
+admin/tests/reliability/results/
+admin/tests/reliability/candidates/
+client/frontend/design/previews/
+docs/technical-report/.*-build/
+docs/technical-report/.build/
+docs/technical-report/.chart-data-*/
+docs/technical-report/evidence/
+# 由 scripts/build.sh 產生，隨 GitHub Release 發布
+docs/technical-report/**/*.html
+docs/technical-report/**/*.pdf
+
+# ===== 編輯器與 Finder =====
 .idea/
 .vscode/
 *.swp
 *.swo
 .DS_Store
 
-# ===== Logs & Temporary Files =====
-functions_error.json
+# ===== 本機 Apple 設計指南 =====
+/AGENTS.md
+/DESIGN.md
+/.agents/skills/apple-hig/

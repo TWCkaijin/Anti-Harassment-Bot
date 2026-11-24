@@ -2,12 +2,27 @@ name: Deploy — Preview (dev)
 
 on:
   push:
-    branches:
-      - dev
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      unit:
+        description: Select one deployment unit or the full four-unit release
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - admin-backend
+          - admin-frontend
+          - client-backend
+          - client-frontend
+
+permissions:
+  contents: read
 
 concurrency:
   group: deploy-preview-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   quality-gate:
@@ -16,198 +31,137 @@ jobs:
     permissions:
       contents: read
 
-  deploy-preview:
-    name: Build & Deploy to Preview
+  deploy:
+    name: Deploy selected units
+    if: github.ref == 'refs/heads/dev'
     needs: quality-gate
     runs-on: ubuntu-latest
-    outputs:
-      frontend_changed: ${{ steps.filter.outputs.frontend }}
-      backend_changed: ${{ steps.filter.outputs.backend }}
-      preview_url: ${{ steps.preview-deploy.outputs.preview_url }}
     permissions:
       contents: read
-    env:
-      FUNCTIONS_REGION: asia-east1
-      PREVIEW_CHANNEL: dev-preview
-
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Check for changes
-        uses: dorny/paths-filter@v3
+          fetch-depth: 0
+      - name: Load project settings
+        run: grep -E '^[A-Z_]+=' project.env >> "$GITHUB_ENV"
+      - name: Detect affected services on push
         id: filter
+        if: github.event_name == 'push'
+        uses: dorny/paths-filter@v3
         with:
+          base: ${{ github.event.before }}
           filters: |
-            frontend:
-              - 'frontend/**'
-              - 'firebase.json'
-              - '.firebaserc'
-              - '.firebaseignore'
-              - '.github/workflows/**'
-            backend:
-              - 'backend/**'
-              - 'main.py'
+            client:
+              - 'client/**'
+            admin:
+              - 'admin/**'
+            shared:
+              - 'shared/**'
+              - 'scripts/**'
+              - 'infrastructure/**'
               - 'pyproject.toml'
               - 'uv.lock'
-              - 'firebase.json'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'firebase*.json'
               - '.firebaserc'
               - '.firebaseignore'
               - '.github/workflows/**'
-
-      # ── Frontend Build ──────────────────────────────────────────────────
-      - name: Setup pnpm
-        if: steps.filter.outputs.frontend == 'true'
-        uses: pnpm/action-setup@v3
-        with:
-          version: 9
-
-      - name: Setup Node.js
-        if: steps.filter.outputs.frontend == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: "pnpm"
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install frontend dependencies
-        if: steps.filter.outputs.frontend == 'true'
-        run: pnpm install --frozen-lockfile
-        working-directory: frontend
-
-      - name: Build frontend (preview)
-        if: steps.filter.outputs.frontend == 'true'
-        run: pnpm run build
-        working-directory: frontend
+      - name: Select deployment units
+        id: scope
+        shell: bash
         env:
-          VITE_ANALYTICS_ENABLED: ${{ vars.ANALYTICS_ENABLED }}
-          VITE_FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
-          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
-          VITE_FIREBASE_MEASUREMENT_ID: ${{ vars.FIREBASE_MEASUREMENT_ID }}
-          VITE_API_BASE_URL: https://asia-east1-anti-harassment-bot.cloudfunctions.net/api_preview
-          VITE_ENV: preview
-
-      # ── Firebase Deploy ─────────────────────────────────────────────────
-      - name: Install Firebase CLI
-        if: steps.filter.outputs.frontend == 'true' || steps.filter.outputs.backend == 'true'
-        run: npm install -g firebase-tools
-
-      - name: Install uv
-        if: steps.filter.outputs.backend == 'true'
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-
-      - name: Setup Python environment for Firebase CLI
-        if: steps.filter.outputs.backend == 'true'
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_UNIT: ${{ inputs.unit }}
+          CLIENT_CHANGED: ${{ steps.filter.outputs.client }}
+          ADMIN_CHANGED: ${{ steps.filter.outputs.admin }}
+          SHARED_CHANGED: ${{ steps.filter.outputs.shared }}
         run: |
-          uv export --format requirements-txt > requirements.txt
-          uv venv venv
-          uv pip install -r requirements.txt -p venv
-
-      - name: Write Firebase service account
-        if: steps.filter.outputs.backend == 'true'
-        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > firebase_admin.json
-
-      - name: Write backend .env
-        if: steps.filter.outputs.backend == 'true'
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
-          RUNTIME_CONFIG_DOCUMENT_ID: app_dev
-          ENVIRONMENT: preview
-        run: |
-          python - <<'PY'
-          import json
-          import os
-
-          keys = [
-              "OPENROUTER_API_KEY",
-              "ADMIN_API_KEY",
-              "RUNTIME_CONFIG_DOCUMENT_ID",
-              "ENVIRONMENT",
-          ]
-          with open(".env", "w", encoding="utf-8") as env_file:
-              for key in keys:
-                  value = os.environ.get(key, "")
-                  env_file.write(f"{key}={json.dumps(value, ensure_ascii=False)}\n")
-          PY
-
-      - name: Deploy Functions (api_preview)
-        if: steps.filter.outputs.backend == 'true'
-        run: |
-          firebase deploy \
-            --only functions:api:api_preview \
-            --token "${{ secrets.FIREBASE_TOKEN }}" \
-            --non-interactive \
-            --force
-
-      - name: Deploy to Firebase Hosting Preview Channel
-        id: preview-deploy
-        if: steps.filter.outputs.frontend == 'true'
-        run: |
-          set -e
-          if ! firebase hosting:channel:deploy ${{ env.PREVIEW_CHANNEL }} --token "${{ secrets.FIREBASE_TOKEN }}" --expires 30d --non-interactive > deploy.log 2>&1; then
-            cat deploy.log
-            echo "Firebase hosting deployment failed."
-            exit 1
+          set -euo pipefail
+          admin_backend=false
+          admin_frontend=false
+          client_backend=false
+          client_frontend=false
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            if [[ "$SHARED_CHANGED" == "true" ]]; then
+              admin_backend=true; admin_frontend=true; client_backend=true; client_frontend=true
+            else
+              if [[ "$ADMIN_CHANGED" == "true" ]]; then admin_backend=true; admin_frontend=true; fi
+              if [[ "$CLIENT_CHANGED" == "true" ]]; then client_backend=true; client_frontend=true; fi
+            fi
+          else
+            case "$REQUESTED_UNIT" in
+              all) admin_backend=true; admin_frontend=true; client_backend=true; client_frontend=true ;;
+              admin-backend) admin_backend=true ;;
+              admin-frontend) admin_frontend=true ;;
+              client-backend) client_backend=true ;;
+              client-frontend) client_frontend=true ;;
+              *) exit 2 ;;
+            esac
           fi
-          cat deploy.log
-          PREVIEW_URL=$(grep -oP 'Channel URL \(\K[^\)]+' deploy.log | head -1 || echo "https://anti-harassment-bot--dev-preview.web.app")
-          echo "preview_url=${PREVIEW_URL}" >> $GITHUB_OUTPUT
-
-  comment-preview:
-    name: Comment Preview Result
-    needs: deploy-preview
-    if: >-
-      needs.deploy-preview.outputs.frontend_changed == 'true' ||
-      needs.deploy-preview.outputs.backend_changed == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Find open PRs targeting dev
-        id: find-pr
-        uses: actions/github-script@v7
+          any=false
+          if [[ "$admin_backend" == "true" || "$admin_frontend" == "true" || "$client_backend" == "true" || "$client_frontend" == "true" ]]; then any=true; fi
+          for key in admin_backend admin_frontend client_backend client_frontend any; do
+            echo "$key=${!key}" >> "$GITHUB_OUTPUT"
+          done
+      - uses: pnpm/action-setup@v4
+        if: steps.scope.outputs.any == 'true'
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const prs = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              base: 'dev'
-            });
-            const pr = prs.data.find(p => p.head.sha === context.sha) || prs.data[0];
-            return pr ? pr.number : null;
-
-      - name: Comment preview URL on dev PR
-        if: steps.find-pr.outputs.result != 'null'
-        uses: actions/github-script@v7
+          version: 10.27.0
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.any == 'true'
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@v5
+        if: steps.scope.outputs.any == 'true'
+        with:
+          version: "0.9.7"
+      - name: Install deployment dependencies
+        if: steps.scope.outputs.any == 'true'
+        run: |
+          uv python install 3.13
+          uv sync --frozen --all-extras
+          pnpm install --frozen-lockfile
+          npm install --global firebase-tools@15.33.0
+      - name: Authenticate with Workload Identity Federation
+        if: steps.scope.outputs.any == 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.FIREBASE_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+        if: steps.scope.outputs.any == 'true'
+      - name: Deploy Admin backend
+        if: steps.scope.outputs.admin_backend == 'true'
         env:
-          PR_NUMBER: ${{ steps.find-pr.outputs.result }}
-          FRONTEND_CHANGED: ${{ needs.deploy-preview.outputs.frontend_changed }}
-          BACKEND_CHANGED: ${{ needs.deploy-preview.outputs.backend_changed }}
-          PREVIEW_URL: ${{ needs.deploy-preview.outputs.preview_url }}
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const prNumber = Number(process.env.PR_NUMBER);
-            if (!Number.isInteger(prNumber) || prNumber <= 0) return;
-            let body = `## 🔍 Preview Deployment (dev)\n\n`;
-            if (process.env.FRONTEND_CHANGED === 'true') {
-              const previewUrl = process.env.PREVIEW_URL;
-              body += `✅ 已部署至 Firebase Hosting Preview Channel\n🔗 **Preview URL**: ${previewUrl}\n`;
-            }
-            if (process.env.BACKEND_CHANGED === 'true') {
-              body += `✅ Backend Updated\n📦 **Preview API**: \`https://asia-east1-anti-harassment-bot.cloudfunctions.net/api_preview\`\n`;
-            }
-            body += `⏳ **有效期限**: 7 天\n\n*由 GitHub Actions 自動部署*`;
-            github.rest.issues.createComment({
-              issue_number: prNumber,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
+          FIREBASE_SKIP_INFORMATIONAL_IAM: '1'
+        run: uv run python scripts/deploy.py --environment preview --service admin --backend-only --output build/deployment-admin-backend.json
+      - name: Deploy Admin frontend
+        if: steps.scope.outputs.admin_frontend == 'true'
+        run: uv run python scripts/deploy.py --environment preview --service admin --frontend-only --output build/deployment-admin-frontend.json
+      - name: Deploy Client backend
+        if: steps.scope.outputs.client_backend == 'true'
+        env:
+          FIREBASE_SKIP_INFORMATIONAL_IAM: '1'
+          CHAT_APP_CHECK_ENABLED: ${{ vars.CLIENT_CHAT_APP_CHECK_ENABLED_DEV }}
+        run: uv run python scripts/deploy.py --environment preview --service client --backend-only --output build/deployment-client-backend.json
+      - name: Deploy Client frontend
+        if: steps.scope.outputs.client_frontend == 'true'
+        env:
+          CLIENT_FIREBASE_APP_ID: ${{ vars.CLIENT_FIREBASE_APP_ID_DEV }}
+          VITE_APP_CHECK_ENABLED: ${{ vars.CLIENT_APP_CHECK_ENABLED_DEV }}
+          VITE_APP_CHECK_SITE_KEY: ${{ vars.CLIENT_APP_CHECK_SITE_KEY_DEV }}
+        run: uv run python scripts/deploy.py --environment preview --service client --frontend-only --output build/deployment-client-frontend.json
+      - name: Deployment summary
+        if: steps.scope.outputs.any == 'true'
+        run: |
+          echo "Admin backend: ${{ steps.scope.outputs.admin_backend }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Admin frontend: ${{ steps.scope.outputs.admin_frontend }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Client backend: ${{ steps.scope.outputs.client_backend }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Client frontend: ${{ steps.scope.outputs.client_frontend }}" >> "$GITHUB_STEP_SUMMARY"

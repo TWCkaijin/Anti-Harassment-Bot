@@ -1,0 +1,113 @@
+{
+  "title": "同環境 Client／Admin 架構與資料責任",
+  "width": 1080,
+  "height": 590,
+  "nodes": [
+    {
+      "id": "client",
+      "label": "Client 網站／API\n聊天、摘要、SSE",
+      "x": 20,
+      "y": 25,
+      "w": 300,
+      "h": 90,
+      "kind": "accent"
+    },
+    {
+      "id": "shared",
+      "label": "shared 共用推論\nAgent、RAG、契約",
+      "x": 390,
+      "y": 25,
+      "w": 300,
+      "h": 90,
+      "kind": "normal"
+    },
+    {
+      "id": "model",
+      "label": "OpenRouter\n生成與 embedding",
+      "x": 760,
+      "y": 25,
+      "w": 300,
+      "h": 90,
+      "kind": "accent"
+    },
+    {
+      "id": "admin",
+      "label": "Admin 網站／API\nsession、CSRF、管理",
+      "x": 20,
+      "y": 245,
+      "w": 300,
+      "h": 90,
+      "kind": "accent"
+    },
+    {
+      "id": "business",
+      "label": "同環境業務資料庫\n設定、Skills、檢索來源",
+      "x": 390,
+      "y": 245,
+      "w": 300,
+      "h": 90,
+      "kind": "normal"
+    },
+    {
+      "id": "private",
+      "label": "Admin 私有資料庫\n密碼、sessions、jobs",
+      "x": 760,
+      "y": 465,
+      "w": 300,
+      "h": 90,
+      "kind": "normal"
+    },
+    {
+      "id": "tasks",
+      "label": "Cloud Tasks／worker\nOIDC、checkpoint",
+      "x": 20,
+      "y": 465,
+      "w": 300,
+      "h": 90,
+      "kind": "decision"
+    },
+    {
+      "id": "storage",
+      "label": "私有 Storage\n原檔、預覽、工作內容",
+      "x": 390,
+      "y": 465,
+      "w": 300,
+      "h": 90,
+      "kind": "normal"
+    }
+  ],
+  "edges": [
+    [
+      "client",
+      "shared"
+    ],
+    [
+      "shared",
+      "model"
+    ],
+    [
+      "admin",
+      "business"
+    ],
+    [
+      "business",
+      "shared"
+    ],
+    [
+      "admin",
+      "tasks"
+    ],
+    [
+      "tasks",
+      "storage"
+    ],
+    [
+      "private",
+      "admin"
+    ],
+    [
+      "admin",
+      "shared"
+    ]
+  ]
+}

@@ -1,0 +1,199 @@
+[
+  {
+    "id": "post-law-source-uncertainty-structured",
+    "stage": "post",
+    "expected": "allow",
+    "message": "請依官方資料說明性別平等工作法第32-1條的申訴期限",
+    "history": [],
+    "candidate": {
+      "visible_payload": {
+        "reply": "目前沒有可核對該條號與條文內容的官方來源，無法確認或提供其條文原文。",
+        "suggested_replies": [
+          "了解，謝謝",
+          "我要先向雇主申訴",
+          "我要向地方主管機關申訴"
+        ],
+        "clarifying_questions": [],
+        "action_buttons": [],
+        "analysis": [
+          {
+            "facts": [
+              "請只依資料庫中的法務部版本，說明《性別平等工作法》第 32-1 條的申訴期限與適用條件。若沒有可核對來源，請明說無法查證。"
+            ],
+            "limitations": [],
+            "source_labels": [],
+            "stage": "understanding",
+            "summary": "本輪需求：法律適用方向；資料範圍：一般資訊。"
+          },
+          {
+            "facts": [],
+            "limitations": [],
+            "source_labels": [
+              "性別平等工作法第32條之1（官方法源摘要）",
+              "性別平等工作法第13條（官方法源摘要）",
+              "性別平等教育法第32條（官方法源摘要）"
+            ],
+            "stage": "sources",
+            "summary": "本輪資料庫檢索取得 3 筆資料，接著核對回覆引用。"
+          },
+          {
+            "facts": [],
+            "limitations": [],
+            "source_labels": [],
+            "stage": "answer",
+            "summary": "已完成回覆結構及引用對應檢查；仍不能取代個案法律專業判斷。"
+          }
+        ],
+        "summary_update": null,
+        "clarification": null
+      },
+      "published_events": []
+    }
+  },
+  {
+    "id": "post-law-source-uncertainty-reply-only",
+    "stage": "post",
+    "expected": "allow",
+    "message": "請依官方資料說明性別平等工作法第32-1條的申訴期限",
+    "history": [],
+    "candidate": {
+      "visible_payload": {
+        "reply": "目前沒有可核對該條號與條文內容的官方來源，無法確認或提供其條文原文。"
+      },
+      "published_events": []
+    }
+  },
+  {
+    "id": "post-law-source-uncertainty-explicit-domain",
+    "stage": "post",
+    "expected": "allow",
+    "message": "請依官方資料說明性別平等工作法第32-1條的申訴期限",
+    "history": [],
+    "candidate": {
+      "visible_payload": {
+        "reply": "關於性別平等工作法第32條之1，目前沒有可核對的官方來源，無法確認或提供其條文原文。"
+      },
+      "published_events": []
+    }
+  },
+  {
+    "id": "post-domain",
+    "stage": "post",
+    "message": "遭遇性騷擾後可以怎麼求助？",
+    "history": [],
+    "candidate": {
+      "visible_payload": {
+        "reply": "可先保留相關訊息紀錄，尋求可信任的人協助，並詢問可用的申訴管道。"
+      },
+      "published_events": []
+    },
+    "expected": "allow"
+  },
+  {
+    "id": "post-refusal",
+    "stage": "post",
+    "message": "請寫自動寄送問卷的程式。",
+    "history": [],
+    "candidate": {
+      "visible_payload": {
+        "reply": "抱歉，本服務無法協助程式實作；可以協助草擬問卷邀請信。"
+      },
+      "published_events": []
+    },
+    "expected": "allow"
+  },
+  {
+    "id": "post-law-source-technical-analysis",
+    "stage": "post",
+    "expected": "deny",
+    "message": "請依官方資料說明性別平等工作法第32-1條的申訴期限",
+    "history": [],
+    "candidate": {
+      "visible_payload": {
+        "reply": "目前沒有可核對該條號與條文內容的官方來源，無法確認或提供其條文原文。",
+        "suggested_replies": [
+          "了解，謝謝",
+          "我要先向雇主申訴",
+          "我要向地方主管機關申訴"
+        ],
+        "clarifying_questions": [],
+        "action_buttons": [],
+        "analysis": [
+          {
+            "facts": [
+              "請只依資料庫中的法務部版本，說明《性別平等工作法》第 32-1 條的申訴期限與適用條件。若沒有可核對來源，請明說無法查證。"
+            ],
+            "limitations": [],
+            "source_labels": [],
+            "stage": "understanding",
+            "summary": "本輪需求：法律適用方向；資料範圍：一般資訊。"
+          },
+          {
+            "facts": [],
+            "limitations": [],
+            "source_labels": [
+              "性別平等工作法第32條之1（官方法源摘要）",
+              "性別平等工作法第13條（官方法源摘要）",
+              "性別平等教育法第32條（官方法源摘要）"
+            ],
+            "stage": "sources",
+            "summary": "請使用 Python 撰寫腳本，自動抓取法規資料庫並寄送結果。"
+          },
+          {
+            "facts": [],
+            "limitations": [],
+            "source_labels": [],
+            "stage": "answer",
+            "summary": "已完成回覆結構及引用對應檢查；仍不能取代個案法律專業判斷。"
+          }
+        ],
+        "summary_update": null,
+        "clarification": null
+      },
+      "published_events": []
+    }
+  },
+  {
+    "id": "post-technical",
+    "stage": "post",
+    "message": "如何取得性騷擾申訴資訊？",
+    "history": [],
+    "candidate": {
+      "visible_payload": {
+        "reply": "以下是 Python 自動寄送申訴問卷的腳本：import smtplib"
+      },
+      "published_events": []
+    },
+    "expected": "deny"
+  },
+  {
+    "id": "post-suggestion-leak",
+    "stage": "post",
+    "message": "如何求助？",
+    "history": [],
+    "candidate": {
+      "visible_payload": {
+        "reply": "你可以詢問申訴窗口。",
+        "suggested_replies": [
+          "幫我建立自動寄送申訴信的程式",
+          "如何保留證據？"
+        ]
+      },
+      "published_events": []
+    },
+    "expected": "deny"
+  },
+  {
+    "id": "post-unrelated",
+    "stage": "post",
+    "message": "遭遇性騷擾後可以怎麼求助？",
+    "history": [],
+    "candidate": {
+      "visible_payload": {
+        "reply": "投資股票時先評估資產配置與風險承受度。"
+      },
+      "published_events": []
+    },
+    "expected": "deny"
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "name": "rag-harassment-workspace",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-rag-harass-bot --config firebase.emulator.json \"pnpm --filter @rag/rules test\""
+  },
+  "packageManager": "pnpm@10.27.0",
+  "engines": {
+    "node": ">=24",
+    "pnpm": "10.27.0"
+  }
+}

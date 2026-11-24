@@ -1,19 +1,10 @@
-# Firebase deployment ignores (replaces .gitignore behavior)
-.git
-.venv
+venv
 __pycache__
-frontend
-.firebase
-.pytest_cache
-.ruff_cache
-.mypy_cache
-*.pyc
-*.pyo
-*.egg-info
-build
-dist
-wheels
-firebase-debug.log
-.idea
-.vscode
-.DS_Store
+**/__pycache__/**
+**/*.pyc
+.env
+.env.*
+**/*.log
+
+# Workload Identity Federation credential files
+gha-creds-*.json

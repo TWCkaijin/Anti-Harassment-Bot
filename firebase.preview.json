@@ -1,0 +1,165 @@
+{
+  "functions": [
+    {
+      "source": "build/functions/client",
+      "codebase": "api",
+      "runtime": "python313",
+      "ignore": [
+        "venv",
+        "__pycache__",
+        "**/__pycache__/**",
+        "**/*.pyc",
+        ".env",
+        ".env.*",
+        "**/*.log"
+      ]
+    },
+    {
+      "source": "build/functions/admin",
+      "codebase": "admin",
+      "runtime": "python313",
+      "ignore": [
+        "venv",
+        "__pycache__",
+        "**/__pycache__/**",
+        "**/*.pyc",
+        ".env",
+        ".env.*",
+        "**/*.log"
+      ]
+    }
+  ],
+  "hosting": [
+    {
+      "public": "client/frontend/dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "function": {
+            "functionId": "api_preview",
+            "region": "asia-east1"
+          }
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "headers": [
+        {
+          "source": "**/*.@(js|css|woff2)",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=31536000, immutable"
+            }
+          ]
+        },
+        {
+          "source": "**",
+          "headers": [
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "DENY"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "1; mode=block"
+            }
+          ]
+        }
+      ],
+      "target": "client"
+    },
+    {
+      "public": "admin/frontend/dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "function": {
+            "functionId": "admin_api_preview",
+            "region": "asia-east1"
+          }
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ],
+      "headers": [
+        {
+          "source": "**/*.@(js|css|woff2)",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "public, max-age=31536000, immutable"
+            }
+          ]
+        },
+        {
+          "source": "**",
+          "headers": [
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "DENY"
+            },
+            {
+              "key": "X-XSS-Protection",
+              "value": "1; mode=block"
+            }
+          ]
+        }
+      ],
+      "target": "admin"
+    }
+  ],
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "infrastructure/firestore.rules",
+      "indexes": "infrastructure/firestore.indexes.json"
+    },
+    {
+      "database": "app-dev",
+      "rules": "infrastructure/firestore.rules",
+      "indexes": "infrastructure/firestore.indexes.json"
+    },
+    {
+      "database": "admin-private",
+      "rules": "infrastructure/firestore.rules",
+      "indexes": "infrastructure/firestore.private.indexes.json"
+    },
+    {
+      "database": "admin-private-dev",
+      "rules": "infrastructure/firestore.rules",
+      "indexes": "infrastructure/firestore.private.indexes.json"
+    }
+  ],
+  "emulators": {
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
+}

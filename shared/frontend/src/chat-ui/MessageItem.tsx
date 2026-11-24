@@ -1,0 +1,394 @@
+/**
+ * MessageItem — 訊息氣泡元件（Stitch 新版對話內頁 v0.1）
+ * AI 訊息使用白底、帶框線卡片 (`bg-white border p-8 rounded-3xl`)。
+ * 使用者訊息使用 primary 配色，特殊圓角 (`rounded-[2rem] rounded-tr-none`)。
+ * 支援 RAG 來源標示（hover 展開條文）、匿名化通知、錯誤狀態、Markdown 渲染。
+ */
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+import MaterialIcon from "./MaterialIcon";
+import ActionButtons from "./ActionButtons";
+import ProcessingTrace from "./ProcessingTrace";
+import RetrievalSources from "./RetrievalSources";
+import { getSafeResourceActions } from "./actionButtonValidation";
+import { historicalLinkSuffix, officialCitationUrl } from "./citationLinks";
+import { useI18n } from "./i18n";
+import React from "react";
+import type { ConversationMessage } from "./types";
+import type { RagSource, RagSourceType } from "../api";
+
+interface MessageItemProps {
+  message: ConversationMessage;
+  streamingStatus?: string | null;
+  showEmotions?: boolean;
+  showReasoning?: boolean;
+  onOpenSummary?: () => void;
+}
+
+const getEmotionColorClasses = (color?: string) => {
+  switch (color?.toLowerCase()) {
+    case "red":
+      return "text-error bg-error-container/30 border-error/20";
+    case "yellow":
+      return "text-yellow-700 bg-yellow-100 border-yellow-200";
+    case "green":
+      return "text-green-700 bg-green-100 border-green-200";
+    case "blue":
+      return "text-blue-700 bg-blue-100 border-blue-200";
+    case "gray":
+      return "text-gray-600 bg-gray-100 border-gray-200";
+    default:
+      return "text-secondary bg-secondary-container/30 border-secondary/20";
+  }
+};
+
+const SOURCE_ORDER: RagSourceType[] = ["law", "judgment", "remedy", "unknown"];
+
+const normalizeSource = (source: RagSource | string): RagSource => {
+  if (typeof source === "string") {
+    return {
+      label: source,
+      type: "law",
+    };
+  }
+  return {
+    ...source,
+    label: source.label,
+    type: source.type ?? "unknown",
+    collection: source.collection,
+    doc_id: source.doc_id,
+    source_url: source.source_url,
+    article: source.article,
+    version: source.version,
+  };
+};
+
+const getSourceStyle = (type: RagSourceType) => {
+  switch (type) {
+    case "law":
+      return {
+        icon: "menu_book",
+        className: "text-orange-700 bg-orange-50 border-orange-200 hover:bg-orange-100",
+        tooltipClassName: "border-orange-200",
+      };
+    case "judgment":
+      return {
+        icon: "gavel",
+        className: "text-blue-700 bg-blue-50 border-blue-200 hover:bg-blue-100",
+        tooltipClassName: "border-blue-200",
+      };
+    case "remedy":
+      return {
+        icon: "support_agent",
+        className: "text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100",
+        tooltipClassName: "border-emerald-200",
+      };
+    default:
+      return {
+        icon: "database",
+        className: "text-gray-700 bg-gray-50 border-gray-200 hover:bg-gray-100",
+        tooltipClassName: "border-gray-200",
+      };
+  }
+};
+
+export default function MessageItem({ message, streamingStatus, showEmotions = false, showReasoning = false, onOpenSummary }: MessageItemProps) {
+  const { t } = useI18n();
+  const isUser = message.role === "user";
+  const isError = message.isError;
+  const isCancelled = message.isCancelled;
+  const reasoning = showReasoning ? message.reasoning : undefined;
+  const sourceLabel = (message.contractVersion ?? 1) >= 3 ? t.citedSources : t.ragLabel;
+  const isCompleteAssistant = !isUser && !isError && !isCancelled && !message.isStreaming;
+  const resourceActions = isCompleteAssistant ? getSafeResourceActions(message.actionButtons) : [];
+  // Older saved conversations have no reply metadata and keep their plain bubble.
+  const replyAnswers = isUser && Array.isArray(message.replyContext?.answers)
+    ? message.replyContext.answers.filter((item) => item && typeof item.question === "string"
+      && item.question.trim() && typeof item.answer === "string" && item.answer.trim())
+    : [];
+  const hasRetrieval = Boolean(
+    message.ragUsed?.retrieval &&
+    ["ok", "empty", "failed"].includes(message.ragUsed.retrieval.status) &&
+    message.ragUsed.retrieval.data_types.length > 0
+  );
+  const [activeSourceType, setActiveSourceType] = React.useState<RagSourceType | null>(null);
+  const retrieval = message.ragUsed?.retrieval;
+  const listedSources = retrieval?.status === "ok"
+    ? retrieval.sources.map(normalizeSource).filter(source =>
+      retrieval.data_types.some(type => type === source.type))
+    : [];
+  const citations = (message.ragUsed?.sources ?? []).map(normalizeSource);
+  const citationLabel = (label: string) => label.normalize("NFKC").replace(/\s/g, "");
+  const sameSource = (source: RagSource, citation: RagSource) => {
+    if (source.type !== citation.type
+      || (source.collection && citation.collection && source.collection !== citation.collection)
+      || (source.version && citation.version && source.version !== citation.version)) return false;
+    if (source.doc_id && citation.doc_id) return citation.doc_id === source.doc_id;
+    return citationLabel(source.label) === citationLabel(citation.label);
+  };
+  const trustedLinks = new Set([
+    ...citations.map(citation => officialCitationUrl(citation.source_url)),
+    ...resourceActions.map(action => action.action === "url" ? officialCitationUrl(action.url) : null),
+  ].filter((url): url is string => url !== null));
+  const trustedLinksByLength = [...trustedLinks].sort((a, b) => b.length - a.length);
+  const citedSources = citations.filter(citation => !listedSources.some(source => sameSource(source, citation)));
+  const retrievalWithCitationLinks = retrieval?.status === "ok" ? {
+    ...retrieval,
+    sources: retrieval.sources.map(item => {
+      const source = normalizeSource(item);
+      if (officialCitationUrl(source.source_url)) return item;
+      const citation = citations.find(candidate => sameSource(source, candidate) &&
+        officialCitationUrl(candidate.source_url));
+      return citation ? { ...source, source_url: citation.source_url } : item;
+    }),
+  } : retrieval;
+  const sourceGroups = React.useMemo(() => {
+    const sources = message.ragUsed?.sources ?? [];
+    const groups = new Map<RagSourceType, RagSource[]>();
+    sources.map(normalizeSource).forEach((source) => {
+      const type = source.type ?? "unknown";
+      const list = groups.get(type) ?? [];
+      if (!list.some((item) => item.label === source.label && item.collection === source.collection)) {
+        list.push(source);
+      }
+      groups.set(type, list);
+    });
+    return SOURCE_ORDER
+      .filter((type) => groups.has(type))
+      .map((type) => ({ type, sources: groups.get(type) ?? [] }));
+  }, [message.ragUsed?.sources]);
+
+  const getSourceTypeLabel = (type: RagSourceType) => {
+    switch (type) {
+      case "law":
+        return t.ragSourceLaw;
+      case "judgment":
+        return t.ragSourceJudgment;
+      case "remedy":
+        return t.ragSourceRemedy;
+      default:
+        return t.ragSourceUnknown;
+    }
+  };
+
+  const activeSourceGroup = sourceGroups.find(({ type }) => type === activeSourceType);
+  // Reply text is authoritative across contract versions. Historical section
+  // metadata is only a fallback for an otherwise empty completed response.
+  const content = message.content.trim() || !isCompleteAssistant ? message.content
+    : message.answerSections?.map(section => section.text.trim()).filter(Boolean).join("\n\n") ?? "";
+
+  return (
+    <div
+      className={`animate-fade-in-up flex gap-2 sm:gap-4 max-w-4xl ${
+        isUser ? "ml-auto flex-row-reverse items-start" : ""
+      }`}
+    >
+      {/* Avatar 與 Emotion 標籤容器 */}
+      <div className="flex flex-col items-center gap-1 shrink-0">
+        <div
+          className={`
+            w-8 h-8 rounded-full flex items-center justify-center shadow-sm
+            ${
+              isUser
+                ? "bg-secondary text-white"
+                : isError
+                  ? "bg-error-container text-error"
+                  : "bg-primary text-white"
+            }
+          `}
+        >
+          {isUser ? (
+            <MaterialIcon icon="person" size={16} />
+          ) : isError ? (
+            <MaterialIcon icon="error" size={16} />
+          ) : (
+            <MaterialIcon icon="shield" size={16} filled />
+          )}
+        </div>
+        {!isUser && onOpenSummary && <button data-summary-trigger type="button" onClick={onOpenSummary} aria-label={t.caseSummaryOpen} title={t.caseSummaryOpen}
+          className="flex h-11 w-11 items-center justify-center rounded-xl text-on-surface/60 transition-colors hover:bg-primary/10 hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">
+          <MaterialIcon icon="description" size={17} />
+        </button>}
+        {/* 情緒標籤 (僅針對使用者訊息顯示) */}
+        {isUser && showEmotions && message.emotion && (
+          <span
+            className={`text-[0.625rem] font-medium px-1.5 py-0.5 rounded border ${getEmotionColorClasses(message.emotionColor)}`}
+          >
+            {message.emotion}
+          </span>
+        )}
+      </div>
+
+      {/* 訊息氣泡 */}
+      <div
+        className={`min-w-0 text-sm flex flex-col gap-2
+          ${
+              isUser
+                ? "bg-primary text-white py-3 px-5 lg:px-6 rounded-[2rem] rounded-tr-none shadow-md"
+                : isError
+                  ? "bg-error-container/30 text-error border border-error/15 p-5 lg:p-6 rounded-3xl shadow-sm"
+                  : "space-y-2 bg-white p-5 lg:p-6 rounded-3xl border border-outline/10 shadow-sm leading-relaxed text-on-surface"
+          }
+        `}
+      >
+        {/* 如果有上傳圖片，顯示圖片預覽 */}
+        {isUser && message.imageUrl && (
+          <img
+            src={message.imageUrl}
+            alt="Uploaded attachment"
+            className="max-w-[200px] lg:max-w-xs rounded-xl object-contain border border-white/20 mb-1 shadow-sm"
+          />
+        )}
+
+        {/* 訊息內容 */}
+        {!isCancelled && replyAnswers.length > 0 && (
+          <div aria-label={t.chatReplyContent} className="space-y-4">
+            {replyAnswers.map(({ question, answer }, index) => (
+              <div key={index} className="space-y-2.5">
+                <blockquote aria-label={t.chatRepliedQuestion} className="border-l-2 border-white/30 pl-3 text-xs leading-relaxed text-white/65">
+                  <span className="mb-1 flex items-center gap-1 text-[0.625rem] font-medium">
+                    <span aria-hidden="true"><MaterialIcon icon="reply" size={14} /></span>{t.chatReplyLabel}
+                  </span>
+                  <p className="whitespace-pre-wrap break-words">{question}</p>
+                </blockquote>
+                <p className="whitespace-pre-wrap break-words font-medium leading-relaxed text-white">{answer}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        {replyAnswers.length === 0 && content && <div className={`${isUser ? "font-medium whitespace-pre-wrap" : "markdown-message"} break-words`}>
+          {isUser || isError ? (
+            content
+          ) : (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a: ({ children, href, node }) => {
+                  const url = officialCitationUrl(href);
+                  if (url && trustedLinks.has(url)) {
+                    return <a href={url} target="_blank" rel="noopener noreferrer">{children}</a>;
+                  }
+                  const offset = node?.position?.start.offset;
+                  const isBare = offset !== undefined && /^https?:\/\//i.test(content.slice(offset));
+                  const repaired = isBare && url && typeof children === "string"
+                    ? historicalLinkSuffix(url, children, trustedLinksByLength)
+                    : null;
+                  if (repaired) {
+                    return <><a href={repaired.url} target="_blank" rel="noopener noreferrer">{repaired.url}</a>{repaired.suffix}</>;
+                  }
+                  return <>{children}</>;
+                },
+              }}
+            >
+              {content}
+            </ReactMarkdown>
+          )}
+        </div>}
+
+        {message.isStreaming && !message.processingTrace && <p role="status" className="text-xs text-on-surface/50 animate-pulse">{streamingStatus ?? t.chatReplying}</p>}
+        {isCancelled && <p className="text-sm font-medium text-on-surface/55">{message.content ? t.chatStoppedIncomplete : t.chatStopped}</p>}
+        {message.interruptionReason && <p role="alert" className="text-sm font-medium">{message.interruptionReason}</p>}
+        {message.superseded && <p className="text-xs text-on-surface/60">{t.supersededAnswer}</p>}
+        {!isUser && Boolean(message.processingTrace || message.analysis?.length || reasoning?.length) && <ProcessingTrace trace={message.processingTrace ?? { steps: [], duration_ms: 0, outcome: message.isStreaming ? "running" : message.isError ? "error" : message.isCancelled ? "cancelled" : "complete" }} analysis={message.analysis} reasoning={reasoning} />}
+        {!isUser && !isError && !isCancelled && message.debugToolCalls !== undefined && (
+          <details className="mt-3 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-xs text-amber-950">
+            <summary className="flex cursor-pointer items-center gap-1.5 font-semibold">
+              <MaterialIcon icon="code" size={15} />
+              {t.debugToolCalls(message.debugToolCalls.length)}
+            </summary>
+            {message.debugToolCalls.length > 0 && (
+              <div className="mt-2 space-y-2 border-t border-amber-300/50 pt-2 font-mono text-[0.6875rem] leading-5">
+                {message.debugToolCalls.map((toolCall, index) => (
+                  <div key={`${toolCall.name}-${index}`}>
+                    <p className="font-semibold">{toolCall.name}</p>
+                    <p className="break-words">{t.debugToolArguments}{JSON.stringify(toolCall.arguments)}</p>
+                    <p>{t.debugToolResults(toolCall.result_count)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </details>
+        )}
+        {/* 底部標示列 */}
+        {isCompleteAssistant && (hasRetrieval || (message.ragUsed?.status && sourceGroups.length > 0) || message.anonymized || resourceActions.length > 0) && (
+          <div className="mt-4 space-y-3 border-t border-outline/10 pt-4">
+            {hasRetrieval && citedSources.length > 0 && (
+              <section aria-label={t.citedSources} className="min-w-0 space-y-1.5 text-xs">
+                <p className="font-semibold text-on-surface/65">{t.citedSources}</p>
+                <ul className="flex flex-wrap gap-2">
+                  {citedSources.map((source, index) => {
+                    const url = officialCitationUrl(source.source_url);
+                    return <li key={source.doc_id ?? `${source.label}-${index}`} className="min-w-0 max-w-full rounded-lg border border-primary/15 bg-primary/5 px-2.5 py-1.5">
+                      {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="break-words font-medium text-primary underline">{source.label}</a>
+                        : <span className="break-words text-on-surface/80">{source.label}</span>}
+                    </li>;
+                  })}
+                </ul>
+              </section>
+            )}
+            {hasRetrieval ? <RetrievalSources retrieval={retrievalWithCitationLinks} /> : (
+              message.ragUsed?.status && sourceGroups.length > 0 && (
+                <div className="min-w-0 space-y-2">
+                  <p className="text-xs font-semibold text-on-surface/65">{sourceLabel}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                  {sourceGroups.map(({ type, sources }) => {
+                    const style = getSourceStyle(type);
+                    const isActive = activeSourceType === type;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setActiveSourceType(isActive ? null : type)}
+                        className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[0.6875rem] font-semibold transition-colors ${style.className}`}
+                        aria-expanded={isActive}
+                        aria-label={`${sourceLabel}：${getSourceTypeLabel(type)}`}
+                      >
+                        <MaterialIcon icon={style.icon} size={14} />
+                        <span>{getSourceTypeLabel(type)}</span>
+                        <span className="tabular-nums opacity-70">{sources.length}</span>
+                      </button>
+                    );
+                  })}
+                  </div>
+                </div>
+              )
+            )}
+            {resourceActions.length > 0 && <ActionButtons actions={resourceActions} />}
+            {!hasRetrieval && message.ragUsed?.status && activeSourceGroup && (
+              <div className="min-w-0 overflow-hidden rounded-lg border border-outline/15 bg-surface-container-low text-xs text-on-surface">
+                <div className="flex items-center gap-2 border-b border-outline/10 px-3 py-2 font-semibold">
+                  <MaterialIcon icon={getSourceStyle(activeSourceGroup.type).icon} size={15} />
+                  <span>{getSourceTypeLabel(activeSourceGroup.type)}</span>
+                </div>
+                <ul className="max-h-44 space-y-2 overflow-y-auto p-3 pr-2">
+                  {activeSourceGroup.sources.map((src, i) => (
+                    <li
+                      key={`${src.label}-${i}`}
+                      className="min-w-0 break-words rounded-md bg-white px-3 py-2 leading-relaxed shadow-sm"
+                    >
+                      <span>{src.label}</span>
+                      {src.article && <span className="ml-2">{src.article}</span>}
+                      {src.version && <span className="ml-2 text-on-surface/60">{src.version}</span>}
+                      {typeof src.promulgated_date === "string" && <p className="mt-1 text-on-surface/60">{t.sourcePromulgatedDate}：{src.promulgated_date}</p>}
+                      {typeof src.effective_date === "string" && <p className="mt-1 text-on-surface/60">{t.sourceEffectiveDate}：{src.effective_date}</p>}
+                      {typeof src.checked_at === "string" && <p className="mt-1 text-on-surface/60">{t.sourceCheckedAt}：{src.checked_at}</p>}
+                      {typeof src.effective_note === "string" && <p className="mt-1 text-on-surface/60">{src.effective_note}</p>}
+                      {officialCitationUrl(src.source_url) && <a href={officialCitationUrl(src.source_url) ?? undefined} target="_blank" rel="noreferrer" className="ml-2 text-primary underline">{t.answerBasis}</a>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {message.anonymized && (
+              <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-medium text-secondary bg-secondary-fixed/50 px-2.5 py-1 rounded-full">
+                <MaterialIcon icon="shield_with_heart" size={14} />
+                {t.anonymizedLabel}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

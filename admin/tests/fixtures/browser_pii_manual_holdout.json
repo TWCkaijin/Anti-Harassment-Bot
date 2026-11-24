@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "createdFor": "Independent browser PII diagnostic holdout, 2026-11-10",
+    "annotation": "Agent-curated exact spans and types; pending independent human adjudication",
+    "humanReviewed": false,
+    "syntheticOnly": true,
+    "source": "Original fictional scenarios written for this holdout; not generated from the 120-case fixture templates or source workbooks",
+    "policy": "Person names and organizations are invented. District names are fictional; emails use the reserved .invalid TLD; identifiers are deliberately marked SIM; the telephone uses an invalid all-zero subscriber prefix. No real user data."
+  },
+  "cases": [
+    {
+      "id": "MH-01",
+      "category": "person",
+      "text": "在虛構的陶藝社值班紀錄裡，柳澄薇說有人一直替她代簽，她想先確認紙本紀錄由誰保管。",
+      "expected": [{"text": "柳澄薇", "type": "person"}]
+    },
+    {
+      "id": "MH-02",
+      "category": "organization",
+      "text": "會議便條只寫到暮杉影像有限公司，沒有列出任何員工姓名；詢問者希望知道應如何保存這張便條。",
+      "expected": [{"text": "暮杉影像有限公司", "type": "organization"}]
+    },
+    {
+      "id": "MH-03",
+      "category": "address",
+      "text": "這是完全虛構的寄件資料：臺中市霧丘區棠光路88巷6號3樓。請只協助判斷哪些內容不宜貼進公開討論區。",
+      "expected": [{"text": "臺中市霧丘區棠光路88巷6號3樓", "type": "address"}]
+    },
+    {
+      "id": "MH-04",
+      "category": "contact",
+      "text": "測試表單留下 reply27@example.invalid 與 02-0000-3141；收件者尚未決定是否要回覆。",
+      "expected": [{"text": "reply27@example.invalid", "type": "contact"}, {"text": "02-0000-3141", "type": "contact"}]
+    },
+    {
+      "id": "MH-05",
+      "category": "identifier",
+      "text": "虛構校務系統顯示學號 STU-XK-00471，旁邊還列了測試帳號 ACCT-SIM-71028。兩者都不應出現在公開摘要。",
+      "expected": [{"text": "STU-XK-00471", "type": "identifier"}, {"text": "ACCT-SIM-71028", "type": "identifier"}]
+    },
+    {
+      "id": "MH-06",
+      "category": "mixed",
+      "text": "這是一封沒有真正收件人的模擬申訴草稿。秦歆然在虹棧資料工作室協助整理道具清單，發現前一版紙張被別人反覆取走，打算先保留版本紀錄。草稿把虛構收件處寫成新北市青灣區橙橋街17號2樓，另附 case42@example.invalid 與代碼 LAB-SIM-7028，方便之後從自己的電腦找回檔案。她沒有提供照片，也沒有要求任何人代為聯絡對方；目前只想把已知事件和仍待確認的部分分開。這段文字只用來測試本機辨識，不代表真實事件。",
+      "expected": [{"text": "秦歆然", "type": "person"}, {"text": "虹棧資料工作室", "type": "organization"}, {"text": "新北市青灣區橙橋街17號2樓", "type": "address"}, {"text": "case42@example.invalid", "type": "contact"}, {"text": "LAB-SIM-7028", "type": "identifier"}]
+    },
+    {
+      "id": "MH-07",
+      "category": "clean_negative",
+      "text": "我只有大概的時間順序：週二下午先開會，週四再補寫紀錄。可以先說明如何區分親眼所見與轉述嗎？不要替任何人猜測動機。",
+      "expected": []
+    },
+    {
+      "id": "MH-08",
+      "category": "clean_negative",
+      "text": "【當事人甲】和【同事乙】只是匿名代稱。文中提到臺北市、成年人、113、110、119，以及法條第 7 條，沒有門牌、真實姓名或聯絡資料。",
+      "expected": []
+    },
+    {
+      "id": "MH-09",
+      "category": "person_organization",
+      "text": "在一個虛構的舞台製作專案中，蘇珞寧把分工單交給曦笛場景設計有限公司的窗口，後來發現備註欄出現她未曾同意的說法。她希望先保存舊版與新版的差異，也想記下看到備註的確切時間。此時不需要猜出是誰修改文件，更不需要推測那句話是否出於惡意。因為大家都可能接觸共用檔案，她想用中性的描述方式詢問紀錄保留期限，並把求助內容限縮在自己直接看到的事實。若要整理成摘要，請保留目前仍無法確認的地方。她也希望保留每次詢問的原始文字，以便日後比對自己的筆記是否有遺漏。",
+      "expected": [{"text": "蘇珞寧", "type": "person"}, {"text": "曦笛場景設計有限公司", "type": "organization"}]
+    },
+    {
+      "id": "MH-10",
+      "category": "address_contact",
+      "text": "虛構的失物招領通知把取件點填成高雄市杉島區潮紋路32號5樓之1，回覆欄則填 helpdesk9@example.invalid。寄件人並沒有提供照片，只說包裹上的標籤被改過一次。接到通知的人想先向場地方確認是否真的有這項寄物服務，再決定要不要提供更多資料。她不希望把地址或信箱轉貼到社群，也不希望在尚未確認的情況下把推測寫成事實。這份文字用於測試辨識完整片段，與任何實際店家或住戶無關。如果對方要求立即回覆，她會先回到原先的通知管道核對，而不是直接照單上的指示操作。",
+      "expected": [{"text": "高雄市杉島區潮紋路32號5樓之1", "type": "address"}, {"text": "helpdesk9@example.invalid", "type": "contact"}]
+    },
+    {
+      "id": "MH-11",
+      "category": "person_identifier",
+      "text": "顧沛嵐替自己建立一份虛構的事件索引，編號是 REG-SIM-2814。索引只用來對照她手上的紙本便條，沒有寄給其他人。她依照時間順序寫下三個片段：先在公共空間聽見一句話，稍後發現便條被移動，最後和管理員確認放置位置。她不確定這些片段是否有關，也不想先替他人下結論。若系統協助她改寫敘述，應保留不確定性及她尚未採取正式申訴的意思。她已經把原始紀錄放在自己的裝置上。她還想知道哪些記錄適合留在個人筆記，哪些內容可能需要在分享前先遮罩。",
+      "expected": [{"text": "顧沛嵐", "type": "person"}, {"text": "REG-SIM-2814", "type": "identifier"}]
+    },
+    {
+      "id": "MH-12",
+      "category": "mixed",
+      "text": "模擬工作單記載：葉知蓁借用金織社區實驗室的展示板，預定歸還到臺南市星港區蓮帆路41號4樓。為免紙本備註遺失，她用 archive5@example.invalid 做本機測試，檔案代碼是 NOTE-SIM-5106。工作單後半段只描述展示板曾被搬到另一間教室，以及她已請現場人員協助找回，沒有指稱特定的人故意移動。她希望摘要只保留能核對的步驟，同時提醒自己不要把完整工作單貼到公開留言。這是完全杜撰的情境，地址中的行政區也不存在。",
+      "expected": [{"text": "葉知蓁", "type": "person"}, {"text": "金織社區實驗室", "type": "organization"}, {"text": "臺南市星港區蓮帆路41號4樓", "type": "address"}, {"text": "archive5@example.invalid", "type": "contact"}, {"text": "NOTE-SIM-5106", "type": "identifier"}]
+    },
+    {
+      "id": "MH-13",
+      "category": "contact_url",
+      "text": "我的虛構私人筆記頁面是 https://example.invalid/u/sim-note-61；我不想在公開摘要中保留這個連結。",
+      "expected": [{"text": "https://example.invalid/u/sim-note-61", "type": "contact"}]
+    },
+    {
+      "id": "MH-14",
+      "category": "address_identifier",
+      "text": "測試登記卡寫著新竹市雲紋區慢雨街12號，卡號 CARD-SIM-3095。收卡人會在確認資料用途後自行決定是否保存。",
+      "expected": [{"text": "新竹市雲紋區慢雨街12號", "type": "address"}, {"text": "CARD-SIM-3095", "type": "identifier"}]
+    },
+    {
+      "id": "MH-15",
+      "category": "clean_negative_long",
+      "text": "這是一則不含特定身分資料的練習敘述。某人在活動結束後發現共用桌面上的資料被挪動，但不能確定是清潔、場地調整，還是有人正在取用。她先把自己看見的順序寫下來，也把只從別人口中聽到的部分另作標記。摘要可以提醒她保存原始版本、詢問場地方的資料保留方式，以及決定是否需要進一步求助。文中提到的星期六、下午三點、成年人和某座城市都不足以識別個人，也沒有任何實際地址、電話、信箱、證件或單位名稱。請避免把泛稱推成具體身分。",
+      "expected": []
+    },
+    {
+      "id": "MH-16",
+      "category": "person_organization_contact",
+      "text": "虛構的講座報名紀錄由黎杏樾保管，承辦單位寫成藍汀工藝學院，聯絡欄位則是 course18@example.invalid。活動結束後，有參加者發現自己的草稿被誤放進共用資料夾，於是請承辦方先確認權限設定。保管人只同意核對哪些檔案曾被看見，沒有同意把名冊轉寄給其他人。摘要應說明誤放與後續核對的順序，並清楚標出目前不知道誰曾開啟資料夾。這個故事、學院與聯絡方式都是測試用的虛構資料，也不應被當成通過正式驗收的證明。",
+      "expected": [{"text": "黎杏樾", "type": "person"}, {"text": "藍汀工藝學院", "type": "organization"}, {"text": "course18@example.invalid", "type": "contact"}]
+    }
+  ]
+}
