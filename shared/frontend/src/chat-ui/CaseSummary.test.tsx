@@ -1,8 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { I18nProvider } from "../i18n";
+import { I18nProvider } from "./i18n";
 import CaseSummary from "./CaseSummary";
-import type { CaseContext } from "../services/caseFacts";
+import type { CaseContext } from "../caseFacts";
 beforeEach(() => localStorage.clear());
 const context: CaseContext = { schema_version: 3, revision: 3, facts: {}, summary: "本人在公車上被碰觸，對方身分不明。", summary_origin: "model" };
 

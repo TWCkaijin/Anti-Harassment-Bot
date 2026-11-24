@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { formatConversationText } from "./conversationExport";
-import zhTW from "../i18n/locales/zh-TW";
-import en from "../i18n/locales/en";
+import zhTW from "@rag/shared/chat-ui/i18n/locales/zh-TW";
+import en from "@rag/shared/chat-ui/i18n/locales/en";
 it.each([zhTW, en])("exports the bounded summary with version and all three statuses alongside messages", labels => {
   const text = formatConversationText({ id: "test", createdAt: 1, messages: [{ id: "m", role: "user", content: "請說明", timestamp: 1 }], caseFacts: { schema_version: 1, revision: 4, facts: { other_role: { status: "provided", value: "主管" }, city: { status: "declined" }, event_time: { status: "unknown" } } } }, labels);
   expect(text).toContain("schema_version: 1, revision: 4");

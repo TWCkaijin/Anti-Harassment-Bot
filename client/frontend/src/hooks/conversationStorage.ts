@@ -1,6 +1,6 @@
 import type { ConversationMessage, ConversationSession } from "./useConversation";
 import { hasCaseContext, isCaseContext, isClarification, isClarificationDraft, isFactUpdate, isRecord, normalizeCaseContext, toSummaryContext, type CaseContext, type LegacyCaseContext } from "../services/caseFacts";
-import { sanitizeProcessingTrace } from "../services/processingTrace";
+import { sanitizeProcessingTrace } from "@rag/shared/chat-ui";
 import { sanitizeAnalysis } from "../services/analysis";
 import { isRetrievalReport } from "../services/api";
 

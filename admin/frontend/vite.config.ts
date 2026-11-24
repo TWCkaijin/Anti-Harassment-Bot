@@ -54,7 +54,7 @@ export default defineConfig(({ mode }) => ({
         url: 'http://localhost/',
       },
     },
-    setupFiles: ['./src/test/setup.ts'],
+    setupFiles: ['../../shared/frontend/src/test/setup.ts'],
     coverage: {
       provider: 'v8' as const,
       reporter: ['text', 'json-summary', 'lcov'],

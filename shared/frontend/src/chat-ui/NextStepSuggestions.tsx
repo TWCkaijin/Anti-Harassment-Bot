@@ -1,9 +1,9 @@
-import { trackAnalytics } from "../services/analytics";
+import { trackAnalytics } from "./analytics";
 import { useRef, useState } from "react";
 
-import type { ActionOption } from "../services/api";
+import type { ActionOption } from "../api";
 import { limitDistinctOptions, MAX_LEGACY_PREDEFINED_OPTIONS } from "./choiceOptions";
-import { settleSendOutcome, type SendOutcome } from "../services/sendOutcome";
+import { settleSendOutcome, type SendOutcome } from "./sendOutcome";
 
 interface NextStepSuggestionsProps {
   suggestions: ActionOption[];

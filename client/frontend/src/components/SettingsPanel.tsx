@@ -4,8 +4,8 @@ import { hasAnalyticsConsent, isAnalyticsConfigured, setAnalyticsConsent } from 
  * 語言切換、色彩組合（暫時佔位）、本地紀錄管理、匯出對話。
  */
 import { useState } from "react";
-import MaterialIcon from "./MaterialIcon";
-import { useI18n, type Locale } from "../i18n";
+import { MaterialIcon } from "@rag/shared/chat-ui";
+import { useI18n, type Locale } from "@rag/shared/chat-ui";
 import type { ConversationSession } from "../hooks/useConversation";
 import { formatConversationText } from "../services/conversationExport";
 import { TEXT_SIZES, type TextSize } from "../hooks/useTextSizePreference";

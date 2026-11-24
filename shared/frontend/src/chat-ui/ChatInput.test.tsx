@@ -1,14 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { I18nProvider } from "../i18n";
+import { I18nProvider } from "./i18n";
 import {
   MAX_USER_MESSAGE_CHARACTERS,
   USER_MESSAGE_TOO_LONG_ERROR,
-} from "../hooks/conversationHistory";
+} from "../conversationHistory";
 import ChatInput from "./ChatInput";
-import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE, MAX_IMAGE_BYTES } from "../services/imageUpload";
-import type { ConversationMessage } from "../hooks/useConversation";
+import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE, MAX_IMAGE_BYTES } from "../imageUpload";
+import type { ConversationMessage } from "./types";
 
 const replyPrompt: ConversationMessage = {
   id: "assistant-1",

@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConversationMessage } from "../hooks/useConversation";
-import { I18nProvider } from "../i18n";
+import { I18nProvider } from "@rag/shared/chat-ui";
 import { checkHealth, type OptionsActionButton } from "../services/api";
 import ChatArea from "./ChatArea";
 

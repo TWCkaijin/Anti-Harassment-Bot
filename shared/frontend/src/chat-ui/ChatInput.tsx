@@ -10,21 +10,21 @@ import {
   type KeyboardEvent,
 } from "react";
 import MaterialIcon from "./MaterialIcon";
-import { settleSendOutcome, type SendOutcome } from "../services/sendOutcome";
-import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE } from "../services/imageUpload";
-import { useImageAttachment } from "../hooks/useImageAttachment";
-import { useAutosizeTextarea } from "../hooks/useAutosizeTextarea";
+import { settleSendOutcome, type SendOutcome } from "./sendOutcome";
+import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE } from "../imageUpload";
+import { useImageAttachment } from "./useImageAttachment";
+import { useAutosizeTextarea } from "./useAutosizeTextarea";
 import FollowUpPanel from "./FollowUpPanel";
 import TypedClarification from "./TypedClarification";
 import NextStepSuggestions from "./NextStepSuggestions";
-import type { ConversationMessage, ReplyContext } from "../hooks/useConversation";
+import type { ConversationMessage, ReplyContext } from "./types";
 import { getFollowUpData } from "./actionButtonValidation";
-import { useI18n } from "../i18n";
-import { isClarification, type ClarificationDraft } from "../services/caseFacts";
+import { useI18n } from "./i18n";
+import { isClarification, type ClarificationDraft } from "../caseFacts";
 import {
   getUserMessageValidationError,
   MAX_USER_MESSAGE_CHARACTERS,
-} from "../hooks/conversationHistory";
+} from "../conversationHistory";
 
 interface ChatInputProps {
   inputLabel?: string;

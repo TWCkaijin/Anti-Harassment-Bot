@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import SettingsPanel from "./SettingsPanel";
-import { I18nProvider } from "../i18n";
+import { I18nProvider } from "@rag/shared/chat-ui";
 import { hasAnalyticsConsent, isAnalyticsConfigured, setAnalyticsConsent } from "../services/analytics";
 vi.mock("../services/analytics", () => ({
   hasAnalyticsConsent: vi.fn(() => false), isAnalyticsConfigured: vi.fn(() => true),

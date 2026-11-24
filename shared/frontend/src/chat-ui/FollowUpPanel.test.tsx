@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ActionButton, OptionsActionButton } from "../services/api";
+import type { ActionButton, OptionsActionButton } from "../api";
 import FollowUpPanel from "./FollowUpPanel";
 
 const optionsAction: OptionsActionButton = {

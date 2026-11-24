@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { validateImageDataUrl, validateImageFile } from "../services/imageUpload";
+import { validateImageDataUrl, validateImageFile } from "../imageUpload";
 
 export interface ImageAttachment { file: File; dataUrl: string }
 

@@ -5,9 +5,9 @@ import {
   MAX_USER_MESSAGE_CHARACTERS,
   USER_MESSAGE_TOO_LONG_ERROR,
 } from "../hooks/conversationHistory";
-import { I18nProvider, useI18n } from "../i18n";
+import { I18nProvider, useI18n } from "@rag/shared/chat-ui";
 import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE, MAX_IMAGE_BYTES } from "../services/imageUpload";
-import type { SendOutcome } from "../services/sendOutcome";
+import type { SendOutcome } from "@rag/shared/chat-ui";
 import WelcomeHero from "./WelcomeHero";
 
 beforeEach(() => {

@@ -1,4 +1,4 @@
-import type { ActionOption } from "../services/api";
+import type { ActionOption } from "../api";
 
 // Typed questions always reserve room for unknown, declined, and free text.
 const MAX_TYPED_CHOICES = 6;

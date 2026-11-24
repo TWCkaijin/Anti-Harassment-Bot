@@ -1,5 +1,5 @@
-import type { OptionsActionButton, TelActionButton, UrlActionButton } from "../services/api";
-import { getUserMessageValidationError, MAX_USER_MESSAGE_CHARACTERS } from "../hooks/conversationHistory";
+import type { OptionsActionButton, TelActionButton, UrlActionButton } from "../api";
+import { getUserMessageValidationError, MAX_USER_MESSAGE_CHARACTERS } from "../conversationHistory";
 import { limitDistinctOptions, MAX_LEGACY_PREDEFINED_OPTIONS } from "./choiceOptions";
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import MaterialIcon from "./MaterialIcon";
-import { useI18n } from "../i18n";
+import { MaterialIcon } from "@rag/shared/chat-ui";
+import { useI18n } from "@rag/shared/chat-ui";
 import type { ConversationSession } from "../hooks/useConversation";
 import { formatConversationText } from "../services/conversationExport";
 import { hasCaseContext } from "../services/caseFacts";

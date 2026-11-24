@@ -3,8 +3,8 @@
  * 固定在右側底部。純圓形圖示，無文字標籤（保留 hover tooltip 增加易用性）。
  * 113 為紅色愛心盾牌，110 為深灰安全盾牌。
  */
-import MaterialIcon from "./MaterialIcon";
-import { useI18n } from "../i18n";
+import { MaterialIcon } from "@rag/shared/chat-ui";
+import { useI18n } from "@rag/shared/chat-ui";
 
 export default function EmergencyFab() {
   const { t } = useI18n();

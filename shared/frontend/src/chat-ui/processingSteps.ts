@@ -1,5 +1,5 @@
-import { CHAT_PROGRESS_PHASES, type ChatProgress } from "./api";
-import { isRecord } from "./caseFacts";
+import { CHAT_PROGRESS_PHASES, type ChatProgress } from "../api";
+import { isRecord } from "../caseFacts";
 
 export type ProcessingPhase = ChatProgress["phase"] | "connecting" | "retrying";
 export interface ProcessingStep { phase: ProcessingPhase; elapsed_ms: number; attempt: number }

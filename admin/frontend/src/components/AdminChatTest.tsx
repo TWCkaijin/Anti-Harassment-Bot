@@ -9,12 +9,12 @@ import {
   type TestMode,
   type TestRun,
 } from "../hooks/useDiagnosticChat";
-import { I18nProvider } from "../../../../client/frontend/src/i18n";
-import ChatInput from "../../../../client/frontend/src/components/ChatInput";
-import MessageItem from "../../../../client/frontend/src/components/MessageItem";
-import CaseSummary from "../../../../client/frontend/src/components/CaseSummary";
-import TypingIndicator from "../../../../client/frontend/src/components/TypingIndicator";
-import MaterialIcon from "./MaterialIcon";
+import { I18nProvider } from "@rag/shared/chat-ui";
+import { ChatInput } from "@rag/shared/chat-ui";
+import { MessageItem } from "@rag/shared/chat-ui";
+import { CaseSummary } from "@rag/shared/chat-ui";
+import { TypingIndicator } from "@rag/shared/chat-ui";
+import { MaterialIcon } from "@rag/shared/chat-ui";
 import DiagnosticSettings from "./DiagnosticSettings";
 
 const DIAGNOSTIC_SECTIONS = [

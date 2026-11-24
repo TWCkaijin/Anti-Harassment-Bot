@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { ActionButton } from "../services/api";
-import MaterialIcon from "./MaterialIcon";
+import { MaterialIcon } from "@rag/shared/chat-ui";
 
 interface SkillActionsEditorProps {
   actions: ActionButton[];

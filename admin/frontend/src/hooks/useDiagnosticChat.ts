@@ -4,7 +4,7 @@ import { applySummaryUpdate, emptySummaryContext, isCaseContext, parseFact, toSu
 import { createChatRequest } from "@rag/shared/conversationHistory";
 import { preparePrivateRequest } from "../services/privateRequest";
 import { temporaryOverrides } from "../services/runtimeConfig";
-import type { ConversationMessage, ReplyContext } from "../../../../client/frontend/src/hooks/useConversation";
+import type { ConversationMessage, ReplyContext } from "@rag/shared/chat-ui";
 
 export type TestMode = "chat" | "applicable_laws_v1";
 export interface TestRun { id: number; mode: TestMode; request: ChatRequest; result: AdminChatTestResult | AdminApplicableLawTestResult; comparison: boolean }

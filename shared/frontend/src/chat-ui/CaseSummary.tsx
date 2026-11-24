@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useI18n } from "../i18n";
-import { MAX_SUMMARY_LENGTH, toSummaryText, type SummaryCaseContext, type CaseContext } from "../services/caseFacts";
+import { useI18n } from "./i18n";
+import { MAX_SUMMARY_LENGTH, toSummaryText, type SummaryCaseContext, type CaseContext } from "../caseFacts";
 import MaterialIcon from "./MaterialIcon";
 
 interface Props {

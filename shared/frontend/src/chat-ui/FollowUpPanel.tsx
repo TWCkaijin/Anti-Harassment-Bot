@@ -1,13 +1,13 @@
-import { trackAnalytics } from "../services/analytics";
+import { trackAnalytics } from "./analytics";
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 
-import { getUserMessageValidationError } from "../hooks/conversationHistory";
-import type { ReplyContext } from "../hooks/useConversation";
-import type { ActionButton, ActionOption } from "../services/api";
+import { getUserMessageValidationError } from "../conversationHistory";
+import type { ReplyContext } from "./types";
+import type { ActionButton, ActionOption } from "../api";
 import { getFollowUpData } from "./actionButtonValidation";
 import MaterialIcon from "./MaterialIcon";
 import HideOptionsButton from "./HideOptionsButton";
-import { settleSendOutcome, type SendOutcome } from "../services/sendOutcome";
+import { settleSendOutcome, type SendOutcome } from "./sendOutcome";
 
 interface FollowUpPanelProps {
   suggestedReplies?: string[];

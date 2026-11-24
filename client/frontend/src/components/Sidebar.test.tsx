@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { I18nProvider } from "../i18n";
+import { I18nProvider } from "@rag/shared/chat-ui";
 import Sidebar from "./Sidebar";
 import type { ConversationSession } from "../hooks/useConversation";
 const session: ConversationSession = { id: "one", title: "合成測試", createdAt: 1, messages: [{ id: "u", role: "user", content: "測試", timestamp: 1 }] };

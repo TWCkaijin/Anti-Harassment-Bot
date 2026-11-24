@@ -13,10 +13,10 @@ import ProcessingTrace from "./ProcessingTrace";
 import RetrievalSources from "./RetrievalSources";
 import { getSafeResourceActions } from "./actionButtonValidation";
 import { historicalLinkSuffix, officialCitationUrl } from "./citationLinks";
-import { useI18n } from "../i18n";
+import { useI18n } from "./i18n";
 import React from "react";
-import type { ConversationMessage } from "../hooks/useConversation";
-import type { RagSource, RagSourceType } from "../services/api";
+import type { ConversationMessage } from "./types";
+import type { RagSource, RagSourceType } from "../api";
 
 interface MessageItemProps {
   message: ConversationMessage;

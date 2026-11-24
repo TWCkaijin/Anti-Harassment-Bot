@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useI18n } from "../i18n";
-import type { ReplyContext } from "../hooks/useConversation";
-import { isClarificationDraft, MAX_FACT_VALUE_LENGTH, type Clarification, type CaseFact, type ClarificationDraft } from "../services/caseFacts";
+import { useI18n } from "./i18n";
+import type { ReplyContext } from "./types";
+import { isClarificationDraft, MAX_FACT_VALUE_LENGTH, type Clarification, type CaseFact, type ClarificationDraft } from "../caseFacts";
 import { limitDistinctOptions, MAX_TYPED_PREDEFINED_OPTIONS } from "./choiceOptions";
 import HideOptionsButton from "./HideOptionsButton";
-import { settleSendOutcome, type SendOutcome } from "../services/sendOutcome";
+import { settleSendOutcome, type SendOutcome } from "./sendOutcome";
 interface Props { clarification: Clarification; revision: number; isLoading: boolean; onSend: (message: string, context: ReplyContext) => SendOutcome; onHide: () => void; draft?: ClarificationDraft; onDraftChange?: (draft: ClarificationDraft) => void }
 export default function TypedClarification({ clarification, revision, isLoading, onSend, onHide, draft: savedDraft, onDraftChange }: Props) {
   const { t } = useI18n();

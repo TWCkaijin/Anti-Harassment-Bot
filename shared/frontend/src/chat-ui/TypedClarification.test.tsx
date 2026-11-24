@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { I18nProvider } from "../i18n";
+import { I18nProvider } from "./i18n";
 import TypedClarification from "./TypedClarification";
 const question = { question_id: "case.other_role.2", fact_key: "other_role" as const, question: "對方與您是什麼關係？", reason: "這有助於了解適合的處理管道。", options: [{ label: "主管", value: "主管" }] };
 beforeEach(() => localStorage.clear());

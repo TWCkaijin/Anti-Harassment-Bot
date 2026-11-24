@@ -18,7 +18,7 @@ export default defineConfig({
         url: 'http://localhost/',
       },
     },
-    setupFiles: ['./src/test/setup.ts'],
+    setupFiles: ['../../shared/frontend/src/test/setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'lcov'],

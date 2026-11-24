@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { I18nProvider } from "../i18n";
-import type { ProcessingTrace as ProcessingTraceData } from "../services/processingTrace";
+import { I18nProvider } from "./i18n";
+import type { ProcessingTrace as ProcessingTraceData } from "./processingSteps";
 import ProcessingTrace from "./ProcessingTrace";
 
 const running: ProcessingTraceData = {

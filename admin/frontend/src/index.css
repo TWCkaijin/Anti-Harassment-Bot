@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@source "../../../client/frontend/src/components";
+@source "../../../shared/frontend/src/chat-ui";
 
 /* ── Stitch 設計系統：新版對話內頁 v0.1 ──────────────────────── */
 

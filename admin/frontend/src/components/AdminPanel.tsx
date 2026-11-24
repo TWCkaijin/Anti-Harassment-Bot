@@ -19,7 +19,7 @@ import { invalidateReadCache } from "../services/readCache";
 import AdminCorpus from "./AdminCorpus";
 import RerankSettings from "./RerankSettings";
 import { configToUpdate, PROMPT_SECTION_FIELDS } from "../services/runtimeConfig";
-import MaterialIcon from "./MaterialIcon";
+import { MaterialIcon } from "@rag/shared/chat-ui";
 import SkillActionsEditor from "./SkillActionsEditor";
 const AdminRerankTests = lazy(() => import("./AdminRerankTests"));
 const AdminChatTest = lazy(() => import("./AdminChatTest"));

@@ -1,8 +1,8 @@
 import { useId, useState } from "react";
 
-import { useI18n } from "../i18n";
-import type { ProcessingTrace as ProcessingTraceData } from "../services/processingTrace";
-import type { AnalysisEntry } from "../services/analysis";
+import { useI18n } from "./i18n";
+import type { ProcessingTrace as ProcessingTraceData } from "./processingSteps";
+import type { AnalysisEntry } from "../analysis";
 
 interface ProcessingTraceProps {
   trace: ProcessingTraceData;

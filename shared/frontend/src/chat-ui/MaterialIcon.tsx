@@ -18,6 +18,7 @@ import {
   ExternalLink,
   FilePenLine,
   FileText,
+  FlaskConical,
   Gavel,
   HardDrive,
   Headset,
@@ -38,6 +39,7 @@ import {
   Settings,
   Shield,
   ShieldCheck,
+  ShieldUser,
   SlidersHorizontal,
   Sparkles,
   Square,
@@ -49,9 +51,10 @@ import {
 } from "lucide-react";
 
 // Keep the existing call-site names while bundling only the SVGs this app uses.
-// This includes source badges and conditional action/navigation icons.
+// This includes source badges, admin tabs and conditional action/navigation icons.
 const icons = {
   account_tree: Workflow,
+  admin_panel_settings: ShieldUser,
   add: Plus,
   arrow_forward: ArrowRight,
   arrow_upward: ArrowUp,
@@ -85,6 +88,7 @@ const icons = {
   palette: Palette,
   person: UserRound,
   reply: Reply,
+  science: FlaskConical,
   settings: Settings,
   shield: Shield,
   side_navigation: PanelLeft,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendProcessingStep, MAX_PROCESSING_STEPS, sanitizeProcessingTrace, type ProcessingTrace } from "./processingTrace";
+import { appendProcessingStep, MAX_PROCESSING_STEPS, sanitizeProcessingTrace, type ProcessingTrace } from "./processingSteps";
 
 const running = (): ProcessingTrace => ({ steps: [], outcome: "running", duration_ms: 0 });
 describe("observable processing trace", () => {

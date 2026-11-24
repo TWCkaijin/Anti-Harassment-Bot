@@ -11,16 +11,11 @@ import {
   assertResponseContract,
   sendChat,
   checkHealth,
-  type ActionButton,
   type ChatGuidance,
   type ChatProgress,
   type ChatResponse,
   type ChatRequest,
-  type DebugToolCall,
-  type RagInfo,
   type CaseContext,
-  type Clarification,
-  type ClarificationAnswer,
   type FactUpdate,
   type AnalysisEntry,
   type ClientSettings,
@@ -35,51 +30,11 @@ import { appendReasoning } from "../services/reasoning";
 import { preparePrivateRequest } from "../services/privateRequest";
 import type { PrivacyDraft } from "../services/clientPrivacy";
 import { loadConversationStorage, recoverConversationMigration, saveConversationStorage, STORAGE_KEY, type StorageIssue } from "./conversationStorage";
-import { appendProcessingStep, type ProcessingPhase, type ProcessingTrace } from "../services/processingTrace";
+import { appendProcessingStep, type ConversationMessage, type ProcessingPhase, type ReplyContext, type ProcessingTrace } from "@rag/shared/chat-ui";
+
+export type { ConversationMessage, ReplyContext } from "@rag/shared/chat-ui";
 
 // ── 型別定義 ──────────────────────────────────────────────────────────────
-
-/** Local display metadata; content remains the complete model-visible message. */
-export interface ReplyContext {
-  answers: Array<{ question: string; answer: string }>;
-  clarificationAnswer?: ClarificationAnswer;
-  factsRevision?: number;
-}
-
-export interface ConversationMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-  anonymized?: boolean;
-  ragUsed?: RagInfo;
-  isError?: boolean;
-  isCancelled?: boolean;
-  isStreaming?: boolean;
-  streamingGuidance?: ChatGuidance;
-  interruptionReason?: string;
-  emotion?: string; // 加入的情緒標籤
-  emotionColor?: string; // 情緒對應的顏色
-  suggestedReplies?: string[];
-  actionButtons?: ActionButton[];
-  interactionMode?: "answer" | "clarify";
-  clarifyingQuestions?: string[];
-  debugToolCalls?: DebugToolCall[];
-  imageUrl?: string; // 圖片預覽網址 (僅 frontend 顯示用)
-  replyContext?: ReplyContext;
-  clarification?: Clarification | null;
-  factsRevision?: number;
-  contractVersion?: 2 | 3 | 4;
-  superseded?: boolean;
-  answerSections?: ChatResponse["answer_sections"];
-  processingTrace?: ProcessingTrace;
-  analysis?: AnalysisEntry[];
-  /** Provider reasoning is ephemeral: never saved, exported or sent as history. */
-  reasoning?: ReasoningEntry[];
-  clarificationDraft?: ClarificationDraft;
-  requestKind?: "request" | "clarification" | "regeneration";
-  originRequestId?: string;
-}
 
 export interface ConversationSession {
   id: string;

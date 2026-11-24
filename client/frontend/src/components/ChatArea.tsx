@@ -3,19 +3,19 @@
  * 包含頂部導航列、訊息列表（或 WelcomeHero）、打字動畫、底部輸入框。
  */
 import { useRef, useEffect, useState, type ReactNode } from "react";
-import MaterialIcon from "./MaterialIcon";
+import { MaterialIcon } from "@rag/shared/chat-ui";
 import BrandMark from "./BrandMark";
-import { useI18n } from "../i18n";
+import { useI18n } from "@rag/shared/chat-ui";
 import type { ConversationMessage, ReplyContext } from "../hooks/useConversation";
-import MessageItem from "./MessageItem";
+import { MessageItem } from "@rag/shared/chat-ui";
 import WelcomeHero from "./WelcomeHero";
-import ChatInput from "./ChatInput";
-import TypingIndicator from "./TypingIndicator";
+import { ChatInput } from "@rag/shared/chat-ui";
+import { TypingIndicator } from "@rag/shared/chat-ui";
 import { checkHealth } from "../services/api";
 import { hasCaseContext, type CaseContext, type FactUpdate, type ClarificationDraft } from "../services/caseFacts";
 import type { StorageIssue } from "../hooks/conversationStorage";
-import CaseSummary from "./CaseSummary";
-import type { SendOutcome } from "../services/sendOutcome";
+import { CaseSummary } from "@rag/shared/chat-ui";
+import type { SendOutcome } from "@rag/shared/chat-ui";
 
 interface ChatAreaProps {
   messages: ConversationMessage[];

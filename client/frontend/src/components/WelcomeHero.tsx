@@ -2,12 +2,12 @@
  * WelcomeHero — 首頁標題、問題輸入與建議入口。
  */
 import { useRef, useState, type KeyboardEvent, type ClipboardEvent } from "react";
-import MaterialIcon from "./MaterialIcon";
-import { settleSendOutcome, type SendOutcome } from "../services/sendOutcome";
+import { MaterialIcon } from "@rag/shared/chat-ui";
+import { settleSendOutcome, type SendOutcome } from "@rag/shared/chat-ui";
 import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE } from "../services/imageUpload";
-import { useI18n } from "../i18n";
-import { useImageAttachment } from "../hooks/useImageAttachment";
-import { useAutosizeTextarea } from "../hooks/useAutosizeTextarea";
+import { useI18n } from "@rag/shared/chat-ui";
+import { useImageAttachment } from "@rag/shared/chat-ui";
+import { useAutosizeTextarea } from "@rag/shared/chat-ui";
 import {
   getUserMessageValidationError,
   MAX_USER_MESSAGE_CHARACTERS,

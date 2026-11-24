@@ -1,5 +1,5 @@
-import type { RagInfo } from "../services/api";
-import { useI18n } from "../i18n";
+import type { RagInfo } from "../api";
+import { useI18n } from "./i18n";
 import MaterialIcon from "./MaterialIcon";
 import { officialCitationUrl } from "./citationLinks";
 

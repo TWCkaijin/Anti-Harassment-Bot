@@ -1,5 +1,5 @@
-import { trackAnalytics } from "../services/analytics";
-import type { ActionButton } from "../services/api";
+import { trackAnalytics } from "./analytics";
+import type { ActionButton } from "../api";
 import { getSafeResourceActions } from "./actionButtonValidation";
 import MaterialIcon from "./MaterialIcon";
 

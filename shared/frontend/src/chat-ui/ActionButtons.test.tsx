@@ -1,11 +1,11 @@
-import { trackAnalytics } from "../services/analytics";
+import { trackAnalytics } from "./analytics";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ActionButton } from "../services/api";
+import type { ActionButton } from "../api";
 import ActionButtons from "./ActionButtons";
 
-vi.mock("../services/analytics", () => ({ trackAnalytics: vi.fn() }));
+vi.mock("./analytics", () => ({ trackAnalytics: vi.fn() }));
 
 describe("ActionButtons", () => {
   it("retains legacy telephone links and opens valid external links in a new tab", () => {

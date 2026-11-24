@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { ConversationMessage } from "../hooks/useConversation";
-import { I18nProvider } from "../i18n";
+import type { ConversationMessage } from "./types";
+import { I18nProvider } from "./i18n";
 import MessageItem from "./MessageItem";
 
 const base: ConversationMessage = { id: "reply-1", role: "user", content: "事情發生在哪裡？\n在學校", timestamp: 1 };

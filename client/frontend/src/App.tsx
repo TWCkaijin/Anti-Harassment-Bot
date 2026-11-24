@@ -6,8 +6,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useConversation } from "./hooks/useConversation";
 import Sidebar from "./components/Sidebar";
-import MaterialIcon from "./components/MaterialIcon";
-import { useI18n } from "./i18n";
+import { MaterialIcon } from "@rag/shared/chat-ui";
+import { useI18n } from "@rag/shared/chat-ui";
 import ChatArea from "./components/ChatArea";
 import SettingsPanel from "./components/SettingsPanel";
 import PrivacyReviewDialog from "./components/PrivacyReviewDialog";
