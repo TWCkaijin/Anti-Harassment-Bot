@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 const privacyUrl = new URL("../../../shared/frontend/src/clientPrivacy.ts", import.meta.url);
 const allowedImports = new Map([
   ["./caseFacts", new URL("../../../shared/frontend/src/caseFacts.ts", import.meta.url).href],
+  ["./chatContract", new URL("../../../shared/frontend/src/chatContract.ts", import.meta.url).href],
   ["./imageUpload", new URL("../../../shared/frontend/src/imageUpload.ts", import.meta.url).href],
 ]);
 registerHooks({

@@ -2,6 +2,7 @@
 import type { SummaryUpdate, CaseContext, Clarification, ClarificationAnswer } from "./caseFacts";
 import type { AnalysisEntry } from "./analysis";
 import type { ClientSettings, PipelineSettings } from "./pipeline";
+import { CHAT_CONTRACT_VERSION } from "./chatContract";
 
 // ── 型別定義 ──────────────────────────────────────────────────────────────
 
@@ -10,8 +11,7 @@ export interface MessageItem {
   content: string;
 }
 
-/** The only chat contract the backend accepts. */
-export const CHAT_CONTRACT_VERSION = 4;
+export { CHAT_CONTRACT_VERSION };
 
 export interface ChatRequest {
   message: string;

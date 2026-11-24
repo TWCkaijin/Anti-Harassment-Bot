@@ -1,5 +1,6 @@
 /** Local-only review of the complete chat payload. No text leaves this module. */
-import { CHAT_CONTRACT_VERSION, type ChatRequest } from "./api";
+import type { ChatRequest } from "./api";
+import { CHAT_CONTRACT_VERSION } from "./chatContract";
 import { FACT_KEYS, isCaseContext, isFactKey, isRecord, type CaseContext, type ClarificationAnswer } from "./caseFacts";
 import { validateImageDataUrl } from "./imageUpload";
 
