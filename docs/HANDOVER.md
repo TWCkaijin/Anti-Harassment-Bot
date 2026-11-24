@@ -60,7 +60,7 @@
 - 本機服務帳號金鑰 `firebase_admin.json` 已刪除，GCP 上 `firebase-adminsdk-fbsvc` 的使用者管理金鑰已撤銷（剩 0 把）。本機開發只用 ADC。
 - 原開發機的舊 `.env` 已搬到 `.admin-local/development.env`（移除 `ADMIN_API_KEY`），`.code-review-graph/` 與舊 `dev-runs` 紀錄已刪除。
 - main-preview workflow 改用 WIF，GCP 的 WIF 條件已更新；沒有 workflow 再使用 repository secrets。
-- Git 歷史中的兩份工作簿已在本機以 `git filter-repo` 移除（所有本機分支的 SHA 自 2026-09-21 起改變），**尚未推送**。
+- Git 歷史中的兩份工作簿已在本機以 `git filter-repo` 移除，**尚未推送**。只改寫了 `36d673d`（2026-09-21）之後的 62 個 commit；更早的 commit 與其他分支不變。被改寫的 commit 原有的簽章會消失（內容改變後無法保留）。main 的最新版本原本仍含這兩個檔案，推送後會一併移除。改寫前的完整備份在 `.admin-local/backups/pre-filter-20261124.bundle`（含工作簿，確認推送無誤後請刪除）。
 
 ### 仍需本人執行
 
@@ -68,8 +68,14 @@
 2. **推送改寫後的歷史**（在本機檢查後）：
 
    ```bash
-   git push --force origin main dev
+   git fetch origin
    ```
+
+   ```bash
+   git push --force-with-lease origin main dev
+   ```
+
+   `--force-with-lease` 只在遠端仍是你上次看到的版本時才覆寫；若有人在這期間推送過，推送會被拒絕，需先核對。
 
    ```bash
    git push origin refactor/handover
