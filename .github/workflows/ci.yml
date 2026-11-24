@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v5
         with:
-          version: "latest"
+          version: "0.9.7"
       - name: Install Python and all application dependencies
         run: |
           uv python install 3.13

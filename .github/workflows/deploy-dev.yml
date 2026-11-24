@@ -117,6 +117,8 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - uses: astral-sh/setup-uv@v5
         if: steps.scope.outputs.any == 'true'
+        with:
+          version: "0.9.7"
       - name: Install deployment dependencies
         if: steps.scope.outputs.any == 'true'
         run: |
