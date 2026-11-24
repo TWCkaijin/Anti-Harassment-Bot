@@ -107,7 +107,7 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
 
   const handleSend = () => {
     if (disabled || isLoading || menuVisible || pendingSend.current || isReading) return;
-    if (attachment && !allowImageUpload) { setImageError("圖片上傳目前已停用，請移除圖片後再傳送。"); return; }
+    if (attachment && !allowImageUpload) { setImageError(t.chatImageUploadDisabledRemove); return; }
     const trimmed = value.trim();
     if ((!trimmed && !attachment) || getUserMessageValidationError(value)) return;
     pendingSend.current = true;
@@ -134,7 +134,7 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
     if (image) {
       event.preventDefault();
       if (disabled || isLoading || menuVisible || pendingSend.current) return;
-      if (!allowImageUpload) { setImageError("圖片上傳目前已停用。"); return; }
+      if (!allowImageUpload) { setImageError(t.chatImageUploadDisabled); return; }
       selectFile(image);
     }
   };
@@ -178,7 +178,7 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
               onClick={showMenu}
               className="rounded-lg px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary"
             >
-              {typedQuestion ? t.clarificationShow : "顯示選單"}
+              {typedQuestion ? t.clarificationShow : t.chatShowMenu}
             </button>
           </div>
         )}
@@ -192,7 +192,7 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
               className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
             >
               <span aria-hidden="true"><MaterialIcon icon="stop" size={18} /></span>
-              停止回覆
+              {t.chatStopReply}
             </button>
           </div>
         )}
@@ -214,8 +214,8 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
               <MaterialIcon icon="close" size={18} />
             </button>
           </div>}
-          {isReading && <p role="status" className="mb-2 text-xs text-on-surface/60">正在讀取圖片…</p>}
-          {(imageError || (attachment && !allowImageUpload)) && <p role="alert" className="mb-2 text-xs text-error">{attachment && !allowImageUpload ? "圖片上傳目前已停用，請移除圖片後再傳送。" : imageError}</p>}
+          {isReading && <p role="status" className="mb-2 text-xs text-on-surface/60">{t.chatReadingImage}</p>}
+          {(imageError || (attachment && !allowImageUpload)) && <p role="alert" className="mb-2 text-xs text-error">{attachment && !allowImageUpload ? t.chatImageUploadDisabledRemove : imageError}</p>}
 
           <div
             onClick={() => textareaRef.current?.focus()}
@@ -260,7 +260,7 @@ export default function ChatInput({ inputLabel, onSend, isLoading, suggestedRepl
                     : "bg-primary/40 cursor-not-allowed"
                 }
               `}
-              aria-label={isLoading ? "停止回覆" : t.sendMessage}
+              aria-label={isLoading ? t.chatStopReply : t.sendMessage}
             >
               <MaterialIcon
                 icon={isLoading ? "stop" : "arrow_forward"}

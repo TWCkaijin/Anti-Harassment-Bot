@@ -75,7 +75,7 @@ export default function TypedClarification({ clarification, revision, isLoading,
           <input
             autoFocus
             aria-label={t.clarificationOther}
-            placeholder="請輸入補充內容…"
+            placeholder={t.clarificationOtherPlaceholder}
             value={draft.other}
             maxLength={MAX_FACT_VALUE_LENGTH}
             onChange={event => updateDraft({ ...draft, other: event.target.value })}

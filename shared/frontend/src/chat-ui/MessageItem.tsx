@@ -243,12 +243,12 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
 
         {/* 訊息內容 */}
         {!isCancelled && replyAnswers.length > 0 && (
-          <div aria-label="回覆內容" className="space-y-4">
+          <div aria-label={t.chatReplyContent} className="space-y-4">
             {replyAnswers.map(({ question, answer }, index) => (
               <div key={index} className="space-y-2.5">
-                <blockquote aria-label="回覆的問題" className="border-l-2 border-white/30 pl-3 text-xs leading-relaxed text-white/65">
+                <blockquote aria-label={t.chatRepliedQuestion} className="border-l-2 border-white/30 pl-3 text-xs leading-relaxed text-white/65">
                   <span className="mb-1 flex items-center gap-1 text-[0.625rem] font-medium">
-                    <span aria-hidden="true"><MaterialIcon icon="reply" size={14} /></span>回覆
+                    <span aria-hidden="true"><MaterialIcon icon="reply" size={14} /></span>{t.chatReplyLabel}
                   </span>
                   <p className="whitespace-pre-wrap break-words">{question}</p>
                 </blockquote>
@@ -286,8 +286,8 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
           )}
         </div>}
 
-        {message.isStreaming && !message.processingTrace && <p role="status" className="text-xs text-on-surface/50 animate-pulse">{streamingStatus ?? "正在回覆…"}</p>}
-        {isCancelled && <p className="text-sm font-medium text-on-surface/55">{message.content ? "使用者已終止回覆，以上內容尚未完成" : "使用者已終止回覆"}</p>}
+        {message.isStreaming && !message.processingTrace && <p role="status" className="text-xs text-on-surface/50 animate-pulse">{streamingStatus ?? t.chatReplying}</p>}
+        {isCancelled && <p className="text-sm font-medium text-on-surface/55">{message.content ? t.chatStoppedIncomplete : t.chatStopped}</p>}
         {message.interruptionReason && <p role="alert" className="text-sm font-medium">{message.interruptionReason}</p>}
         {message.superseded && <p className="text-xs text-on-surface/60">{t.supersededAnswer}</p>}
         {!isUser && Boolean(message.processingTrace || message.analysis?.length || reasoning?.length) && <ProcessingTrace trace={message.processingTrace ?? { steps: [], duration_ms: 0, outcome: message.isStreaming ? "running" : message.isError ? "error" : message.isCancelled ? "cancelled" : "complete" }} analysis={message.analysis} reasoning={reasoning} />}
@@ -295,15 +295,15 @@ export default function MessageItem({ message, streamingStatus, showEmotions = f
           <details className="mt-3 rounded-lg border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-xs text-amber-950">
             <summary className="flex cursor-pointer items-center gap-1.5 font-semibold">
               <MaterialIcon icon="code" size={15} />
-              模型 Tool Call：{message.debugToolCalls.length > 0 ? `${message.debugToolCalls.length} 次` : "未使用"}
+              {t.debugToolCalls(message.debugToolCalls.length)}
             </summary>
             {message.debugToolCalls.length > 0 && (
               <div className="mt-2 space-y-2 border-t border-amber-300/50 pt-2 font-mono text-[0.6875rem] leading-5">
                 {message.debugToolCalls.map((toolCall, index) => (
                   <div key={`${toolCall.name}-${index}`}>
                     <p className="font-semibold">{toolCall.name}</p>
-                    <p className="break-words">參數：{JSON.stringify(toolCall.arguments)}</p>
-                    <p>檢索結果：{toolCall.result_count} 筆</p>
+                    <p className="break-words">{t.debugToolArguments}{JSON.stringify(toolCall.arguments)}</p>
+                    <p>{t.debugToolResults(toolCall.result_count)}</p>
                   </div>
                 ))}
               </div>

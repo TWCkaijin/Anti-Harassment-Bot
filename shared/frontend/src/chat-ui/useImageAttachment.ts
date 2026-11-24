@@ -1,3 +1,10 @@
+/**
+ * Image attachments are kept for a later release but are currently OFF:
+ * the backend only reports `enable_image_upload: true` when IMAGE_UPLOAD_ROLLOUT_ENABLED
+ * (runtime_config.py) and the runtime flag are both on, and useConversation still
+ * refuses any request that carries image data. Validation stays
+ * here so the feature can be turned back on without rebuilding it.
+ */
 import { useEffect, useRef, useState } from "react";
 import { validateImageDataUrl, validateImageFile } from "../imageUpload";
 import { errorMessage } from "../browser";
