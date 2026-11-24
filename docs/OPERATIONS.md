@@ -1,8 +1,8 @@
 # Client／Admin 操作、執行與部署手冊
 
-本手冊對應拆分後程式。實際完成狀態與驗收範圍見 [遷移報告](MIGRATION_REPORT.md)；Preview 網址以部署 JSON 的輸出為準。不要以舊版 PDF 的路徑、固定 Admin token 或部署指令操作新版。
+本手冊對應拆分後程式。目前部署狀態、已知限制與待決事項見 [交接文件](HANDOVER.md)；架構細節見 [架構說明](MIGRATION_REPORT.md)。Preview 網址以部署 JSON 的輸出為準。不要以舊版 PDF 的路徑、固定 Admin token 或部署指令操作新版。
 
-截至 2026-11-10，Preview 已驗證 11 篇有官方來源的法條摘要；Production 尚未發布新版。下列部署命令是操作步驟，不能視為已完成正式切換。
+Production 尚未發布新版。下列部署命令是操作步驟，不能視為已完成正式切換。
 
 ## 環境對照
 
@@ -22,7 +22,7 @@ Firestore 四個 databases 位於 `nam5`。`app-dev` 是 dev 業務庫的實際�
 
 ## 本機安裝與啟動
 
-工具：Python 3.13、Node.js 24、pnpm 10.27.0、uv；部署需 Google Cloud CLI 與 Firebase CLI 15.33.0；Rules Emulator 需 Java 21。舊虛擬環境不作為可攜式交付，請依鎖定檔安裝。
+工具：Python 3.13、Node.js 24 以上（`.nvmrc`）、pnpm 10.27.0、uv（CI 固定 0.9.7）；部署需 Google Cloud CLI 與 Firebase CLI 15.33.0；Rules Emulator 需 Java 21。舊虛擬環境不作為可攜式交付，請依鎖定檔安裝。
 
 部署前用 `command -v firebase` 與 `firebase --version` 核對 PATH 實際選用的 CLI；電腦可能同時存在舊獨立執行檔與 npm 版本。`deploy.py` 會要求版本 15.33.0，避免不同 CLI 的 Python 函式分析行為造成部署失敗。函式分析使用的臨時環境旗標不寫入部署環境；線上服務仍必須取得各環境的模型與澄清簽章 secrets 才能啟動。
 
@@ -30,6 +30,8 @@ Firestore 四個 databases 位於 `nam5`。`app-dev` 是 dev 業務庫的實際�
 uv sync --frozen --all-extras
 pnpm install --frozen-lockfile
 ```
+
+一般情況用 `uv run --frozen python scripts/dev.py` 一次啟動兩個 API 與兩個網頁（見 [README](../README.md#快速開始本機)），它會自動套用下列環境變數並把 log 寫到 `.admin-local/dev-runs/run-*/`。以下是需要個別控制程序時的手動方式。
 
 保留現有 `.env`／`.env.local`。建立 `.admin-local/development.env`，參考 `.env.example` 填入本機模型 key；該目錄已排除 Git。每個後端終端先設定以下變數（路徑由根目錄計算）：
 
@@ -59,13 +61,31 @@ export ADMIN_TASKS_AUDIENCE=
 
 | 程序 | 命令 | 位址／目的 |
 | --- | --- | --- |
-| Client API | `uv run --frozen flask --app client_app.main:create_app run --host 127.0.0.1 --port 8000` | `/api/v1/health/`、`/api/v1/chat/` |
-| Admin API | `uv run --frozen flask --app admin_app.main:create_app run --host 127.0.0.1 --port 8001` | `/api/v1/admin/*` |
-| Client 網頁 | `pnpm --filter @rag/client dev` | `http://127.0.0.1:5173` |
+| Client API | `uv run --frozen python -m flask --app client_app.main:create_app run --host 127.0.0.1 --port 8000` | `/api/v1/health/`、`/api/v1/chat/` |
+| Admin API | `uv run --frozen python -m flask --app admin_app.main:create_app run --host 127.0.0.1 --port 8001` | `/api/v1/admin/*` |
+| Client 網頁 | `VITE_API_BASE_URL=/api pnpm --filter @rag/client dev` | `http://127.0.0.1:5173` |
 | Admin 網頁 | `pnpm --filter @rag/admin dev` | `http://127.0.0.1:5174` |
 | Admin worker | `uv run --frozen python -m admin_app.worker_cli --poll-seconds 2` | 執行 development 的診斷／匯入／刪除 jobs |
 
-前端使用 Vite 的同源 `/api` proxy。Client 可透過 `VITE_API_BASE_URL` 指定 API；Admin 必須保持同源 cookie 流程。worker 也可用 `--once --limit 20` 執行一批，Ctrl-C 停止輪詢；它拒絕 production／preview、已部署 runtime 與非空 Cloud Tasks 設定，且不提供免驗證 HTTP 入口。API 與 worker 的環境、資料庫及 bucket 必須相同。
+前端使用 Vite 的同源 `/api` proxy。Client 網頁務必帶 `VITE_API_BASE_URL=/api`：`client/frontend/.env` 若指向 Functions Emulator（`127.0.0.1:5001`），未覆寫時頁面會顯示「連線失敗」。Admin 必須保持同源 cookie 流程。兩個 Vite port 都設 `strictPort`；不要混用 `localhost` 與 `127.0.0.1` 登入，以免 Cookie 綁在不同主機。worker 也可用 `--once --limit 20` 執行一批，Ctrl-C 停止輪詢；它拒絕 production／preview、已部署 runtime 與非空 Cloud Tasks 設定，且不提供免驗證 HTTP 入口。API 與 worker 的環境、資料庫及 bucket 必須相同。
+
+啟動後可用以下唯讀探測確認路由（成功只代表 HTTP 程序可用，不代表 Firestore、Storage 或模型已通過驗收）：
+
+```bash
+curl --fail http://127.0.0.1:5173/api/v1/health/        # 應列出 chat_contract_versions: [4]
+curl --fail http://127.0.0.1:5174/api/v1/admin/health
+curl -i http://127.0.0.1:5174/api/v1/admin/auth/session  # 未登入，預期 401
+```
+
+| 本機現象 | 優先檢查 |
+| --- | --- |
+| `ModuleNotFoundError`（`client_app`／`admin_app`） | 是否在根目錄執行、是否設定 `PYTHONPATH`、是否 `uv sync --all-extras` |
+| `.venv/bin/pytest` 等指令找不到直譯器 | `.venv` 曾在其他路徑建立；刪除後重新 `uv sync --frozen --all-extras` |
+| 頁面 proxy／connection refused | 8000／8001 是否已啟動；Client 是否帶 `VITE_API_BASE_URL=/api` |
+| ADC／Firestore／Storage permission denied | ADC 是否已登入；本機 `firebase_admin.json`（若存在）的身分是否具 dev 權限 |
+| 登入後仍未驗證 | `ADMIN_COOKIE_SECURE=false`、從 5174 開啟、固定同一主機名稱 |
+| `Untrusted origin` | `ADMIN_ORIGINS` 是否包含瀏覽器實際 origin |
+| 模型回 401／404 | OpenRouter key、dev runtime 設定中的模型 ID／provider |
 
 ## 管理密碼與登入
 
@@ -79,7 +99,7 @@ CLI 隱藏輸入且要求重複確認。改密碼加 `--reset`，停用登入加
 
 舊版曾分別初始化 Preview 與 Production 密碼，並留有本機 `.admin-local/preview.password`、`.admin-local/production.password`（均為 0600）。在更新正式憑證前，先以現有 Preview 密碼檔驗證 Preview 登入，完成 Preview 四個單元的瀏覽器／API 驗收及必要備份；全部通過後，才用同一檔案對 `--environment production` 執行 `--reset --password-file .admin-local/preview.password`，再分別驗證兩站登入。若 Preview 驗證失敗，不可把可能過期的檔案寫入正式庫。重設會使正式舊 Session 失效；舊 production 密碼檔其後不再作為登入依據。正式管理入口為 [Admin Production](https://anti-harassment-bot-admin.web.app)，發布狀態以遷移報告為準。Preview 網址每次部署後以 deployment JSON 實際輸出為準；舊 channel 網址可能已過期。
 
-本機 development 與 preview 共用 `admin-private-dev` 的密碼 hash，但 sessions 有環境綁定。密碼輪替會使該私有庫所有舊 sessions 失效。
+本機 development 與 preview 共用 `admin-private-dev` 的密碼 hash，但 sessions 有環境綁定。密碼輪替會使該私有庫所有舊 sessions 失效，也會改變線上 Preview 的密碼；已有密碼時不要為了本機啟動執行 `--reset`。
 
 在 Admin 網頁輸入密碼後，後端設定 `__session` Cookie（雲端為 Secure／HttpOnly／SameSite=Strict、host-only）。預設閒置 30 分鐘、最長 8 小時；每次請求查驗期限、撤銷及 credential version。登出撤銷 session。瀏覽器不保存管理 token；CLI 也只在記憶體保留 Cookie 與 CSRF。登入限流預設每來源 15 分鐘 5 次、全域 100 次。
 
@@ -132,7 +152,7 @@ PYTHONPATH=shared/python:admin/backend uv run --frozen python -m admin.tests.rel
 ## 建置與檢查
 
 ```bash
-uv run --frozen pytest client/tests admin/tests shared/tests -q
+uv run --frozen python -m pytest -q
 pnpm -r lint
 pnpm --filter @rag/shared test
 pnpm --filter @rag/client test

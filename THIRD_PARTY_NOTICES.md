@@ -3,6 +3,30 @@
 This project is licensed under Apache-2.0 (see [LICENSE](LICENSE)). The components below are
 distributed under their own terms.
 
+## Dependency license summary
+
+Checked 2026-11-24 from the installed lock files (`pnpm-lock.yaml`, `uv.lock`). Re-check after
+dependency updates with `pnpm licenses list --prod` and the package metadata in `.venv`.
+
+| Ecosystem | Licenses |
+| --- | --- |
+| Frontend runtime (`pnpm licenses list --prod`, 197 packages) | MIT 125, Apache-2.0 53, BSD-3-Clause 10, ISC 8, 0BSD 1 |
+| Python (runtime and dev, 80 packages) | Apache-2.0, MIT, BSD (2/3-clause), PSF-2.0; `certifi` is MPL-2.0 and `tqdm` is MPL-2.0 AND MIT |
+
+No dependency is under a strong copyleft license. MPL-2.0 is file-level copyleft: the two
+packages are used unmodified, so only their notices need to be kept if they are redistributed.
+Deployed Functions install Python packages from the locked requirements at build time; the
+repository does not vendor them.
+
+## External services and data
+
+| Item | Terms |
+| --- | --- |
+| OpenRouter and the models it routes to | Each provider's terms of service and usage policy |
+| Embedding model `intfloat/multilingual-e5-large` (called through OpenRouter) | MIT (model card) |
+| Firebase / Google Cloud | Google Cloud terms |
+| Law texts and judgments in the knowledge base (`data/`, `resource/legal/`, not in Git) | Taiwan government open data terms of each source; see `data/README.md` |
+
 ## CKIP ALBERT Tiny Chinese NER
 
 | Item | Value |
