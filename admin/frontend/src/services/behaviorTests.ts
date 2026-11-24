@@ -1,6 +1,6 @@
 import type { AdminChatTestResult, ChatRequest, RuntimeConfig, RuntimeConfigUpdate } from "./api";
 import { reproducibleOverrides } from "./adminDiagnostics";
-import type { SummaryCaseContext } from "./caseFacts";
+import type { SummaryCaseContext } from "@rag/shared/caseFacts";
 import type { ScenarioWorkbook } from "./scenarioWorkbook";
 
 export interface BehaviorCase {

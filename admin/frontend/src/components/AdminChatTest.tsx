@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RuntimeConfig } from "../services/api";
-import { DEFAULT_PIPELINE } from "../services/pipeline";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
 import { reproducibleOverrides } from "../services/adminDiagnostics";
 import { temporaryOverrides } from "../services/runtimeConfig";
 import {

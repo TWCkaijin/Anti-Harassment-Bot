@@ -4,14 +4,14 @@
 import { useRef, useState, type KeyboardEvent, type ClipboardEvent } from "react";
 import { MaterialIcon } from "@rag/shared/chat-ui";
 import { settleSendOutcome, type SendOutcome } from "@rag/shared/chat-ui";
-import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE } from "../services/imageUpload";
+import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE } from "@rag/shared/imageUpload";
 import { useI18n } from "@rag/shared/chat-ui";
 import { useImageAttachment } from "@rag/shared/chat-ui";
 import { useAutosizeTextarea } from "@rag/shared/chat-ui";
 import {
   getUserMessageValidationError,
   MAX_USER_MESSAGE_CHARACTERS,
-} from "../hooks/conversationHistory";
+} from "@rag/shared/conversationHistory";
 
 interface WelcomeHeroProps {
   onSuggest: (message: string, imageBase64?: string, imageUrl?: string) => SendOutcome;

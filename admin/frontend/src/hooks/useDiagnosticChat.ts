@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, assertResponseContract, runAdminApplicableLawTest, runAdminChatTest, type AdminApplicableLawTestResult, type AdminChatTestResult, type ChatRequest, type RuntimeConfig, type RuntimeConfigUpdate } from "../services/api";
-import { applySummaryUpdate, emptySummaryContext, isCaseContext, parseFact, toSummaryContext, type CaseContext, type ClarificationDraft, type SummaryCaseContext } from "../services/caseFacts";
+import { applySummaryUpdate, emptySummaryContext, isCaseContext, parseFact, toSummaryContext, type CaseContext, type ClarificationDraft, type SummaryCaseContext } from "@rag/shared/caseFacts";
 import { createChatRequest } from "@rag/shared/conversationHistory";
-import { preparePrivateRequest } from "../services/privateRequest";
+import { preparePrivateRequest } from "@rag/shared/privateRequest";
 import { temporaryOverrides } from "../services/runtimeConfig";
 import type { ConversationMessage, ReplyContext } from "@rag/shared/chat-ui";
 import { errorMessage } from "@rag/shared/browser";

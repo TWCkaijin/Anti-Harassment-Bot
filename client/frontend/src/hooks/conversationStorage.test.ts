@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConversationStorage, recoverConversationMigration, saveConversationStorage, STORAGE_KEY } from "./conversationStorage";
-import { emptySummaryContext, toSummaryContext, toSummaryText, type LegacyCaseContext } from "../services/caseFacts";
+import { emptySummaryContext, toSummaryContext, toSummaryText, type LegacyCaseContext } from "@rag/shared/caseFacts";
 const session = { id: "old", createdAt: 1, messages: [{ id: "m", role: "user" as const, content: "我是學生", timestamp: 1 }] };
 beforeEach(() => localStorage.clear());
 afterEach(() => vi.restoreAllMocks());

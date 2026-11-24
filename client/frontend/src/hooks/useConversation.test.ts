@@ -6,16 +6,16 @@ import { ApiError, sendChat, checkHealth, type ChatGuidance, type ChatProgress, 
 import {
   MAX_USER_MESSAGE_CHARACTERS,
   USER_MESSAGE_TOO_LONG_ERROR,
-} from "./conversationHistory";
+} from "@rag/shared/conversationHistory";
 import { useConversation } from "./useConversation";
-import { toSummaryContext, type LegacyCaseContext } from "../services/caseFacts";
+import { toSummaryContext, type LegacyCaseContext } from "@rag/shared/caseFacts";
 
 vi.mock("../services/api", async () => {
   const actual = await vi.importActual<typeof import("../services/api")>("../services/api");
   return { ...actual, sendChat: vi.fn(), checkHealth: vi.fn() };
 });
 
-vi.mock("../services/privateRequest", () => ({ preparePrivateRequest: vi.fn(async request => request) }));
+vi.mock("@rag/shared/privateRequest", () => ({ preparePrivateRequest: vi.fn(async request => request) }));
 vi.mock("../services/analytics", () => ({ hasAnalyticsConsent: () => true, trackAnalytics: vi.fn() }));
 
 const successfulResponse: ChatResponse = {

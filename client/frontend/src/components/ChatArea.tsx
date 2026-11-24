@@ -12,7 +12,7 @@ import WelcomeHero from "./WelcomeHero";
 import { ChatInput } from "@rag/shared/chat-ui";
 import { TypingIndicator } from "@rag/shared/chat-ui";
 import { checkHealth } from "../services/api";
-import { hasCaseContext, type CaseContext, type FactUpdate, type ClarificationDraft } from "../services/caseFacts";
+import { hasCaseContext, type CaseContext, type FactUpdate, type ClarificationDraft } from "@rag/shared/caseFacts";
 import type { StorageIssue } from "../hooks/conversationStorage";
 import { CaseSummary } from "@rag/shared/chat-ui";
 import type { SendOutcome } from "@rag/shared/chat-ui";

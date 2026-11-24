@@ -4,7 +4,7 @@ import { MaterialIcon } from "@rag/shared/chat-ui";
 import { useI18n } from "@rag/shared/chat-ui";
 import type { ConversationSession } from "../hooks/useConversation";
 import { formatConversationText } from "../services/conversationExport";
-import { hasCaseContext } from "../services/caseFacts";
+import { hasCaseContext } from "@rag/shared/caseFacts";
 import { downloadBlob } from "@rag/shared/browser";
 
 interface SidebarProps {

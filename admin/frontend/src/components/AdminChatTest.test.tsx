@@ -2,11 +2,11 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminChatTest from "./AdminChatTest";
 import { getRerankModels, runAdminApplicableLawTest, runAdminChatTest, updateRuntimeConfig, type AdminApplicableLawTestResult, type AdminChatTestResult, type ChatRequest, type RuntimeConfig } from "../services/api";
-import { DEFAULT_PIPELINE } from "../services/pipeline";
-import { preparePrivateRequest } from "../services/privateRequest";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
+import { preparePrivateRequest } from "@rag/shared/privateRequest";
 
 vi.mock("../services/api", async () => ({ ...await vi.importActual<typeof import("../services/api")>("../services/api"), getRerankModels: vi.fn(), runAdminChatTest: vi.fn(), runAdminApplicableLawTest: vi.fn(), updateRuntimeConfig: vi.fn() }));
-vi.mock("../services/privateRequest", () => ({ preparePrivateRequest: vi.fn() }));
+vi.mock("@rag/shared/privateRequest", () => ({ preparePrivateRequest: vi.fn() }));
 const config: RuntimeConfig = { openrouter_model: "synthetic/model", rag_retrieval_top_k: 3, rag_distance_threshold: 0.7, enable_anonymization: true, temperature: 0.2, top_p: 0.9, max_tokens: 1200, reasoning_effort: "low", agent_prompt_sections: { core_mission: "synthetic prompt" }, rag_collections: { law: "laws", judgment: "judgments", remedy: "remedies" }, maintenance_message: "", enable_image_upload: true, development_mode: false, source: "firestore", pipeline: DEFAULT_PIPELINE, environment_document_id: "app_dev" };
 const result = (request?: ChatRequest, reply = "合成回答", extra: Partial<AdminChatTestResult["response"]> = {}): AdminChatTestResult => ({ response: { reply, session_id: "test", anonymized: true, rag_used: { status: false, sources: [] }, suggested_replies: [], action_buttons: [], interaction_mode: "answer", clarifying_questions: [], contract_version: 4, context_revision: request?.case_context?.revision ?? 0, summary_update: null, clarification: null, ...extra }, diagnostics: { effective_config: { ...config, maintenance_message: null, updated_by: "metadata" }, pii: { masked: true } } });
 const lawResult = (status: AdminApplicableLawTestResult["prediction"]["decision_status"] = "predicted"): AdminApplicableLawTestResult => ({ output_contract: "applicable_laws_v1", prediction: { predicted_laws: status === "predicted" ? ["性工法", "性騷法"] : [], decision_status: status, decision_reason: status === "predicted" ? null : "合成原因" }, diagnostics: { effective_config: config } });

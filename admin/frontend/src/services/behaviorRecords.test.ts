@@ -2,7 +2,7 @@ import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { behaviorResult, behaviorRun } from "../test/behaviorFixture";
 import { acceptedBehaviorContext, behaviorStatistics, checkBehaviorTurn, currentBehaviorReview, exportBehaviorJson, importBehaviorRun, refreshBehaviorEvidence, sanitizeBehaviorResult } from "./behaviorRecords";
-import { emptySummaryContext } from "./caseFacts";
+import { emptySummaryContext } from "@rag/shared/caseFacts";
 import type { BehaviorRun, BehaviorTurn } from "./behaviorTests";
 
 beforeEach(() => vi.stubGlobal("crypto", webcrypto));

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runAdminChatTest, runAdminApplicableLawTest } from "./api";
-import { approvePrivacyDraft, createPrivacyDraft } from "./clientPrivacy";
+import { approvePrivacyDraft, createPrivacyDraft } from "@rag/shared/clientPrivacy";
 import { behaviorResult } from "../test/behaviorFixture";
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });

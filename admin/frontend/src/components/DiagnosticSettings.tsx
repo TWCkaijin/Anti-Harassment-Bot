@@ -1,5 +1,5 @@
 import type { RuntimeConfig } from "../services/api";
-import { DEFAULT_PIPELINE } from "../services/pipeline";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
 import { PROMPT_SECTION_FIELDS } from "../services/runtimeConfig";
 import PipelineSettingsEditor from "./PipelineSettingsEditor";
 import RerankSettings from "./RerankSettings";

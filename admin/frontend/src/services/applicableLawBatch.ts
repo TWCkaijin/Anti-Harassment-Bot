@@ -1,6 +1,6 @@
 import type { ReferenceAnswer } from "./lawBatchScoring";
 import type { ApplicableLawPrediction, ChatRequest } from "./api";
-import type { PrivacyDraft } from "./clientPrivacy";
+import type { PrivacyDraft } from "@rag/shared/clientPrivacy";
 
 export type BatchStatus = "pending" | "running" | "error" | ApplicableLawPrediction["decision_status"];
 export interface BatchRow {

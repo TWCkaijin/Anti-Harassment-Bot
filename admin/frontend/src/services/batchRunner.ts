@@ -1,8 +1,8 @@
-import { createChatRequest } from '../hooks/conversationHistory';
+import { createChatRequest } from '@rag/shared/conversationHistory';
 import { ApiError, runAdminApplicableLawTest, runAdminChatTest, type ChatRequest } from './api';
-import { emptySummaryContext } from './caseFacts';
-import { preparePrivateRequest } from './privateRequest';
-import { createPrivacyDraft } from './clientPrivacy';
+import { emptySummaryContext } from '@rag/shared/caseFacts';
+import { preparePrivateRequest } from '@rag/shared/privateRequest';
+import { createPrivacyDraft } from '@rag/shared/clientPrivacy';
 import { acceptedBehaviorContext, behaviorDigest, checkBehaviorTurn, sanitizeBehaviorData, sanitizeBehaviorResult } from './behaviorRecords';
 import type { BatchRecord, BatchTurn, ScriptRun } from './batchScript';
 

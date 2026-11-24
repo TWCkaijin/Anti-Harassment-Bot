@@ -1,7 +1,7 @@
 import type { ConversationMessage, ConversationSession } from "./useConversation";
-import { hasCaseContext, isCaseContext, isClarification, isClarificationDraft, isFactUpdate, isRecord, normalizeCaseContext, toSummaryContext, type CaseContext, type LegacyCaseContext } from "../services/caseFacts";
+import { hasCaseContext, isCaseContext, isClarification, isClarificationDraft, isFactUpdate, isRecord, normalizeCaseContext, toSummaryContext, type CaseContext, type LegacyCaseContext } from "@rag/shared/caseFacts";
 import { sanitizeProcessingTrace } from "@rag/shared/chat-ui";
-import { sanitizeAnalysis } from "../services/analysis";
+import { sanitizeAnalysis } from "@rag/shared/analysis";
 import { isRetrievalReport } from "../services/api";
 
 export const STORAGE_KEY = "harass_bot_conversations";

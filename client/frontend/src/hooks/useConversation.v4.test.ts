@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, checkHealth, sendChat, type ChatResponse } from "../services/api";
 import { useConversation } from "./useConversation";
 import { STORAGE_KEY } from "./conversationStorage";
-import { DEFAULT_PIPELINE } from "../services/pipeline";
-import { emptySummaryContext, type LegacyCaseContext } from "../services/caseFacts";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
+import { emptySummaryContext, type LegacyCaseContext } from "@rag/shared/caseFacts";
 
 vi.mock("../services/api", async () => ({ ...await vi.importActual<typeof import("../services/api")>("../services/api"), sendChat: vi.fn(), checkHealth: vi.fn() }));
-vi.mock("../services/privateRequest", () => ({ preparePrivateRequest: vi.fn(async request => request) }));
+vi.mock("@rag/shared/privateRequest", () => ({ preparePrivateRequest: vi.fn(async request => request) }));
 vi.mock("../services/analytics", () => ({ hasAnalyticsConsent: () => true, trackAnalytics: vi.fn() }));
 const health = { status: "ok", timestamp: "test", version: "test", environment: "test", capabilities: { chat_contract_versions: [1, 2, 3, 4] }, client_settings: { contract_version: 4 as const, enable_image_upload: true, enable_reasoning_display: true, pipeline: DEFAULT_PIPELINE } };
 const response = (revision: number, extra: Partial<ChatResponse> = {}): ChatResponse => ({ reply: "合成回覆", session_id: "test", anonymized: false, rag_used: { status: false, sources: [] }, suggested_replies: [], action_buttons: [], interaction_mode: "answer", clarifying_questions: [], contract_version: 4, context_revision: revision, summary_update: null, clarification: null, analysis: [], execution: { route: "direct_retrieval", model_calls: 1 }, ...extra });

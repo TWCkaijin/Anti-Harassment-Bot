@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { batchConfig, fixtureWorkbook, tabularFixtureWorkbook } from '../test/scenarioFixture';
 import { behaviorConfig, behaviorResult } from '../test/behaviorFixture';
 import { getRuntimeConfig, runAdminApplicableLawTest, runAdminChatTest } from '../services/api';
-import { reviewedRequestBody } from '../services/clientPrivacy';
+import { reviewedRequestBody } from '@rag/shared/clientPrivacy';
 import { parseScenarioWorkbook } from '../services/scenarioWorkbook';
 import { downloadBlob } from '@rag/shared/browser';
 import AdminBatchPrediction from './AdminBatchPrediction';

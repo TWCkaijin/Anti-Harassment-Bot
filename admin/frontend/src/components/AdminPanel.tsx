@@ -27,7 +27,7 @@ import AdminBatchPrediction from "./AdminBatchPrediction";
 const maskingLabEnabled = import.meta.env.MODE === "preview" || import.meta.env.DEV;
 const MaskingValidation = maskingLabEnabled ? lazy(() => import("../masking-lab/ValidationPage")) : null;
 import PipelineSettingsEditor from "./PipelineSettingsEditor";
-import { DEFAULT_PIPELINE } from "../services/pipeline";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
 
 interface AdminPanelProps {
   session: AdminSession;

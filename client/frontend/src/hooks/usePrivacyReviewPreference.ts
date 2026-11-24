@@ -1,21 +1,6 @@
-import { useState } from "react";
-
-const STORAGE_KEY = "harass_bot_confirm_privacy_before_sending";
+import { parseFlag, usePersistentPreference } from "./usePersistentPreference";
 
 export function usePrivacyReviewPreference() {
-  const [confirmPrivacyBeforeSending, setConfirmPrivacyBeforeSending] = useState(() => {
-    try { return localStorage.getItem(STORAGE_KEY) === "true"; }
-    catch { return false; }
-  });
-  const [privacyReviewSaveFailed, setPrivacyReviewSaveFailed] = useState(false);
-
-  const updateConfirmPrivacy = (enabled: boolean) => {
-    setConfirmPrivacyBeforeSending(enabled);
-    try {
-      localStorage.setItem(STORAGE_KEY, String(enabled));
-      setPrivacyReviewSaveFailed(false);
-    } catch { setPrivacyReviewSaveFailed(true); }
-  };
-
+  const [confirmPrivacyBeforeSending, updateConfirmPrivacy, privacyReviewSaveFailed] = usePersistentPreference("harass_bot_confirm_privacy_before_sending", parseFlag);
   return { confirmPrivacyBeforeSending, updateConfirmPrivacy, privacyReviewSaveFailed };
 }

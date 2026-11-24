@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { PipelineSettings } from "../services/pipeline";
+import type { PipelineSettings } from "@rag/shared/pipeline";
 
 const maskSwitches = [
   ["mask_message", "遮罩訊息與歷史", "送入模型前處理訊息與歷史中的文字識別資訊。"],

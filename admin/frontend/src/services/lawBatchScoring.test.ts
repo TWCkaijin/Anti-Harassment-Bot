@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BatchRow, BatchStatus } from "./applicableLawBatch";
-import { createPrivacyDraft } from "./clientPrivacy";
+import { createPrivacyDraft } from "@rag/shared/clientPrivacy";
 import { evaluateLawRow, formatBatchRate, parseReferenceAnswer, scoreLawBatch } from "./lawBatchScoring";
 
 const row = (status: BatchStatus, laws: string[] = [], reference?: string): BatchRow => ({

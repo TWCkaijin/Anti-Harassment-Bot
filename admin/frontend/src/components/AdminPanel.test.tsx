@@ -15,7 +15,7 @@ import {
 } from "../services/api";
 import AdminPanel from "./AdminPanel";
 const session = { authenticated: true as const, csrf_token: "admin-token", expires_at: "2099-01-01T00:00:00Z", environment: "preview" };
-import { DEFAULT_PIPELINE } from "../services/pipeline";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
 import { evaluateSplit, type CaseResult } from "../masking-lab/benchmark";
 
 const masking = vi.hoisted(() => ({ load: vi.fn(), detect: vi.fn(), dispose: vi.fn() }));

@@ -5,7 +5,7 @@ import { behaviorResult, behaviorRun } from "../test/behaviorFixture";
 import { exportBehaviorWorkbook } from "./behaviorWorkbook";
 import { refreshBehaviorEvidence } from "./behaviorRecords";
 import { parseScenarioWorkbook } from "./scenarioWorkbook";
-import { emptySummaryContext } from "./caseFacts";
+import { emptySummaryContext } from "@rag/shared/caseFacts";
 
 beforeEach(() => vi.stubGlobal("crypto", webcrypto));
 afterEach(() => vi.unstubAllGlobals());

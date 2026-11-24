@@ -1,4 +1,4 @@
-import { createPrivacyDraft } from './clientPrivacy';
+import { createPrivacyDraft } from '@rag/shared/clientPrivacy';
 import { reproducibleOverrides } from './adminDiagnostics';
 import type { RuntimeConfig, ApplicableLawPrediction } from './api';
 import { builtinBehaviorCases } from './behaviorTests';

@@ -48,7 +48,7 @@ describe("chat App Check", () => {
     vi.stubEnv("VITE_FIREBASE_APP_ID", "synthetic-app");
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
-    const { approvePrivacyDraft, createPrivacyDraft } = await import("./clientPrivacy");
+    const { approvePrivacyDraft, createPrivacyDraft } = await import("@rag/shared/clientPrivacy");
     const { sendChat } = await import("./api");
     const request = approvePrivacyDraft(createPrivacyDraft({ message: "合成問題", history: [], use_rag: false }));
     await expect(sendChat(request)).rejects.toMatchObject({ status: 503 });

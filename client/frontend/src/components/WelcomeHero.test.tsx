@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_USER_MESSAGE_CHARACTERS,
   USER_MESSAGE_TOO_LONG_ERROR,
-} from "../hooks/conversationHistory";
+} from "@rag/shared/conversationHistory";
 import { I18nProvider, useI18n } from "@rag/shared/chat-ui";
-import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE, MAX_IMAGE_BYTES } from "../services/imageUpload";
+import { IMAGE_ACCEPT, IMAGE_ONLY_MESSAGE, MAX_IMAGE_BYTES } from "@rag/shared/imageUpload";
 import type { SendOutcome } from "@rag/shared/chat-ui";
 import WelcomeHero from "./WelcomeHero";
 

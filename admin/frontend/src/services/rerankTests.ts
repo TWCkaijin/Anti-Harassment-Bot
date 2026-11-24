@@ -1,7 +1,7 @@
 import { adminFetch } from './session';
 import type { CorpusKind, CorpusRecord } from './corpus';
 import type { RuntimeConfig } from './api';
-import { retrievalSettings } from './retrievalSettings';
+import { retrievalSettings } from '@rag/shared/retrievalSettings';
 
 export type Kind = CorpusKind;
 export type Relevance = 'relevant' | 'irrelevant' | 'unjudged';

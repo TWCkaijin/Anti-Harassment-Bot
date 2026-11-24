@@ -2,11 +2,11 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConversation } from "./useConversation";
 import { ApiError, checkHealth, sendChat, type ChatResponse } from "../services/api";
-import { reviewedRequestBody } from "../services/clientPrivacy";
-import { emptySummaryContext } from "../services/caseFacts";
+import { reviewedRequestBody } from "@rag/shared/clientPrivacy";
+import { emptySummaryContext } from "@rag/shared/caseFacts";
 import { STORAGE_KEY } from "./conversationStorage";
 import { trackAnalytics } from "../services/analytics";
-import { DEFAULT_PIPELINE } from "../services/pipeline";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
 
 vi.mock("../services/api", async () => ({ ...await vi.importActual<typeof import("../services/api")>("../services/api"), checkHealth: vi.fn(), sendChat: vi.fn() }));
 vi.mock("../services/analytics", () => ({ hasAnalyticsConsent: () => true, trackAnalytics: vi.fn() }));

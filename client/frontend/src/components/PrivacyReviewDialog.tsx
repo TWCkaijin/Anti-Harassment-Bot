@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { approvePrivacyDraft, createPrivacyDraft, type PrivacyDraft } from "../services/clientPrivacy";
+import { approvePrivacyDraft, createPrivacyDraft, type PrivacyDraft } from "@rag/shared/clientPrivacy";
 import type { ChatRequest } from "../services/api";
 import { errorMessage } from "@rag/shared/browser";
 

@@ -1,6 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import type { RuntimeConfig } from "../services/api";
-import { DEFAULT_PIPELINE } from "../services/pipeline";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
 
 export const batchConfig: RuntimeConfig = {
   pipeline: { ...DEFAULT_PIPELINE }, openrouter_model: "fixture/no-network", rag_retrieval_top_k: 3,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PIPELINE } from "./pipeline";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
 import { reproducibleOverrides } from "./adminDiagnostics";
 
 const snapshot = {

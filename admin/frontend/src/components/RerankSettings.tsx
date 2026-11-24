@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { getRerankModels, type RuntimeConfig } from "../services/api";
-import { retrievalSettings } from "../services/retrievalSettings";
+import { retrievalSettings } from "@rag/shared/retrievalSettings";
 
 export default function RerankSettings({ config, onChange, csrfToken }: {
   config: RuntimeConfig; onChange: (value: Partial<RuntimeConfig>) => void; csrfToken: string;

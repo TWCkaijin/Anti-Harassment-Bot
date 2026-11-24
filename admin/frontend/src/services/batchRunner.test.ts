@@ -4,7 +4,7 @@ import { ApiError, runAdminChatTest, runAdminApplicableLawTest, type ChatRequest
 import { runScriptBatch } from './batchRunner';
 import { defaultTemplate, prepareScriptRun, type Parallelism, type ScriptRun } from './batchScript';
 import { behaviorConfig, behaviorResult } from '../test/behaviorFixture';
-import { reviewedRequestBody } from './clientPrivacy';
+import { reviewedRequestBody } from '@rag/shared/clientPrivacy';
 import { exportScriptRun, importScriptRun } from './batchRecords';
 
 vi.mock('./api', async () => ({ ...await vi.importActual('./api'), runAdminChatTest: vi.fn(), runAdminApplicableLawTest: vi.fn() }));

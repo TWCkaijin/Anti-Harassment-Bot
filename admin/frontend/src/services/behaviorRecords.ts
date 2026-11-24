@@ -1,6 +1,6 @@
 import { parseAdminApplicableLawTestResult, parseChatResponse, type AdminChatTestResult, type ChatRequest, type RuntimeConfigUpdate } from "./api";
 import { reproducibleOverrides } from "./adminDiagnostics";
-import { applySummaryUpdate, emptySummaryContext, isCaseContext, isRecord, type SummaryCaseContext } from "./caseFacts";
+import { applySummaryUpdate, emptySummaryContext, isCaseContext, isRecord, type SummaryCaseContext } from "@rag/shared/caseFacts";
 import { validateBehaviorCases, type BehaviorCase, type BehaviorIssue, type BehaviorRecord, type BehaviorReview, type BehaviorRun, type BehaviorTurn } from "./behaviorTests";
 
 export const MAX_BEHAVIOR_JSON_BYTES = 20 * 1024 * 1024;

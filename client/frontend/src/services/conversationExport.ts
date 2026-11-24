@@ -1,5 +1,5 @@
 import type { ConversationSession } from "../hooks/useConversation";
-import { FACT_KEYS, factText, normalizeCaseContext, type FactKey } from "./caseFacts";
+import { FACT_KEYS, factText, normalizeCaseContext, type FactKey } from "@rag/shared/caseFacts";
 interface Labels { caseSummary: string; caseSummaryEmpty: string; caseFactUnknown: string; caseFactDeclined: string; caseFactLabels: Record<FactKey, string> }
 /** Shared by individual and all-conversation text exports. Proposed facts stay unconfirmed. */
 export function formatConversationText(session: ConversationSession, labels: Labels): string {

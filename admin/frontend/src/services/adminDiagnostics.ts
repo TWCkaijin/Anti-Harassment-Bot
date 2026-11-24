@@ -1,7 +1,7 @@
-import { retrievalSettings } from "./retrievalSettings";
+import { retrievalSettings } from "@rag/shared/retrievalSettings";
 import type { RuntimeConfig, RuntimeConfigUpdate } from "./api";
-import { isRecord } from "./caseFacts";
-import { DEFAULT_PIPELINE } from "./pipeline";
+import { isRecord } from "@rag/shared/caseFacts";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
 
 /** Freeze the complete writable configuration; partial diagnostics cannot support a fair comparison. */
 export function reproducibleOverrides(value: unknown): RuntimeConfigUpdate | null {

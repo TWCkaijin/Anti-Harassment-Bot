@@ -24,11 +24,11 @@ import {
 import {
   createChatRequest,
   getUserMessageValidationError,
-} from "./conversationHistory";
-import { applyFactUpdates, applySummaryUpdate, emptySummaryContext, hasCaseContext, isCaseContext, normalizeCaseContext, parseFact, toSummaryContext, type ClarificationDraft, type LegacyCaseContext } from "../services/caseFacts";
-import { appendReasoning } from "../services/reasoning";
-import { preparePrivateRequest } from "../services/privateRequest";
-import type { PrivacyDraft } from "../services/clientPrivacy";
+} from "@rag/shared/conversationHistory";
+import { applyFactUpdates, applySummaryUpdate, emptySummaryContext, hasCaseContext, isCaseContext, normalizeCaseContext, parseFact, toSummaryContext, type ClarificationDraft, type LegacyCaseContext } from "@rag/shared/caseFacts";
+import { appendReasoning } from "@rag/shared/reasoning";
+import { preparePrivateRequest } from "@rag/shared/privateRequest";
+import type { PrivacyDraft } from "@rag/shared/clientPrivacy";
 import { loadConversationStorage, recoverConversationMigration, saveConversationStorage, STORAGE_KEY, type StorageIssue } from "./conversationStorage";
 import { appendProcessingStep, type ConversationMessage, type ProcessingPhase, type ReplyContext, type ProcessingTrace } from "@rag/shared/chat-ui";
 import { errorMessage } from "@rag/shared/browser";

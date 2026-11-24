@@ -1,6 +1,6 @@
 import type { RuntimeConfig, RuntimeConfigUpdate } from "./api";
-import { retrievalSettings } from "./retrievalSettings";
-import { DEFAULT_PIPELINE } from "./pipeline";
+import { retrievalSettings } from "@rag/shared/retrievalSettings";
+import { DEFAULT_PIPELINE } from "@rag/shared/pipeline";
 
 export const PROMPT_SECTION_FIELDS = [
   ["core_mission", "你的核心使命", 5],

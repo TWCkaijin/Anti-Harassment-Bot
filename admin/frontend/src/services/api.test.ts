@@ -13,7 +13,7 @@ import {
   type AdminApplicableLawTestResult,
   type RuntimeConfig,
 } from "./api";
-import { approvePrivacyDraft, createPrivacyDraft } from "./clientPrivacy";
+import { approvePrivacyDraft, createPrivacyDraft } from "@rag/shared/clientPrivacy";
 
 // These protocol tests start after the explicit privacy confirmation. The separate
 // clientPrivacy tests exercise the actual unapproved/approved transport boundary.
