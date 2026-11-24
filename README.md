@@ -61,6 +61,8 @@ docs/            # 交接、架構與操作文件
    gcloud auth application-default set-quota-project anti-harassment-bot
    ```
 
+   本機只用 ADC，不需要也不要建立服務帳戶金鑰檔。若 ADC 回報 `Invalid JWT Signature`，通常是 shell 設了別的專案的 `GOOGLE_APPLICATION_CREDENTIALS`；`dev.py` 會自動忽略它。
+
 3. 建立本機設定檔，填入 `OPENROUTER_API_KEY`（不要寫進 Git 或任何 `VITE_*` 變數）：
 
    ```bash

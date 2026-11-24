@@ -67,7 +67,7 @@ export ADMIN_TASKS_AUDIENCE=
 
 `FLASK_SKIP_DOTENV=1` 停用 Flask CLI 自動讀取根目錄 `.env`，由共用設定模組依 `RAG_ENV_FILE` 載入本機設定，讓兩個 API 與 Python worker 使用相同來源。終端已匯出的同名變數仍優先，切換設定前請核對。
 
-本機程式可使用 ADC（`gcloud auth application-default login`），或共用 Firestore 工廠支援的本機憑證檔。Storage SDK 使用 ADC；上傳／下載的操作者需有 dev bucket 權限。連線 dev Firestore、Storage 及 OpenRouter 會實際使用雲端資源。本機 HTTP 才可 `ADMIN_COOKIE_SECURE=false`。
+本機程式只使用 ADC（`gcloud auth application-default login`，並以 `set-quota-project` 設為本專案），不要建立服務帳戶金鑰檔。`scripts/dev.py` 會忽略 shell 中的 `GOOGLE_APPLICATION_CREDENTIALS`，避免其他專案的金鑰覆蓋 ADC。Storage SDK 使用 ADC；上傳／下載的操作者需有 dev bucket 權限。連線 dev Firestore、Storage 及 OpenRouter 會實際使用雲端資源。本機 HTTP 才可 `ADMIN_COOKIE_SECURE=false`。
 
 五個程序分別在終端執行：
 
@@ -94,7 +94,7 @@ curl -i http://127.0.0.1:5174/api/v1/admin/auth/session  # 未登入，預期 40
 | `ModuleNotFoundError`（`client_app`／`admin_app`） | 是否在根目錄執行、是否設定 `PYTHONPATH`、是否 `uv sync --all-extras` |
 | `.venv/bin/pytest` 等指令找不到直譯器 | `.venv` 曾在其他路徑建立；刪除後重新 `uv sync --frozen --all-extras` |
 | 頁面 proxy／connection refused | 8000／8001 是否已啟動；Client 是否帶 `VITE_API_BASE_URL=/api` |
-| ADC／Firestore／Storage permission denied | ADC 是否已登入；本機 `firebase_admin.json`（若存在）的身分是否具 dev 權限 |
+| ADC／Firestore／Storage permission denied 或 `Invalid JWT Signature` | 重新執行 `gcloud auth application-default login`；手動啟動時確認 shell 沒有殘留的 `GOOGLE_APPLICATION_CREDENTIALS`（`dev.py` 會自動忽略） |
 | 登入後仍未驗證 | `ADMIN_COOKIE_SECURE=false`、從 5174 開啟、固定同一主機名稱 |
 | `Untrusted origin` | `ADMIN_ORIGINS` 是否包含瀏覽器實際 origin |
 | 模型回 401／404 | OpenRouter key、dev runtime 設定中的模型 ID／provider |

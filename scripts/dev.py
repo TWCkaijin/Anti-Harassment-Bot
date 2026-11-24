@@ -40,6 +40,9 @@ def environment(env_file: Path):
         "FIRESTORE_EMULATOR_HOST",
         "PYTHON_DOTENV_DISABLED",
         "RAG_FUNCTION_DISCOVERY",
+        # A key file exported for another project would silently replace the
+        # developer's ADC for every Google client started here.
+        "GOOGLE_APPLICATION_CREDENTIALS",
     ):
         env.pop(key, None)
     env.update(
@@ -188,6 +191,12 @@ def main():
         print(
             f"Env file: {env_file}\nDevelopment databases: app-dev / admin-private-dev", flush=True
         )
+        if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+            print(
+                "Ignoring GOOGLE_APPLICATION_CREDENTIALS from this shell; "
+                "local services use your ADC (gcloud auth application-default login).",
+                flush=True,
+            )
         if args.check:
             print("Preflight passed (cloud credentials and model access have not been tested).")
             return 0
